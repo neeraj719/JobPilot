@@ -1,0 +1,30 @@
+# env / secrets
+.env
+*.env.local
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# uploads / runtime data
+backend/uploads/
+backend/*.db
+backend/playwright-screenshots/
+
+# node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# editors / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

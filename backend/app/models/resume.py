@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.enums import ResumeParseStatus
+
+if TYPE_CHECKING:
+    from app.models.user import User
+
+
+class Resume(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "resumes"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g. "Software Engineer - Backend"
+    target_role: Mapped[str | None] = mapped_column(String(255))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    text_content: Mapped[str | None] = mapped_column(Text)
+    # Structured JSON produced by the AI parser and editable by the user:
+    # {name, email, phone, summary, skills[], experience[], education[], projects[], certifications[], total_experience_years}
+    parsed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    parse_status: Mapped[ResumeParseStatus] = mapped_column(
+        Enum(ResumeParseStatus, native_enum=False, length=20), default=ResumeParseStatus.PENDING, nullable=False
+    )
+    parse_error: Mapped[str | None] = mapped_column(Text)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="resumes")
+    versions: Mapped[list[ResumeVersion]] = relationship(back_populates="resume", cascade="all, delete-orphan", order_by="ResumeVersion.version_number")
+
+
+class ResumeVersion(UUIDMixin, Base):
+    """Immutable history of a resume's file + parsed data."""
+
+    __tablename__ = "resume_versions"
+
+    resume_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), index=True, nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    parsed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    note: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    resume: Mapped[Resume] = relationship(back_populates="versions")
+
+
+class Skill(UUIDMixin, Base):
+    """Lightweight skill taxonomy used for normalisation ("ReactJS" -> "React")."""
+
+    __tablename__ = "skills"
+
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    aliases: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    category: Mapped[str | None] = mapped_column(String(80))  # language, framework, cloud, database, tool, soft
