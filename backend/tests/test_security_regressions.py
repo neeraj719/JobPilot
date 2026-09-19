@@ -667,3 +667,41 @@ def test_encrypted_columns_are_never_returned_by_the_api(auth_client: TestClient
     listed = auth_client.get(f"{API}/integrations/accounts")
     assert "PlatformPass123!" not in listed.text
     assert "encrypted_credentials" not in listed.text
+
+
+# ------------------------------------------------- the quick start must still start
+
+PLACEHOLDER_ENCRYPTION_KEY = "generate-your-own-fernet-key-see-command-above"
+
+
+def test_development_boots_on_the_env_example_placeholder_key() -> None:
+    """``cp .env.example .env && docker compose up`` has to work.
+
+    The example file ships a placeholder instead of a working Fernet key so nobody
+    deploys with a secret published in this repository. Outside production that
+    placeholder falls back to the development key rather than failing at import with
+    an error that never mentions which setting is wrong.
+    """
+    development = Settings(ENV="development", ENCRYPTION_KEY=PLACEHOLDER_ENCRYPTION_KEY)
+
+    assert development.ENCRYPTION_KEY == DEV_ENCRYPTION_KEY
+
+    from app.core.security import SecretBox
+
+    box = SecretBox(development.ENCRYPTION_KEY)
+    assert box.decrypt(box.encrypt("token")) == "token"
+
+
+def test_production_refuses_the_placeholder_encryption_key() -> None:
+    """The same placeholder must stop a production boot, not fail at first encryption."""
+    with pytest.raises(ValueError, match="valid Fernet key"):
+        Settings(ENV="production", SECRET_KEY="x" * 64, ENCRYPTION_KEY=PLACEHOLDER_ENCRYPTION_KEY)
+
+
+def test_production_accepts_a_freshly_generated_key() -> None:
+    from cryptography.fernet import Fernet
+
+    production = Settings(ENV="production", SECRET_KEY="x" * 64, ENCRYPTION_KEY=Fernet.generate_key().decode())
+
+    assert production.COOKIE_SECURE is True
+    assert production.docs_enabled is False

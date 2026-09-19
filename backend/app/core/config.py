@@ -6,9 +6,11 @@ local development.
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Literal
 
+from cryptography.fernet import Fernet
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -150,6 +152,29 @@ class Settings(BaseSettings):
         return [s.strip() for s in scopes]
 
     @model_validator(mode="after")
+    def _repair_unusable_dev_encryption_key(self) -> "Settings":
+        """Keep ``docker compose up`` working on a freshly copied ``.env``.
+
+        ``.env.example`` deliberately ships a placeholder rather than a working Fernet
+        key, so nobody deploys with a secret published in this repository. A placeholder
+        is not a valid key though, and Fernet would fail at import with an error that says
+        nothing about which setting is wrong. Outside production, fall back to the known
+        development key (which the production check below refuses) and say so loudly.
+        """
+        if self.ENV == "production":
+            return self
+        try:
+            Fernet(self.ENCRYPTION_KEY.encode("utf-8"))
+        except (ValueError, TypeError):
+            logging.getLogger(__name__).warning(
+                "ENCRYPTION_KEY is not a valid Fernet key; falling back to the development key. "
+                "Generate a real one with: python -c \"from cryptography.fernet import Fernet; "
+                'print(Fernet.generate_key().decode())"'
+            )
+            object.__setattr__(self, "ENCRYPTION_KEY", DEV_ENCRYPTION_KEY)
+        return self
+
+    @model_validator(mode="after")
     def _reject_insecure_production_defaults(self) -> "Settings":
         """Never let a production deployment run on the published development keys."""
         if self.ENV != "production":
@@ -161,6 +186,16 @@ class Settings(BaseSettings):
             problems.append(f"SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH} characters")
         if self.ENCRYPTION_KEY == DEV_ENCRYPTION_KEY:
             problems.append("ENCRYPTION_KEY is still the published development default")
+        else:
+            try:
+                Fernet(self.ENCRYPTION_KEY.encode("utf-8"))
+            except (ValueError, TypeError):
+                # Catch the placeholder from .env.example here rather than at the first
+                # attempt to encrypt a token, which would be long after startup.
+                problems.append(
+                    "ENCRYPTION_KEY is not a valid Fernet key (generate one with: python -c "
+                    '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")'
+                )
         if any(origin.strip() == "*" for origin in self.CORS_ORIGINS):
             # CORSMiddleware runs with allow_credentials=True; a wildcard origin makes it
             # echo any site back, so a hostile page could drive the credentialed endpoints.
