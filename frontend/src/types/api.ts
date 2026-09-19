@@ -439,10 +439,19 @@ export interface ResumeRead {
 /** NOTE: shape inferred from the `ResumeVersion` model — confirm against OpenAPI. */
 export interface ResumeVersionRead {
   id: UUID
+  /** Confirmed against `resumes/schemas.py::ResumeVersionRead`. */
+  resume_id?: UUID
   version_number: number
   note: string | null
   parsed_data: ParsedResume | Record<string, never>
   created_at: ISODateString
+}
+
+/** Body of `PATCH /resumes/{id}` — rename / retarget / set default. */
+export interface ResumeUpdate {
+  name?: string
+  target_role?: string | null
+  is_default?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -454,6 +463,9 @@ export interface CompanyRead {
   name: string
   normalized_name: string
   domain: string | null
+  /** Domains whose email is attributed to this company. */
+  email_domains?: string[]
+  created_at?: ISODateString | null
   website: string | null
   careers_url: string | null
   logo_url: string | null
@@ -484,6 +496,16 @@ export interface CompanyPreferenceUpsert {
   company_name: string
   priority: CompanyPriority
   notes?: string | null
+}
+
+/** Body of `PUT /companies/preferences` — replaces the whole priority list. */
+export interface CompanyPreferencesReplace {
+  items: CompanyPreferenceUpsert[]
+}
+
+export interface CompanyListParams extends PageParams {
+  q?: string
+  priority?: CompanyPriority
 }
 
 /* ------------------------------------------------------------------ */
@@ -534,6 +556,18 @@ export interface JobSourceRead {
   last_seen_at: ISODateString
 }
 
+/** Enough of an application for the job pages (`JobDetail.application`). */
+export interface ApplicationBrief {
+  id: UUID
+  job_id: UUID
+  status: ApplicationStatus
+  priority: CompanyPriority
+  match_score: number | null
+  automation_state: AutomationState | string | null
+  applied_at: ISODateString | null
+  created_at: ISODateString | null
+}
+
 export interface JobDetail extends JobCard {
   description: string
   required_skills: string[]
@@ -541,12 +575,17 @@ export interface JobDetail extends JobCard {
   canonical_url: string | null
   apply_url: string | null
   is_active: boolean
-  /** Full per-platform listings behind this (deduplicated) job. */
-  source_links: JobSourceRead[]
+  /**
+   * Full per-platform listings behind this (deduplicated) job.
+   * Confirmed against `jobs/schemas.py::JobDetail` — the API key is `job_sources`;
+   * `source_links` is kept as an optional alias for older callers.
+   */
+  job_sources: JobSourceRead[]
+  source_links?: JobSourceRead[]
   match: JobMatchRead | null
-  application: ApplicationRead | null
-  created_at: ISODateString
-  updated_at: ISODateString
+  application: ApplicationBrief | null
+  created_at?: ISODateString
+  updated_at?: ISODateString
 }
 
 export interface SkillMatch {
@@ -608,7 +647,26 @@ export interface DiscoverResult {
   jobs_found: number
   jobs_new: number
   duplicates_merged: number
+  /** Newly discovered jobs the matching engine scored during the same run. */
+  jobs_analyzed?: number
   sources: DiscoverSourceResult[]
+}
+
+/** `POST /jobs/discover` body (all fields optional — defaults to every enabled source). */
+export interface DiscoverRequest {
+  sources?: JobSourceType[]
+  limit?: number
+}
+
+/** Minimal application view returned by `POST /jobs/{id}/queue` and `/skip`. */
+export interface QueuedApplicationRead {
+  id: UUID
+  job_id: UUID
+  status: ApplicationStatus
+  priority: CompanyPriority
+  match_score: number | null
+  skipped_reason: string | null
+  created_at: ISODateString | null
 }
 
 export interface MatchingSummary {
@@ -617,6 +675,8 @@ export interface MatchingSummary {
   matched_at_or_above_min: number
   high_match: number
   queued: number
+  /** The user's configured minimum match score (returned by `GET /matching/summary`). */
+  min_match_score: number
 }
 
 /* ------------------------------------------------------------------ */
@@ -632,6 +692,12 @@ export interface AdapterInfo {
   terms_note: string
   /** Added by `GET /jobs/sources`. */
   job_count?: number
+  /** Politeness budget the adapter sticks to (`GET /integrations`). */
+  rate_limit_per_minute?: number
+  /** True when the adapter drives a real Playwright browser. */
+  uses_browser?: boolean
+  /** True when the current user has a connected account for this source. */
+  connected?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -674,11 +740,15 @@ export interface ApplicationRead {
   created_at: ISODateString
   updated_at: ISODateString
 
-  /** Denormalised for list rendering. NOTE: confirm the exact key names against OpenAPI. */
+  /** Denormalised by the service for list rendering (confirmed against `applications/schemas.py`). */
   job_title?: string
   company_name?: string
   company_logo_url?: string | null
   location?: string | null
+  /** How this job is applied to — drives the "Easy apply / ATS form" hint in the queue. */
+  application_type?: ApplicationType | null
+  /** True when every required answer is prepared, i.e. the row can be started/submitted. */
+  ready?: boolean
 }
 
 export interface FormSnapshotField {
@@ -702,6 +772,14 @@ export interface FormSnapshot {
   url?: string
   fields: FormSnapshotField[]
   blockers: FormSnapshotBlocker[]
+  /** CSS selector the runner used for the submit button (debug only). */
+  submit_selector?: string | null
+  /** Absolute path of the post-fill screenshot; only its basename is served. */
+  screenshot_path?: string | null
+  /** Absolute path of the post-submit screenshot. */
+  submit_screenshot_path?: string | null
+  /** Some runners record plain screenshot names instead of paths. */
+  screenshots?: string[]
 }
 
 export interface ApplicationAnswerRead {
@@ -739,6 +817,7 @@ export interface ApplicationDocumentRead {
   resume_id: UUID | null
   document_type: DocumentType
   filename: string
+  file_path?: string | null
   content: string | null
   created_at: ISODateString
 }
@@ -773,13 +852,14 @@ export interface ApplicationDetail extends ApplicationRead {
   documents: ApplicationDocumentRead[]
   emails: EmailMessageRead[]
   interviews: InterviewRead[]
-  job: JobDetail
+  /** Null for the rare orphan row whose job was purged. */
+  job: JobDetail | null
   review: ReviewSummary
 }
 
 export interface QueueItem {
   application: ApplicationRead
-  job: JobCard
+  job: JobCard | null
   position: number
 }
 
@@ -796,11 +876,48 @@ export interface ApplicationListParams extends PageParams {
 export interface QueueParams extends PageParams {
   priority?: CompanyPriority
   status?: ApplicationStatus
+  /** Only rows whose every required answer is prepared. */
+  ready?: boolean
 }
 
 export interface AnswerUpdate {
   id: UUID
-  answer: string
+  answer: string | null
+}
+
+/** `PUT /applications/{id}/answers` body. */
+export interface AnswersUpdateRequest {
+  answers: AnswerUpdate[]
+}
+
+/** `POST /applications/{id}/resume-automation` body (optional). */
+export interface ResumeAutomationRequest {
+  answers?: AnswerUpdate[]
+  run_in_background?: boolean
+}
+
+/** `PATCH /applications/{id}` body — notes, next action and the resume to use. */
+export interface ApplicationPatch {
+  notes?: string | null
+  next_action?: string | null
+  next_action_due?: ISODateString | null
+  resume_id?: UUID | null
+}
+
+/** `PATCH /applications/{id}/status` body. */
+export interface ApplicationStatusUpdate {
+  status: ApplicationStatus
+  note?: string | null
+}
+
+/** Body shared by `POST /applications/{id}/skip` and `/withdraw`. */
+export interface ApplicationSkipRequest {
+  reason?: string | null
+}
+
+/** `GET|POST|PUT /applications/{id}/cover-letter` response. */
+export interface CoverLetterRead {
+  cover_letter: string | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -833,9 +950,41 @@ export interface InterviewRead {
   created_at: ISODateString
   updated_at: ISODateString
 
-  /** Denormalised for calendar rendering. NOTE: confirm against OpenAPI. */
-  company_name?: string
-  job_title?: string
+  /** Denormalised for calendar rendering (filled by the interviews service). */
+  company_name?: string | null
+  job_title?: string | null
+}
+
+/** Body of `POST /interviews`. */
+export interface InterviewCreate {
+  application_id: UUID
+  interview_type?: InterviewType
+  status?: InterviewStatus
+  round_number?: number
+  scheduled_at?: ISODateString | null
+  duration_minutes?: number | null
+  location_or_link?: string | null
+  interviewer?: string | null
+  notes?: string | null
+}
+
+/** Body of `PATCH /interviews/{id}` - every field optional. */
+export interface InterviewUpdate {
+  interview_type?: InterviewType
+  status?: InterviewStatus
+  round_number?: number
+  scheduled_at?: ISODateString | null
+  duration_minutes?: number | null
+  location_or_link?: string | null
+  interviewer?: string | null
+  notes?: string | null
+  outcome?: string | null
+}
+
+export interface InterviewListParams extends PageParams {
+  upcoming?: boolean
+  application_id?: UUID
+  status?: InterviewStatus
 }
 
 /* ------------------------------------------------------------------ */
@@ -845,6 +994,8 @@ export interface InterviewRead {
 export interface EmailMessageRead {
   id: UUID
   application_id: UUID | null
+  /** The Gmail integration row that delivered it (null for simulated / demo mail). */
+  integration_id?: UUID | null
   provider_message_id: string
   thread_id: string | null
   sender: string
@@ -869,7 +1020,19 @@ export interface EmailMessageRead {
 export interface EmailListParams extends PageParams {
   classification?: EmailClassification
   application_id?: UUID
+  /** true = only unlinked, false = only linked, undefined = both. */
   unlinked?: boolean
+  /** Searches subject, sender and body. */
+  q?: string
+}
+
+/** Body of `POST /emails/simulate` - the demo helper that injects a realistic message. */
+export interface EmailSimulateRequest {
+  application_id?: UUID | null
+  kind?: EmailClassification
+  subject?: string | null
+  body?: string | null
+  sender?: string | null
 }
 
 export interface GmailStatus {
@@ -880,6 +1043,7 @@ export interface GmailStatus {
   last_synced_at: ISODateString | null
   /** false when GOOGLE_CLIENT_ID / SECRET are not set on the server. */
   configured: boolean
+  sync_enabled?: boolean
   last_error?: string | null
 }
 
@@ -889,9 +1053,24 @@ export interface ConnectedAccountRead {
   account_identifier: string | null
   status: IntegrationStatus
   is_mock: boolean
+  /** True when encrypted platform credentials are stored (they are never returned). */
+  has_credentials?: boolean
   connected_at: ISODateString | null
   last_used_at: ISODateString | null
   last_error: string | null
+  created_at?: ISODateString | null
+}
+
+/** Body of `POST /integrations/accounts`. Credentials are encrypted at rest. */
+export interface ConnectedAccountCreate {
+  source: JobSourceType
+  account_identifier?: string | null
+  credentials?: { username: string; password: string } | null
+}
+
+/** `POST /integrations/gmail/connect`. */
+export interface AuthorizationUrlResponse {
+  authorization_url: string
 }
 
 export interface IntegrationsOverview {
@@ -906,6 +1085,7 @@ export interface SyncResult {
   classified: number
   linked: number
   status_updates: number
+  error?: string | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -913,6 +1093,7 @@ export interface SyncResult {
 /* ------------------------------------------------------------------ */
 
 export interface AutomationConfigRead {
+  id?: UUID
   enabled: boolean
   schedule_time: string
   timezone: string
@@ -930,9 +1111,13 @@ export interface AutomationConfigRead {
   notify_on_input_required: boolean
   last_run_at: ISODateString | null
   next_run_at: ISODateString | null
+  created_at?: ISODateString | null
+  updated_at?: ISODateString | null
 }
 
-export type AutomationConfigUpdate = Partial<Omit<AutomationConfigRead, 'last_run_at' | 'next_run_at'>>
+export type AutomationConfigUpdate = Partial<
+  Omit<AutomationConfigRead, 'id' | 'last_run_at' | 'next_run_at' | 'created_at' | 'updated_at'>
+>
 
 export interface AutomationRunStats {
   jobs_found?: number
@@ -945,16 +1130,27 @@ export interface AutomationRunStats {
   prepared?: number
   submitted?: number
   requires_user?: number
+  ready_for_review?: number
   failed?: number
   skipped_limit?: number
+  filtered_out?: number
+  /**
+   * The pipeline writes counters freely, so other keys may show up too. One entry is
+   * *not* a number — `filter_reasons` is a `{reason: count}` map; read it with
+   * `readFilterReasons()` from `features/automation/stats.ts`.
+   */
   [key: string]: number | undefined
 }
 
+export const AUTOMATION_STEP_STATUSES = ['PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED'] as const
+export type AutomationStepStatus = (typeof AUTOMATION_STEP_STATUSES)[number]
+
 export interface AutomationRunStep {
   step: string
-  status: 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'RUNNING'
+  status: AutomationStepStatus
   started_at?: ISODateString | null
   finished_at?: ISODateString | null
+  duration_ms?: number | null
   message?: string
   data?: Record<string, unknown>
 }
@@ -980,7 +1176,13 @@ export interface AutomationStatus {
   today: {
     applications_submitted: number
     limit_remaining: number
+    daily_limit?: number
   }
+}
+
+/** Body of `POST /automation/run`. */
+export interface AutomationRunRequest {
+  dry_run?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -1034,6 +1236,12 @@ export interface DatePoint {
 }
 
 export interface DashboardCharts {
+  /** Echo of the requested window. */
+  range: ChartRange
+  /** Inclusive first day of the window (`YYYY-MM-DD`). */
+  start_date: string | null
+  /** Inclusive last day of the window (`YYYY-MM-DD`). */
+  end_date: string | null
   applications_per_day: DatePoint[]
   responses_per_day: DatePoint[]
   by_company: { name: string; count: number }[]
@@ -1045,6 +1253,16 @@ export interface DashboardCharts {
 
 export type ChartRange = '7d' | '30d' | '90d'
 
+/** Stages returned by `charts.funnel`, in pipeline order. */
+export type FunnelStageKey = 'discovered' | 'matched' | 'queued' | 'applied' | 'responses' | 'interviews' | 'offers'
+
+/** `GET /applications/review-summary` — the three "needs you" counters. */
+export interface ReviewCounts {
+  pending_review: number
+  requires_input: number
+  ready_to_submit: number
+}
+
 /** `GET /dashboard/activity` merges audit logs and application events. */
 export interface ActivityItem {
   id: UUID
@@ -1052,8 +1270,16 @@ export interface ActivityItem {
   action: string
   message: string
   actor: Actor
+  level?: AuditLevel
   application_id: UUID | null
+  automation_run_id?: UUID | null
+  from_status?: ApplicationStatus | string | null
+  to_status?: ApplicationStatus | string | null
+  /** In-app route for the row, e.g. `/applications/<id>`. */
+  link?: string | null
   created_at: ISODateString
+  /** The server sends `metadata`; `meta` is kept for older callers. */
+  metadata?: Record<string, unknown>
   meta?: Record<string, unknown>
 }
 
@@ -1078,15 +1304,18 @@ export interface UnreadCount {
 
 export interface AuditLogRead {
   id: UUID
-  user_id: UUID | null
+  user_id?: UUID | null
   application_id: UUID | null
   automation_run_id: UUID | null
   actor: Actor
   level: AuditLevel
   action: string
   message: string
-  meta: Record<string, unknown>
-  ip_address: string | null
+  /** The wire name is `metadata` (the model attribute is `meta`). */
+  metadata: Record<string, unknown>
+  /** @deprecated the API sends `metadata`; kept so older call sites still compile. */
+  meta?: Record<string, unknown>
+  ip_address?: string | null
   created_at: ISODateString
 }
 
@@ -1108,6 +1337,15 @@ export interface BrowserSessionRead {
   expires_at: ISODateString | null
   user_agent: string | null
   created_at: ISODateString
+  updated_at?: ISODateString
+  /** True when encrypted cookies / localStorage are stored for this context. */
+  has_stored_state?: boolean
+}
+
+/** `GET /browser/status` — whether Playwright Chromium can run on this deployment. */
+export interface BrowserStatus {
+  available: boolean
+  headless: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -1125,4 +1363,10 @@ export interface HealthStatus {
   app: string
   env: string
   llm_provider: string
+}
+
+/** Generic `{ok, message}` acknowledgement returned by several mutating endpoints. */
+export interface OkResponse {
+  ok: boolean
+  message?: string
 }

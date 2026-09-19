@@ -27,9 +27,32 @@ export function cn(...inputs: ClassValue[]): string {
 export type DateInput = string | number | Date | null | undefined
 
 /** Coerce anything the API might hand us into a `Date`, or `null` when unusable. */
+/**
+ * Matches an ISO timestamp that carries no zone designator, e.g.
+ * `2026-09-19T10:42:58.733949`.
+ */
+const OFFSETLESS_ISO = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
+
+/**
+ * Parse a timestamp coming from the API.
+ *
+ * Every API timestamp is UTC (docs/CONTRACTS.md §0), but a SQLite-backed
+ * deployment serialises them without a zone designator. `parseISO` would read
+ * those as *local* time and shift every date by the viewer's UTC offset (five
+ * and a half hours in India). So an offset-less string is pinned to UTC, while
+ * anything already carrying `Z` or `+hh:mm` is parsed as-is.
+ */
 export function toDate(value: DateInput): Date | null {
   if (value === null || value === undefined || value === '') return null
-  const date = value instanceof Date ? value : typeof value === 'number' ? new Date(value) : parseISO(value)
+  let date: Date
+  if (value instanceof Date) {
+    date = value
+  } else if (typeof value === 'number') {
+    date = new Date(value)
+  } else {
+    const trimmed = value.trim()
+    date = parseISO(OFFSETLESS_ISO.test(trimmed) ? `${trimmed}Z` : trimmed)
+  }
   return isValid(date) ? date : null
 }
 

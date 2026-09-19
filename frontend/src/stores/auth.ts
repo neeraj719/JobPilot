@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { api, configureApiAuth } from '@/lib/api'
+import { api, configureApiAuth, isApiError } from '@/lib/api'
 import type { LoginRequest, RegisterRequest, TokenResponse, UserRead } from '@/types/api'
 
 interface AuthState {
@@ -90,8 +90,13 @@ export const useAuthStore = create<AuthState>()(
           const user = await api.get<UserRead>('/auth/me')
           set({ user })
           return user
-        } catch {
-          set({ accessToken: null, user: null })
+        } catch (error) {
+          // Only a genuine authentication failure ends the session. A rate limit,
+          // a server error or a dropped connection must not silently sign the
+          // user out and bounce them to the login screen.
+          if (isApiError(error) && (error.status === 401 || error.status === 403)) {
+            set({ accessToken: null, user: null })
+          }
           return null
         }
       },
