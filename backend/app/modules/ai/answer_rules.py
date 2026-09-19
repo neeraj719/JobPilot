@@ -226,10 +226,14 @@ def free_text_intent(question: str) -> tuple[str, str] | None:
 
 
 def _skill_years_key(question: str) -> str | None:
-    """``"Years of experience with React?"`` -> ``skill_years:React``.
+    """``"Years of experience with React?"`` -> ``skill_years:react``.
 
     Only technologies the shared taxonomy recognises qualify, so generic
     "total years of experience" questions fall through to ``years_of_experience``.
+
+    Lowercase, like ``browser.mapper`` and ``CandidateContext.flat``: the two spellings
+    used to produce two ``ApplicationAnswer`` rows for the same question, so a question
+    the user had already answered reappeared on the review screen.
     """
     text = (question or "").lower()
     if not re.search(r"\b(years?|yrs?)\b", text):
@@ -238,7 +242,7 @@ def _skill_years_key(question: str) -> str | None:
         return None
     for canonical in extract_skills(text):
         if canonical in SKILL_ALIASES:
-            return f"skill_years:{canonical}"
+            return f"skill_years:{canonical.lower()}"
     return None
 
 

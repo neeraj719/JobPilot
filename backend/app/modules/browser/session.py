@@ -173,10 +173,15 @@ class BrowserSessionHandle:
 
         self.thread_id = threading.get_ident()
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(
-            headless=self.headless,
-            args=["--disable-dev-shm-usage", "--no-sandbox"],
-        )
+        # The automation navigates to third-party application forms, so the renderer
+        # sandbox is the last line of defence between a hostile page and this host.
+        # It is only dropped where the container runtime makes it impossible
+        # (BROWSER_DISABLE_SANDBOX=true), never by default.
+        args = ["--disable-dev-shm-usage"]
+        if settings.BROWSER_DISABLE_SANDBOX:
+            logger.warning("Launching Chromium with --no-sandbox (BROWSER_DISABLE_SANDBOX=true)")
+            args.append("--no-sandbox")
+        self._browser = self._pw.chromium.launch(headless=self.headless, args=args)
         storage_state = self._load_storage_state()
         self._context = self._browser.new_context(
             user_agent=DEFAULT_USER_AGENT,

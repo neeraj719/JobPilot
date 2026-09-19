@@ -65,9 +65,11 @@ def create_app() -> FastAPI:
             "prepare and autofill applications with human approval, and track every response."
         ),
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        # The interactive docs enumerate every endpoint and schema; they are a
+        # reconnaissance aid in production, so they are off there by default.
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
 
     app.add_middleware(SecurityHeadersMiddleware)
@@ -130,7 +132,16 @@ def _include_routers(app: FastAPI) -> None:
 
 def _mount_demo_ats(app: FastAPI) -> None:
     """The demo ATS is a tiny Greenhouse-style career site served by this backend so the
-    Playwright autofill flow can be demonstrated end-to-end without touching third-party sites."""
+    Playwright autofill flow can be demonstrated end-to-end without touching third-party sites.
+
+    It is deliberately unauthenticated (it plays the part of a third-party site), which
+    makes it the only writable surface on this API that does not require a token. That is
+    acceptable for a demo host but not for a production deployment, so it is never mounted
+    when ``ENV=production``.
+    """
+    if settings.is_production:
+        logger.info("Demo ATS not mounted (ENV=production)")
+        return
     from app.demo_ats.router import router as demo_ats_router
 
     app.include_router(demo_ats_router, prefix="/demo-ats", tags=["demo-ats"], include_in_schema=False)

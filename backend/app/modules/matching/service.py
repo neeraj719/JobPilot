@@ -32,6 +32,7 @@ __all__ = [
     "analyze_job",
     "analyze_jobs",
     "analyze_all",
+    "resolved_min_score",
     "build_summary",
     "CandidateFacts",
     "HIGH_MATCH_SCORE",
@@ -62,6 +63,15 @@ class CandidateFacts:
     min_match_score: int = DEFAULT_MIN_MATCH_SCORE
     resume_id: uuid.UUID | None = None
     context: Any = None  # profiles.schemas.CandidateContext when available
+
+
+def resolved_min_score(value: Any) -> int:
+    """``min_match_score`` with ``None`` (not "falsy") meaning "use the default".
+
+    ``0`` is a legitimate, settable value ("show me everything") and ``0 or 75`` silently
+    turned it into 75, so the API contradicted ``GET /preferences/job``.
+    """
+    return DEFAULT_MIN_MATCH_SCORE if value is None else int(value)
 
 
 def _as_list(value: Any) -> list[str]:
@@ -124,7 +134,7 @@ def build_candidate_facts(db: Session, user_id: uuid.UUID, resume: Resume | None
         excluded_keywords=_as_list(getattr(preference, "excluded_keywords", None)),
         min_salary=getattr(preference, "min_salary", None) if preference else None,
         desired_salary=getattr(preference, "desired_salary", None) if preference else None,
-        min_match_score=int(getattr(preference, "min_match_score", DEFAULT_MIN_MATCH_SCORE) or DEFAULT_MIN_MATCH_SCORE),
+        min_match_score=resolved_min_score(getattr(preference, "min_match_score", None) if preference else None),
         resume_id=resume.id if resume is not None else None,
     )
     if facts.years_of_experience is None:
@@ -432,7 +442,7 @@ def build_summary(db: Session, user_id: uuid.UUID) -> dict[str, Any]:
     from app.models.application import Application
 
     facts_min = db.scalars(select(JobPreference.min_match_score).where(JobPreference.user_id == user_id)).first()
-    min_score = int(facts_min or DEFAULT_MIN_MATCH_SCORE)
+    min_score = resolved_min_score(facts_min)
 
     total_jobs = db.scalar(select(func.count(Job.id)).where(Job.is_active.is_(True))) or 0
     analyzed = db.scalar(select(func.count(JobMatch.id)).where(JobMatch.user_id == user_id)) or 0

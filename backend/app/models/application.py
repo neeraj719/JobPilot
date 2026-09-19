@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import (
     Actor,
     AnswerSource,
@@ -32,7 +32,13 @@ if TYPE_CHECKING:
 
 class Application(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "applications"
-    __table_args__ = (UniqueConstraint("user_id", "job_id", name="uq_application_user_job"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_application_user_job"),
+        # The queue / list / dashboard all filter on (owner, status) and the daily
+        # automation budget counts (owner, applied_at) inside a day window.
+        Index("ix_applications_user_status", "user_id", "status"),
+        Index("ix_applications_user_applied_at", "user_id", "applied_at"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True, nullable=False)
@@ -59,20 +65,20 @@ class Application(UUIDMixin, TimestampMixin, Base):
     # {"url":..., "fields":[{key,label,selector,field_type,mapped_to,value,status,required}], "blockers":[...]}
     form_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     review_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     auto_submit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     cover_letter: Mapped[str | None] = mapped_column(Text)
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
     submitted_via: Mapped[str | None] = mapped_column(String(50))  # AUTOMATION / MANUAL / EXTERNAL
     external_application_id: Mapped[str | None] = mapped_column(String(255))
     external_url: Mapped[str | None] = mapped_column(String(1024))
     confirmation_message: Mapped[str | None] = mapped_column(Text)
 
-    last_update_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_update_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_response_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     next_action: Mapped[str | None] = mapped_column(String(500))
-    next_action_due: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_action_due: Mapped[datetime | None] = mapped_column(UTCDateTime)
     notes: Mapped[str | None] = mapped_column(Text)
     skipped_reason: Mapped[str | None] = mapped_column(String(500))
 
@@ -113,6 +119,10 @@ class ApplicationAnswer(UUIDMixin, TimestampMixin, Base):
 
 class ApplicationEvent(UUIDMixin, Base):
     __tablename__ = "application_events"
+    #: Timelines are always read per application, oldest first.
+    __table_args__ = (
+        Index("ix_application_events_application_created", "application_id", "created_at"),
+    )
 
     application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False)
     event_type: Mapped[ApplicationEventType] = mapped_column(Enum(ApplicationEventType, native_enum=False, length=30), nullable=False)
@@ -121,7 +131,7 @@ class ApplicationEvent(UUIDMixin, Base):
     to_status: Mapped[ApplicationStatus | None] = mapped_column(Enum(ApplicationStatus, native_enum=False, length=30))
     message: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
 
     application: Mapped[Application] = relationship(back_populates="events")
 
@@ -135,6 +145,6 @@ class ApplicationDocument(UUIDMixin, Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str | None] = mapped_column(String(1024))
     content: Mapped[str | None] = mapped_column(Text)  # for generated cover letters
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     application: Mapped[Application] = relationship(back_populates="documents")

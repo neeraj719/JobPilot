@@ -212,14 +212,38 @@ def fill_form(
     return result
 
 
+def _resolve_upload_path(value: str) -> tuple[Path | None, str | None]:
+    """Validate the path of a file answer before handing it to the browser.
+
+    Anything a form asks us to attach must be a file JobPilot itself stored under
+    ``UPLOAD_DIR``. Without this rail, a path that reached an answer row (a crafted
+    answer, a corrupted profile fact) would be uploaded verbatim to a third-party
+    site -- an arbitrary server-file read with built-in exfiltration.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None, "no file to attach"
+    try:
+        path = Path(raw).expanduser().resolve()
+        root = Path(settings.UPLOAD_DIR).expanduser().resolve()
+    except OSError as exc:  # pragma: no cover - defensive
+        return None, f"invalid file path: {exc}"
+    if path != root and root not in path.parents:
+        logger.warning("Refusing to attach %s: outside the upload directory", path)
+        return None, "file is outside the allowed upload directory"
+    if not path.is_file():
+        return None, f"file not found: {raw}"
+    return path, None
+
+
 def _fill_field(page: Any, field: DetectedField, value: str) -> str | None:
     """Type one value. Returns ``None`` on success or a human reason why it could not."""
     locator = page.locator(field.selector).first
 
     if field.field_type is FieldType.FILE:
-        path = Path(value)
-        if not path.exists():
-            return f"file not found: {value}"
+        path, reason = _resolve_upload_path(value)
+        if path is None:
+            return reason
         locator.set_input_files(str(path))
         return None
 

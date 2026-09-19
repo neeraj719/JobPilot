@@ -274,7 +274,7 @@ def test_select_options_are_matched_from_a_fact() -> None:
 
 def test_skill_years_question_reads_the_skill_map() -> None:
     result = _answer("How many years of experience do you have with React?", "NUMBER")
-    assert result.question_key == "skill_years:React"
+    assert result.question_key == "skill_years:react"  # lowercase, like the mapper and CandidateContext.flat
     assert result.answer == "2"
     assert result.needs_user_input is False
 

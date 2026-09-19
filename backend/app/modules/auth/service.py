@@ -12,6 +12,7 @@ Security notes:
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -138,11 +139,17 @@ def create_user(db: Session, email: str, password: str, full_name: str, *, role:
     return user
 
 
+#: Bcrypt hash of an unguessable string, used to keep the "unknown email" path as slow
+#: as the "wrong password" path (otherwise response time enumerates registered accounts).
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(24))
+
+
 def authenticate(db: Session, email: str, password: str, *, ip_address: str | None = None) -> User:
     """Return the user for valid credentials, else raise a *generic* 401."""
     email = normalize_email(email)
     user = get_user_by_email(db, email)
-    if user is None or not verify_password(password, user.hashed_password):
+    password_ok = verify_password(password, user.hashed_password if user is not None else _DUMMY_HASH)
+    if user is None or not password_ok:
         audit(
             db,
             action="auth.login_failed",

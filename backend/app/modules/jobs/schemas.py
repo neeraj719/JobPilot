@@ -134,6 +134,8 @@ class IngestResult(BaseModel):
     jobs_found: int = 0
     jobs_new: int = 0
     duplicates_merged: int = 0
+    #: Listings dropped because they were unusable (e.g. a blank company name).
+    skipped: int = 0
     job_ids_new: list[uuid.UUID] = Field(default_factory=list)
     job_ids_all: list[uuid.UUID] = Field(default_factory=list)
     per_source: dict[str, dict[str, int]] = Field(default_factory=dict)

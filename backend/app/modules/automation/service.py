@@ -349,7 +349,11 @@ def cancel_run(db: Session, user_id: uuid.UUID, run_id: uuid.UUID) -> Automation
     run.finished_at = utcnow()
     run.error = run.error or "Cancelled by the user"
     db.flush()
-    locks.release_lock(user_id)
+    # Deliberately *not* releasing the lock: the pipeline is still executing the current
+    # step (it only notices the cancel at the next boundary) and it releases its own
+    # token when it stops. Force-releasing here let a new run start alongside the dying
+    # one, and two runs each computing the budget once can spend 2x the daily limit.
+    # A hard process kill is covered by the lock's TTL.
     audit(
         db,
         action="automation.run_finished",
@@ -373,13 +377,41 @@ def _spawn(target: Callable[..., Any], *args: Any, **kwargs: Any) -> threading.T
     return thread
 
 
-def _background_pipeline(user_id: uuid.UUID, run_id: uuid.UUID, dry_run: bool) -> None:
+def _background_pipeline(
+    user_id: uuid.UUID, run_id: uuid.UUID, dry_run: bool, token: str | None = None
+) -> None:
+    """Execute a manual run in its own thread and **always** close the row out.
+
+    The row is committed before the thread starts, so anything that escapes here would
+    otherwise leave it ``RUNNING`` for ever - and ``ensure_not_running`` would then
+    reject every future run for this user with a permanent 409.
+    """
+    from app.core.database import session_scope
     from app.modules.automation.pipeline import run_pipeline
 
     try:
-        run_pipeline(user_id, AutomationRunTrigger.MANUAL, run_id=run_id, dry_run=dry_run)
-    except Exception as exc:  # pragma: no cover - the pipeline records its own failures
+        run_pipeline(
+            user_id,
+            AutomationRunTrigger.MANUAL,
+            run_id=run_id,
+            dry_run=dry_run,
+            acquire=token is None,
+        )
+    except Exception as exc:  # the pipeline records its own step failures; this is the backstop
         logger.exception("Background automation run %s failed: %s", run_id, exc)
+        try:
+            with session_scope() as db:
+                run = db.get(AutomationRun, run_id)
+                if run is not None and run.status == AutomationRunStatus.RUNNING:
+                    run.status = AutomationRunStatus.FAILED
+                    run.finished_at = utcnow()
+                    run.current_step = None
+                    run.error = str(exc)[:1000]
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Could not close automation run %s", run_id)
+    finally:
+        if token is not None:
+            locks.release_lock(user_id, token)
 
 
 def start_manual_run(
@@ -395,16 +427,27 @@ def start_manual_run(
     """
     ensure_not_running(db, user_id)
     config = get_config(db, user_id)
-    run = create_run(db, user_id, AutomationRunTrigger.MANUAL, dry_run=dry_run, config=config)
 
     if not background:
         from app.modules.automation.pipeline import run_pipeline
 
+        run = create_run(db, user_id, AutomationRunTrigger.MANUAL, dry_run=dry_run, config=config)
         return run_pipeline(user_id, AutomationRunTrigger.MANUAL, run_id=run.id, dry_run=dry_run, db=db)
 
-    # The worker thread opens its own session, so the row has to be visible to it.
-    db.commit()
-    _spawn(_background_pipeline, user_id, run.id, dry_run)
+    # Take the lock *before* inserting the row. ``ensure_not_running`` is only a read, so
+    # two requests (or a request and the worker's minute tick) could otherwise both pass
+    # the guard and create two RUNNING runs for the same user - §14 allows exactly one.
+    token = locks.acquire_lock(user_id)
+    if token is None:
+        raise ConflictError("An automation run is already in progress", code="automation_running")
+    try:
+        run = create_run(db, user_id, AutomationRunTrigger.MANUAL, dry_run=dry_run, config=config)
+        # The worker thread opens its own session, so the row has to be visible to it.
+        db.commit()
+    except Exception:
+        locks.release_lock(user_id, token)
+        raise
+    _spawn(_background_pipeline, user_id, run.id, dry_run, token)
     return run
 
 

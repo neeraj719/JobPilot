@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ResumeParseStatus
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ class Resume(UUIDMixin, TimestampMixin, Base):
         Enum(ResumeParseStatus, native_enum=False, length=20), default=ResumeParseStatus.PENDING, nullable=False
     )
     parse_error: Mapped[str | None] = mapped_column(Text)
-    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="resumes")
@@ -53,7 +53,7 @@ class ResumeVersion(UUIDMixin, Base):
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     parsed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     note: Mapped[str | None] = mapped_column(String(500))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     resume: Mapped[Resume] = relationship(back_populates="versions")
 

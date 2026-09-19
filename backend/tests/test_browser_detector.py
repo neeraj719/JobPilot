@@ -326,6 +326,8 @@ def test_autofill_fills_the_demo_form_and_submits(live_server: str, browser_sess
     from app.modules.browser.autofill import click_submit, fill_form
 
     monkeypatch.setattr(settings, "BROWSER_ACTION_DELAY_MS", 0)
+    # attachments are only accepted from inside UPLOAD_DIR (autofill._resolve_upload_path)
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
     resume = tmp_path / "resume.pdf"
     resume.write_bytes(b"%PDF-1.4 demo resume\n")
     answers = [

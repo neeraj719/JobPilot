@@ -16,6 +16,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.models.enums import (
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 APPLICATION_ID_RE = re.compile(r"Application ID:\s*(DEMO-[A-Z0-9]+)", re.IGNORECASE)
 CONFIRMATION_TEXT = "Thank you for applying"
+#: The browser only ever navigates to the web - never file://, data: or javascript:.
+ALLOWED_APPLY_SCHEMES = frozenset({"http", "https"})
 HTTP_TIMEOUT_SECONDS = 5.0
 
 
@@ -90,6 +93,15 @@ class GenericAtsFormAdapter(JobSourceAdapter):
         apply_url = getattr(ctx.job, "apply_url", None) or getattr(ctx.job, "canonical_url", None)
         if not apply_url:
             return ApplyStepResult(state=AutomationState.FAILED, message="Job has no apply URL")
+        # The apply URL comes from a job source. Only ever drive the browser to the web:
+        # file://, data: and javascript: would turn a bad listing into local-file access
+        # or script execution inside the automation context.
+        if urlparse(str(apply_url)).scheme.lower() not in ALLOWED_APPLY_SCHEMES:
+            logger.warning("%s refused a non-http(s) apply URL: %s", self.display_name, apply_url)
+            return ApplyStepResult(
+                state=AutomationState.FAILED,
+                message="The application URL is not an http(s) address; JobPilot will not open it.",
+            )
         try:
             page.goto(apply_url, timeout=settings.BROWSER_TIMEOUT_MS, wait_until="domcontentloaded")
             page.wait_for_selector("form", timeout=settings.BROWSER_TIMEOUT_MS)

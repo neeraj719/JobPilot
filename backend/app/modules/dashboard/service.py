@@ -10,7 +10,8 @@ import logging
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from typing import Any
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -144,22 +145,28 @@ def _load_applications(db: Session, user_id: uuid.UUID) -> list[_AppRow]:
 
 def _response_events(db: Session, user_id: uuid.UUID) -> list[tuple[uuid.UUID, ApplicationStatus, datetime]]:
     """``(application_id, to_status, created_at)`` for every transition into a response status."""
+    # Filtered in SQL, not in Python: the timeline is the fastest growing table in the
+    # schema and only transitions into a response status are ever used here.
     stmt = (
         select(ApplicationEvent.application_id, ApplicationEvent.to_status, ApplicationEvent.created_at)
         .join(Application, ApplicationEvent.application_id == Application.id)
-        .where(Application.user_id == user_id, ApplicationEvent.to_status.is_not(None))
+        .where(
+            Application.user_id == user_id,
+            ApplicationEvent.to_status.in_(tuple(RESPONSE_STATUSES)),
+        )
     )
     out = []
     for application_id, to_status, created_at in db.execute(stmt).all():
         moment = _aware(created_at)
-        if to_status in RESPONSE_STATUSES and moment is not None:
+        if moment is not None:
             out.append((application_id, to_status, moment))
     return out
 
 
 def _min_match_score(db: Session, user_id: uuid.UUID) -> int:
     value = db.scalars(select(JobPreference.min_match_score).where(JobPreference.user_id == user_id)).first()
-    return int(value or DEFAULT_MIN_MATCH_SCORE)
+    # ``0`` means "no floor", not "unset" - ``value or DEFAULT`` used to turn it into 75.
+    return DEFAULT_MIN_MATCH_SCORE if value is None else int(value)
 
 
 def _match_scores(db: Session, user_id: uuid.UUID) -> list[int]:
@@ -248,6 +255,31 @@ def _has_answers_ids(db: Session, user_id: uuid.UUID) -> set[uuid.UUID]:
     return set(db.scalars(stmt).all())
 
 
+def _responded_and_interviewed(
+    applications: list[_AppRow],
+    interviews: list[tuple[uuid.UUID, datetime | None, datetime | None]],
+    sent_ids: set[uuid.UUID],
+) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """``(interviewed, responded)`` — both restricted to applications actually sent.
+
+    Two invariants the dashboard promises depend on this:
+    * ``response_rate`` cannot exceed 100% — an application that replied and was then
+      SKIPPED from the Jobs page used to stay in the numerator but drop out of ``sent``;
+    * the funnel stays monotonic — an interview *is* a response, so a manually created
+      ``Interview`` on an APPLIED application must not make ``interviews > responses``.
+    """
+    interviewed = {application_id for application_id, _, _ in interviews}
+    interviewed |= {a.id for a in applications if a.status in (ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER)}
+    interviewed &= sent_ids
+    responded = {
+        a.id
+        for a in applications
+        if a.id in sent_ids and (a.last_response_at is not None or a.status in RESPONSE_STATUSES)
+    }
+    responded |= interviewed
+    return interviewed, responded
+
+
 def _rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
@@ -260,9 +292,10 @@ def build_stats(db: Session, user_id: uuid.UUID, *, now: datetime | None = None)
     from app.modules.automation.service import get_config
 
     config = get_config(db, user_id)
+    zone = limits.resolve_zone(config.timezone)
     day_start, day_end = limits.day_bounds(config.timezone, now)
-    week_start = day_start - timedelta(days=6)
-    month_start = day_start - timedelta(days=29)
+    week_start = _window_start(day_start, zone, 6)
+    month_start = _window_start(day_start, zone, 29)
 
     applications = _load_applications(db, user_id)
     response_events = _response_events(db, user_id)
@@ -287,9 +320,8 @@ def build_stats(db: Session, user_id: uuid.UUID, *, now: datetime | None = None)
     answered = _has_answers_ids(db, user_id)
 
     sent = [a for a in applications if a.status in SUBMITTED_STATUSES]
-    responded_total = {a.id for a in applications if a.last_response_at is not None or a.status in RESPONSE_STATUSES}
-    interviewed = {application_id for application_id, _, _ in interviews}
-    interviewed |= {a.id for a in applications if a.status in (ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER)}
+    sent_ids = {a.id for a in sent}
+    interviewed, responded_total = _responded_and_interviewed(applications, interviews, sent_ids)
     offers = [a for a in applications if a.status == ApplicationStatus.OFFER]
     rejections = [a for a in applications if a.status == ApplicationStatus.REJECTED]
 
@@ -328,7 +360,7 @@ def build_stats(db: Session, user_id: uuid.UUID, *, now: datetime | None = None)
         month=month,
         totals=totals,
         response_rate=_rate(len(responded_total), len(sent)),
-        interview_rate=_rate(len(interviewed & {a.id for a in sent}), len(sent)),
+        interview_rate=_rate(len(interviewed), len(sent)),
         offer_rate=_rate(len(offers), len(sent)),
         attention=_attention(
             db,
@@ -439,6 +471,16 @@ def _attention(
 # --------------------------------------------------------------------------- charts
 
 
+def _window_start(day_start: datetime, zone: Any, days_back: int) -> datetime:
+    """Local midnight ``days_back`` days before today, as a UTC instant.
+
+    ``day_start - timedelta(days=N)`` is N x 24h, which lands on 01:00 (or 23:00) local
+    across a DST change and then silently drops the first day of the window.
+    """
+    today_local = day_start.astimezone(zone).date()
+    return datetime.combine(today_local - timedelta(days=days_back), time.min, tzinfo=zone).astimezone(timezone.utc)
+
+
 def _day_series(counter: Counter[date], start_day: date, end_day: date) -> list[DayCount]:
     out: list[DayCount] = []
     cursor = start_day
@@ -459,7 +501,7 @@ def build_charts(db: Session, user_id: uuid.UUID, range_: str = DEFAULT_RANGE, *
     config = get_config(db, user_id)
     zone = limits.resolve_zone(config.timezone)
     day_start, day_end = limits.day_bounds(config.timezone, now)
-    window_start = day_start - timedelta(days=days - 1)
+    window_start = _window_start(day_start, zone, days - 1)
 
     applications = _load_applications(db, user_id)
     response_events = _response_events(db, user_id)
@@ -493,10 +535,9 @@ def build_charts(db: Session, user_id: uuid.UUID, range_: str = DEFAULT_RANGE, *
     for row in applications:
         by_status[row.status.value if hasattr(row.status, "value") else str(row.status)] += 1
 
-    responded_total = {a.id for a in applications if a.last_response_at is not None or a.status in RESPONSE_STATUSES}
+    sent_ids = {a.id for a in sent}
+    interviewed, responded_total = _responded_and_interviewed(applications, interviews, sent_ids)
     queued_or_beyond = [a for a in applications if a.status != ApplicationStatus.DISCOVERED and a.status != ApplicationStatus.SKIPPED]
-    interviewed = {application_id for application_id, _, _ in interviews}
-    interviewed |= {a.id for a in applications if a.status in (ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER)}
 
     funnel = [
         FunnelStage(stage="discovered", count=len(scores)),

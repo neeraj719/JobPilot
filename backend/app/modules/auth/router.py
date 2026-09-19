@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.core.rate_limit import auth_rate_limit
+from app.core.rate_limit import auth_rate_limit, client_ip
 from app.models.user import User
 from app.modules.auth import service
 from app.modules.auth.schemas import (
@@ -30,10 +30,13 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:64]
-    return request.client.host if request.client else None
+    """Client address for the audit trail.
+
+    Uses the shared helper so a spoofed ``X-Forwarded-For`` cannot forge the IP
+    recorded against a failed login (it is only trusted behind a real proxy).
+    """
+    ip = client_ip(request)
+    return ip if ip != "unknown" else None
 
 
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:

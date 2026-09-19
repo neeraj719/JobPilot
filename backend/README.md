@@ -88,8 +88,11 @@ environment variables win over `.env`.
 | `API_PREFIX` | `/api/v1` | prefix for every application route |
 | `DATABASE_URL` | Postgres DSN | `sqlite+pysqlite:///./dev.db` for local work |
 | `REDIS_URL` | `redis://localhost:6379/0` | rate limiting + the automation lock; both fall back to in-process |
-| `SECRET_KEY` | dev value | JWT signing — **change in production** |
-| `ENCRYPTION_KEY` | dev value | Fernet key for OAuth tokens, credentials and browser state |
+| `SECRET_KEY` | dev value | JWT signing — the app **refuses to start** with `ENV=production` on the default |
+| `ENCRYPTION_KEY` | dev value | Fernet key for OAuth tokens, credentials and browser state (same production check) |
+| `COOKIE_SECURE` / `COOKIE_SAMESITE` | `false` / `lax` | refresh-cookie flags; `COOKIE_SECURE` is forced on in production |
+| `TRUST_PROXY_HEADERS` | `false` | honour `X-Real-IP` / `X-Forwarded-For` from a **single** trusted reverse proxy; leave off otherwise or clients pick their own rate-limit bucket |
+| `ENABLE_API_DOCS` | unset | `/docs`, `/redoc`, `/openapi.json`; off in production unless set to `true` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS` | `30` / `14` | token lifetimes |
 | `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | `120` / `10` | per user (or IP) |
 | `UPLOAD_DIR` / `MAX_UPLOAD_MB` | `./uploads` / `10` | resumes, screenshots, demo-ATS submissions |
@@ -97,15 +100,19 @@ environment variables win over `.env`.
 | `LLM_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLM_TIMEOUT_SECONDS` | — | only for real providers |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | — | Gmail OAuth; scope is `gmail.readonly` only |
 | `PLAYWRIGHT_HEADLESS` | `true` | set `false` to watch the browser fill the form |
+| `BROWSER_DISABLE_SANDBOX` | `false` | adds `--no-sandbox`; only for containers that block user namespaces |
 | `BROWSER_ACTION_DELAY_MS` / `BROWSER_TIMEOUT_MS` | `250` / `15000` | autofill pacing and page timeouts |
 | `DEMO_ATS_BASE_URL` | `http://localhost:8000` | URL the **browser** uses to reach the demo ATS (the service name inside Docker) |
 | `DEFAULT_DAILY_APPLICATION_LIMIT` / `MAX_DAILY_APPLICATION_LIMIT` | `20` / `100` | automation safety rails |
 | `DEFAULT_MIN_MATCH_SCORE` / `AUTOMATION_RETRY_LIMIT` / `AUTOMATION_DELAY_SECONDS` | `75` / `3` / `1.0` | pipeline defaults |
-| `SEED_DEMO_DATA`, `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD` | `true`, `demo@jobpilot.ai`, `DemoPass123!` | demo account |
+| `SEED_DEMO_DATA`, `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD` | `true`, `demo@jobpilot.ai`, `DemoPass123!` | demo account; `python -m app.seed` refuses to run in production |
 | `RUN_SCHEDULER_IN_API` | `false` | run APScheduler inside the API process instead of the worker |
 
 If you change the port, change `DEMO_ATS_BASE_URL` with it — the Playwright runner navigates to
 that host, not to whatever the API thinks its own address is.
+
+The bundled demo ATS at `/demo-ats` is unauthenticated on purpose (it plays a third-party site)
+and is **not mounted when `ENV=production`**.
 
 ## Module map
 
@@ -221,3 +228,33 @@ alembic downgrade -1
 
 `tests/test_migrations.py` asserts that `compare_metadata` reports **no** difference between the
 migrations and the models, so a forgotten migration fails the suite.
+
+## Scale: bounded work and query budgets
+
+Every list endpoint resolves one page with a **constant** number of statements — none of
+them grows with `page_size`. `tests/test_review_regressions.py` pins this for the queue and
+the job list (the queue used to cost four statements per row, 83 for a 20-row page).
+
+| Endpoint | Statements per page | Notes |
+|---|---|---|
+| `GET /applications/queue` | 9 | job cards batch-loaded via `jobs.service.get_job_details` |
+| `GET /jobs` | 5 | one count, one page, one priority map, `selectinload(Job.sources)` |
+| `GET /applications` | 4 | ordered and paginated in SQL, `?ready=` is a SQL predicate |
+| `GET /companies` | 6 | `?priority=` filters through `prioritized_company_ids` |
+| `GET /emails`, `/audit`, `/notifications` | 3 | `LIMIT`/`OFFSET` + count |
+| `GET /dashboard/stats` | 15 | fixed set of aggregates, no per-row queries |
+
+Hard caps on the endpoints that can otherwise do unbounded work:
+
+* `POST /matching/analyze-all` — `limit` defaults to 500, max 2000 jobs per call.
+* `POST /jobs/discover` — `limit` max 200 listings **per source**; discovery is synchronous,
+  so a full sweep is a long request by design (the daily pipeline runs it in a thread instead).
+* `GET /dashboard/charts` — `range` is one of `7d|30d|90d`; nothing else is accepted.
+* `GET /dashboard/activity` — `limit` clamped to 200.
+* Pagination — `page_size` max 100 everywhere (`common.pagination.MAX_PAGE_SIZE`).
+* `GET /dashboard/stats|charts` still read every application row for the user (they are
+  all-time aggregates); the timeline is filtered to response transitions in SQL so the
+  fastest-growing table is never fully scanned.
+
+Composite indexes for the "(owner, sort column)" access pattern live in the models and in
+`alembic/versions/a1c4f7b28e10_composite_indexes.py`.

@@ -31,7 +31,12 @@ from app.models.company import Company
 from app.models.enums import SUBMITTED_STATUSES, ApplicationStatus
 from app.models.job import Job
 from app.modules.companies.service import normalize_company_name
-from app.modules.emails.classifier import JOB_BOARD_DOMAINS, extract_display_name, extract_domain
+from app.modules.emails.classifier import (
+    JOB_BOARD_DOMAINS,
+    extract_display_name,
+    extract_domain,
+    is_job_board_domain,
+)
 from app.modules.emails.schemas import IncomingEmail
 
 logger = logging.getLogger(__name__)
@@ -260,6 +265,14 @@ def link(
     haystack = normalize_text(" ".join([extract_display_name(msg.sender), msg.subject or "", body_head]))
     raw_text = f"{msg.subject or ''}\n{body_head}"
 
+    # A quoted reference ("Application ID: DEMO-U3611N") names one application outright, so
+    # it outranks every heuristic below. Matching on the sender's domain first would hand an
+    # employer's acknowledgement to whichever application at that company was applied to most
+    # recently, which is the wrong one as soon as the user applies twice to the same company.
+    application = _by_reference(applications, raw_text)
+    if application is not None:
+        return LinkResult(application, MATCH_APPLICATION_ID)
+
     application = _by_domain(applications, domain)
     if application is not None:
         return LinkResult(application, MATCH_DOMAIN)
@@ -270,13 +283,14 @@ def link(
             learn_sender_domain(db, getattr(application.job, "company", None), domain)
         return LinkResult(application, MATCH_COMPANY_NAME)
 
-    application = _by_job_title(applications, subject_norm)
-    if application is not None:
-        return LinkResult(application, MATCH_JOB_TITLE)
-
-    application = _by_reference(applications, raw_text)
-    if application is not None:
-        return LinkResult(application, MATCH_APPLICATION_ID)
+    # The weakest strategy, so it must not fire for a bulk job-board sender: a routine
+    # "Software Engineer: 12 new jobs in Bangalore" alert would otherwise link to - and
+    # advance - a real application. A genuine ATS mail carries the company name and is
+    # caught by the strategy above.
+    if not is_job_board_domain(domain):
+        application = _by_job_title(applications, subject_norm)
+        if application is not None:
+            return LinkResult(application, MATCH_JOB_TITLE)
 
     logger.info("No application matched email %s from %s for user %s", msg.provider_message_id, msg.sender, user_id)
     return LinkResult(None, None)

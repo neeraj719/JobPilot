@@ -1473,15 +1473,26 @@ def seed_demo_data(db: Session, *, force: bool = False) -> SeedSummary:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.seed", description="Seed the JobPilot AI demo data.")
     parser.add_argument("--force", action="store_true", help="delete the demo user's data and rebuild it")
+    parser.add_argument(
+        "--allow-production",
+        action="store_true",
+        help="seed even when ENV=production (creates an account with a well-known password)",
+    )
     args = parser.parse_args(argv)
 
     configure_logging()
+    if settings.is_production and not args.allow_production:
+        # The demo account's password comes from configuration and is published in
+        # .env.example; creating it on a live deployment hands anyone an account.
+        logger.error("Refusing to seed demo data in production (pass --allow-production to override).")
+        return 1
     with session_scope() as db:
         summary = seed_demo_data(db, force=args.force)
     if not summary.created:
         logger.info("Nothing seeded. %s", " ".join(summary.messages))
         return 0
-    logger.info("Demo login: %s / %s", settings.DEMO_USER_EMAIL, settings.DEMO_USER_PASSWORD)
+    # The password is configuration, not log material.
+    logger.info("Demo login: %s (password: DEMO_USER_PASSWORD from the environment)", settings.DEMO_USER_EMAIL)
     return 0
 
 

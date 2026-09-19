@@ -15,7 +15,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import JSON as SAJSON, select
 from sqlalchemy.orm import Session
 
 from app.models.profile import JobPreference, UserProfile
@@ -199,10 +199,36 @@ def to_preference_read(preference: JobPreference) -> JobPreferenceRead:
 # --------------------------------------------------------------------------- updates
 
 
+def _json_column_defaults(model: Any) -> dict[str, type]:
+    """``{column: list | dict}`` for every NOT NULL JSON column of ``model``.
+
+    ``ProfileUpdate.skills`` is ``list[Any] | None``, so ``{"skills": null}`` is a valid
+    body - but SQLAlchemy stores Python ``None`` as the JSON literal ``null`` (the NOT
+    NULL constraint never fires) and ``ProfileRead.model_validate`` then raises, turning
+    the whole request into a 500 *and* rolling back the other fields the user edited.
+    Worse, a ``null`` that ever reaches the column makes ``GET /profile`` and
+    ``build_candidate_context`` fail for ever. So ``null`` means "empty", not "no value".
+    """
+    out: dict[str, type] = {}
+    for column in model.__table__.columns:
+        if not isinstance(column.type, SAJSON) or column.nullable:
+            continue
+        default = column.default
+        empty = default.arg(None) if default is not None and default.is_callable else []
+        out[column.key] = type(empty)
+    return out
+
+
+_PROFILE_JSON_DEFAULTS = _json_column_defaults(UserProfile)
+_PREFERENCE_JSON_DEFAULTS = _json_column_defaults(JobPreference)
+
+
 def update_profile(db: Session, user_id: uuid.UUID, payload: ProfileUpdate) -> UserProfile:
     profile = get_or_create_profile(db, user_id)
     data = payload.model_dump(exclude_unset=True, mode="json")
     for field, value in data.items():
+        if value is None and field in _PROFILE_JSON_DEFAULTS:
+            value = _PROFILE_JSON_DEFAULTS[field]()
         if hasattr(profile, field):
             setattr(profile, field, value)
 
@@ -230,6 +256,8 @@ def update_job_preference(db: Session, user_id: uuid.UUID, payload: JobPreferenc
             continue
         if field in {"min_match_score"} and value is None:
             continue
+        if value is None and field in _PREFERENCE_JSON_DEFAULTS:
+            value = _PREFERENCE_JSON_DEFAULTS[field]()
         if hasattr(preference, field):
             setattr(preference, field, value)
     db.flush()

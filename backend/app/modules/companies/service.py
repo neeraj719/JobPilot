@@ -22,7 +22,7 @@ from app.models.company import Company
 from app.models.enums import Actor, ApplicationEventType, ApplicationStatus, CompanyPriority
 from app.models.job import Job
 from app.models.profile import CompanyPreference
-from app.modules.common.pagination import Pagination, paginate_sequence
+from app.modules.common.pagination import Pagination, paginate
 from app.modules.common.schemas import PageResponse
 from app.modules.companies.schemas import CompanyPreferenceItem, CompanyRead
 
@@ -383,8 +383,9 @@ def list_companies(
 ) -> PageResponse[CompanyRead]:
     """Companies with the user's priority, open job count and application count.
 
-    Priority is derived (preferences + fuzzy name match), so filtering on it happens in
-    Python after resolution rather than in SQL.
+    ``companies`` is a global table, so the page is resolved in SQL: the derived
+    ``?priority=`` filter goes through :func:`prioritized_company_ids` (same rules as
+    :func:`resolve_priority`) instead of loading every company and filtering in Python.
     """
     stmt = select(Company)
     term = (q or "").strip()
@@ -395,15 +396,20 @@ def list_companies(
         if normalized:
             conditions = conditions | Company.normalized_name.like(f"%{normalized}%")
         stmt = stmt.where(conditions)
-    companies = list(db.scalars(stmt.order_by(func.lower(Company.name).asc())).unique())
 
-    preferences = list_user_preferences(db, user_id)
-    priorities = {company.id: resolve_priority(preferences, company) for company in companies}
     if priority is not None:
-        companies = [company for company in companies if priorities[company.id] == priority]
+        prioritized = prioritized_company_ids(db, user_id)
+        if priority == CompanyPriority.P2:
+            # The default: everything the preference list does not resolve to something else.
+            if prioritized:
+                stmt = stmt.where(Company.id.notin_(list(prioritized)))
+        else:
+            matching = [cid for cid, value in prioritized.items() if value == priority]
+            stmt = stmt.where(Company.id.in_(matching))
 
-    page = paginate_sequence(companies, pagination)
+    page = paginate(db, stmt.order_by(func.lower(Company.name).asc(), Company.id.asc()), pagination)
     window: list[Company] = list(page.items)
+    priorities = get_priority_map(db, user_id, window)
     ids = [company.id for company in window]
     open_jobs = _open_job_counts(db, ids)
     applications = _application_counts(db, user_id, ids)

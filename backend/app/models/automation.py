@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import AutomationRunStatus, AutomationRunTrigger, BrowserSessionStatus, IntegrationStatus, JobSourceType
 
 if TYPE_CHECKING:
@@ -36,8 +36,8 @@ class AutomationConfig(UUIDMixin, TimestampMixin, Base):
     auto_submit_sources: Mapped[list[Any]] = mapped_column(JSON, default=list)
     auto_generate_cover_letters: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notify_on_input_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     user: Mapped[User] = relationship(back_populates="automation_config")
 
@@ -52,8 +52,8 @@ class AutomationRun(UUIDMixin, Base):
     status: Mapped[AutomationRunStatus] = mapped_column(
         Enum(AutomationRunStatus, native_enum=False, length=20), default=AutomationRunStatus.RUNNING, nullable=False, index=True
     )
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     current_step: Mapped[str | None] = mapped_column(String(80))
     # {"jobs_found":0,"jobs_new":0,"duplicates_merged":0,"jobs_analyzed":0,"jobs_matched":0,"high_match":0,
     #  "queued":0,"prepared":0,"submitted":0,"requires_user":0,"failed":0,"skipped_limit":0}
@@ -79,8 +79,8 @@ class ConnectedAccount(UUIDMixin, TimestampMixin, Base):
         Enum(IntegrationStatus, native_enum=False, length=20), default=IntegrationStatus.CONNECTED, nullable=False
     )
     is_mock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    connected_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
@@ -100,6 +100,6 @@ class BrowserSession(UUIDMixin, TimestampMixin, Base):
     status: Mapped[BrowserSessionStatus] = mapped_column(
         Enum(BrowserSessionStatus, native_enum=False, length=20), default=BrowserSessionStatus.ACTIVE, nullable=False
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     user_agent: Mapped[str | None] = mapped_column(String(512))

@@ -38,6 +38,14 @@ services:
       UPLOAD_DIR: /data/uploads
       # The headless browser runs inside this container, so it reaches the demo ATS via localhost.
       DEMO_ATS_BASE_URL: http://localhost:8000
+      # Chromium's sandbox needs user namespaces the default container profile blocks.
+      BROWSER_DISABLE_SANDBOX: "true"
+      # Nginx (the frontend service) is the only hop in front of the API, so its
+      # forwarding headers can be trusted for per-client rate limiting.
+      # IMPORTANT for a real deployment: drop the published "8000:8000" port below so the
+      # API is reachable only through that proxy. While the port is published a client can
+      # bypass Nginx and set X-Real-IP itself, which is exactly what this setting trusts.
+      TRUST_PROXY_HEADERS: "true"
       RUN_MIGRATIONS: "true"
       RUN_SEED: ${SEED_DEMO_DATA:-true}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
@@ -66,6 +74,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /data/uploads
       DEMO_ATS_BASE_URL: http://backend:8000
+      BROWSER_DISABLE_SANDBOX: "true"
       RUN_MIGRATIONS: "false"
       RUN_SEED: "false"
     command: ["python", "-m", "app.worker.main"]

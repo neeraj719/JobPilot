@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ApplicationType, CompanyPriority, EmploymentType, JobSourceType, WorkMode
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
     experience_max: Mapped[float | None] = mapped_column(Float)
     required_skills: Mapped[list[Any]] = mapped_column(JSON, default=list)
     preferred_skills: Mapped[list[Any]] = mapped_column(JSON, default=list)
-    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
     canonical_url: Mapped[str | None] = mapped_column(String(1024))
     apply_url: Mapped[str | None] = mapped_column(String(1024))  # where the browser automation navigates
     application_type: Mapped[ApplicationType] = mapped_column(
@@ -68,9 +68,9 @@ class JobSource(UUIDMixin, Base):
     application_type: Mapped[ApplicationType] = mapped_column(
         Enum(ApplicationType, native_enum=False, length=20), default=ApplicationType.UNKNOWN, nullable=False
     )
-    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    discovered_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     job: Mapped[Job] = relationship(back_populates="sources")
@@ -80,7 +80,11 @@ class JobMatch(UUIDMixin, TimestampMixin, Base):
     """AI/heuristic match of a Job against a user's profile, resume and preferences."""
 
     __tablename__ = "job_matches"
-    __table_args__ = (UniqueConstraint("job_id", "user_id", name="uq_job_match_job_user"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "user_id", name="uq_job_match_job_user"),
+        # Match summary / job-list sorting read (owner, score) ranges.
+        Index("ix_job_matches_user_score", "user_id", "match_score"),
+    )
 
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True, nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
@@ -101,7 +105,7 @@ class JobMatch(UUIDMixin, TimestampMixin, Base):
     missing_skills: Mapped[list[Any]] = mapped_column(JSON, default=list)
     explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    analyzed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    analyzed_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     model_used: Mapped[str | None] = mapped_column(String(80))
 
     job: Mapped[Job] = relationship(back_populates="matches")

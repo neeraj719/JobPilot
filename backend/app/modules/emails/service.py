@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
-from app.core.exceptions import NotFoundError, ValidationFailed
+from app.core.exceptions import ConflictError, NotFoundError, ValidationFailed
 from app.models.application import Application, ApplicationEvent
 from app.models.base import utcnow
 from app.models.email import EmailMessage
@@ -336,28 +336,32 @@ def _apply_to_application(
 
     Returns ``True`` when the application status changed.
     """
+    # A manual re-classification of an already-linked email must not append the same
+    # "email linked" audit entry and timeline event again on every call.
+    newly_linked = email.application_id != application.id
     email.application_id = application.id
     email.matched_by = matched_by
     subject = email.subject or "(no subject)"
     company = company_name_for(application)
 
-    audit(
-        db,
-        action="email.linked",
-        message=f"Email '{subject[:120]}' linked to the {company} application",
-        user_id=email.user_id,
-        application_id=application.id,
-        actor=actor,
-        meta={"email_id": str(email.id), "matched_by": matched_by, "classification": email.classification.value},
-    )
-    _record_event(
-        db,
-        application,
-        ApplicationEventType.EMAIL_LINKED,
-        f"Email: {subject[:200]}",
-        actor=actor,
-        meta={"email_id": str(email.id), "matched_by": matched_by, "classification": email.classification.value},
-    )
+    if newly_linked:
+        audit(
+            db,
+            action="email.linked",
+            message=f"Email '{subject[:120]}' linked to the {company} application",
+            user_id=email.user_id,
+            application_id=application.id,
+            actor=actor,
+            meta={"email_id": str(email.id), "matched_by": matched_by, "classification": email.classification.value},
+        )
+        _record_event(
+            db,
+            application,
+            ApplicationEventType.EMAIL_LINKED,
+            f"Email: {subject[:200]}",
+            actor=actor,
+            meta={"email_id": str(email.id), "matched_by": matched_by, "classification": email.classification.value},
+        )
 
     notification_type = NOTIFICATION_FOR.get(email.classification)
     known_notifications = _recent_notification_ids(db, email.user_id, notification_type) if notification_type else set()
@@ -378,10 +382,10 @@ def _apply_to_application(
         changed = True
         logger.info("Email %s moved application %s from %s to %s", email.id, application.id, previous.value, target.value)
 
-    if email.classification is EmailClassification.INTERVIEW:
+    if email.classification is EmailClassification.INTERVIEW and application.status not in TERMINAL_STATUSES:
         _ensure_interview(db, email, application)
 
-    if notification_type is not None:
+    if notification_type is not None and (newly_linked or changed):
         already = _recent_notification_ids(db, email.user_id, notification_type) - known_notifications
         if already:
             logger.debug("A %s notification was already raised for application %s", notification_type.value, application.id)
@@ -468,7 +472,16 @@ def ingest_message(
         },
     )
 
-    application, matched_by = linker.link(db, user_id, msg, application_id=application_id)
+    application, matched_by = linker.link(
+        db,
+        user_id,
+        msg,
+        application_id=application_id,
+        # ``companies`` is a global, cross-tenant registry: an unrelated newsletter that
+        # merely mentions "Google" must not teach ``Company.email_domains`` its sender,
+        # or every other user's mail from that sender links by the highest-trust strategy.
+        learn=outcome.classification is not EmailClassification.OTHER,
+    )
     if application is not None and matched_by is not None:
         _apply_to_application(db, email, application, matched_by=matched_by)
     db.flush()
@@ -688,8 +701,16 @@ def link_to_application(db: Session, user_id: uuid.UUID, email_id: uuid.UUID, ap
     """Manual link from the UI — applies the same status progression as an automatic one."""
     email = get_email(db, user_id, email_id)
     application = _get_application(db, user_id, application_id)
-    if email.application_id == application.id and email.matched_by == linker.MATCH_MANUAL:
+    if email.application_id == application.id:
+        email.matched_by = linker.MATCH_MANUAL
         return email
+    if email.application_id is not None:
+        # ``unlink`` deliberately leaves the old application's status alone, so silently
+        # moving a link would advance *two* applications off one email.
+        raise ConflictError(
+            "This email is already linked to another application. Unlink it first.",
+            code="already_linked",
+        )
     _apply_to_application(db, email, application, matched_by=linker.MATCH_MANUAL, actor=Actor.USER)
     logger.info("User %s linked email %s to application %s", user_id, email_id, application_id)
     return email

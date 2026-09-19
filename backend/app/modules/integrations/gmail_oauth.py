@@ -4,9 +4,13 @@ Only ``settings.GMAIL_SCOPES`` is ever requested (``gmail.readonly`` + the ident
 scopes needed to show which mailbox is connected). The refresh/access token bundle is
 Fernet-encrypted before it touches the database and is never returned by the API.
 
-CSRF protection: a single-use ``state`` (``secrets.token_urlsafe(32)``) is stored on
-``EmailIntegration.oauth_state`` when the flow starts and must come back unchanged;
-it is cleared as soon as it is spent.
+CSRF protection: a single-use ``state`` (issue time + ``secrets.token_urlsafe(32)``) is
+stored on ``EmailIntegration.oauth_state`` when the flow starts and mirrored into an
+``HttpOnly`` cookie. Both must come back unchanged, and within ``STATE_TTL_SECONDS``;
+the state is cleared as soon as it is spent (or as soon as a mismatch is seen, so a
+consent URL handed to somebody else cannot be replayed). Without the cookie half, an
+attacker's state plus a victim's authorization code would attach the victim's mailbox
+to the attacker's account.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import json
 import logging
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -27,7 +32,7 @@ from app.core.exceptions import ExternalServiceError, ValidationFailed
 from app.core.security import decrypt_str, encrypt_str
 from app.models.base import utcnow
 from app.models.email import EmailIntegration
-from app.models.enums import Actor, EmailProvider, IntegrationStatus
+from app.models.enums import Actor, AuditLevel, EmailProvider, IntegrationStatus
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,14 @@ REVOKE_URI = "https://oauth2.googleapis.com/revoke"
 USERINFO_URI = "https://www.googleapis.com/oauth2/v3/userinfo"
 STATE_BYTES = 32
 HTTP_TIMEOUT_SECONDS = 15.0
+
+#: The ``state`` is also mirrored into this ``HttpOnly`` cookie when the flow starts and
+#: must come back with the callback. Without it the state only proves that *somebody*
+#: started a flow, so an attacker could hand their own consent URL to a victim and have
+#: the victim's mailbox attached to the attacker's account (OAuth account-linking CSRF).
+STATE_COOKIE_NAME = "gmail_oauth_state"
+#: A consent round-trip that takes longer than this is treated as stale.
+STATE_TTL_SECONDS = 900
 
 #: Write-capable Gmail scopes we must never hold.
 FORBIDDEN_SCOPE_FRAGMENTS = ("gmail.send", "gmail.modify", "gmail.compose", "gmail.insert", "gmail.settings", "mail.google.com")
@@ -154,11 +167,33 @@ def _assert_scopes_are_read_only(scopes: list[str]) -> None:
             )
 
 
-def start_authorization(db: Session, user_id: uuid.UUID) -> str:
-    """Begin the flow: store a fresh CSRF state and return Google's consent URL."""
+def new_state() -> str:
+    """A single-use CSRF state carrying the instant it was issued."""
+    return f"{int(time.time())}.{secrets.token_urlsafe(STATE_BYTES)}"
+
+
+def _state_is_fresh(state: str) -> bool:
+    issued, _, _nonce = (state or "").partition(".")
+    try:
+        age = time.time() - int(issued)
+    except ValueError:
+        return False  # states issued before this format existed are no longer accepted
+    return 0 <= age <= STATE_TTL_SECONDS
+
+
+def start_authorization(db: Session, user_id: uuid.UUID) -> tuple[str, str]:
+    """Begin the flow.
+
+    Returns ``(authorization_url, state)``; the caller must also put ``state`` in the
+    :data:`STATE_COOKIE_NAME` cookie so the callback can prove the browser finishing
+    the flow is the one that started it.
+    """
     ensure_configured()
+    # Belt and braces: Settings already refuses a widened GMAIL_SCOPES at startup, but
+    # never send the user to a consent screen asking for more than read-only access.
+    _assert_scopes_are_read_only(list(settings.GMAIL_SCOPES))
     integration = get_or_create_integration(db, user_id)
-    state = secrets.token_urlsafe(STATE_BYTES)
+    state = new_state()
     flow = build_flow(state=state)
     try:
         authorization_url, _ = flow.authorization_url(
@@ -183,7 +218,7 @@ def start_authorization(db: Session, user_id: uuid.UUID) -> str:
         actor=Actor.USER,
         meta={"provider": EmailProvider.GMAIL.value, "scopes": list(settings.GMAIL_SCOPES)},
     )
-    return authorization_url
+    return authorization_url, state
 
 
 def exchange_code(code: str, state: str | None = None) -> dict[str, Any]:
@@ -228,14 +263,45 @@ def fetch_account_email(credentials: dict[str, Any]) -> str | None:
     return None
 
 
-def handle_callback(db: Session, code: str, state: str) -> EmailIntegration:
-    """Finish the flow: verify state, exchange the code and store the encrypted bundle."""
+def handle_callback(db: Session, code: str, state: str, *, cookie_state: str | None = None) -> EmailIntegration:
+    """Finish the flow: verify state, exchange the code and store the encrypted bundle.
+
+    ``cookie_state`` is the value of :data:`STATE_COOKIE_NAME` on the incoming request.
+    Both halves must agree: the stored state proves the flow exists, the cookie proves
+    it was started by *this* browser. Checking only the stored half would let an
+    attacker send a victim their own consent URL and capture the victim's mailbox.
+    """
     ensure_configured()
     if not code or not state:
         raise ValidationFailed("Missing the authorization code or state", code="invalid_callback")
     integration = db.scalars(select(EmailIntegration).where(EmailIntegration.oauth_state == state)).first()
     if integration is None:
         logger.warning("Gmail callback with an unknown OAuth state")
+        raise ValidationFailed("This sign-in link has expired. Start the connection again.", code="invalid_state")
+
+    if not cookie_state or not secrets.compare_digest(str(cookie_state), str(state)):
+        # Burn the state so a stolen consent URL cannot be retried.
+        integration.oauth_state = None
+        db.flush()
+        logger.warning("Gmail callback state did not match the browser cookie for user %s", integration.user_id)
+        audit(
+            db,
+            action="integration.connect_rejected",
+            message="Gmail callback rejected: the sign-in did not start in this browser",
+            user_id=integration.user_id,
+            actor=Actor.USER,
+            level=AuditLevel.WARN,
+            meta={"provider": EmailProvider.GMAIL.value, "reason": "state_cookie_mismatch"},
+        )
+        raise ValidationFailed(
+            "This sign-in did not start in this browser. Start the connection again.",
+            code="state_mismatch",
+        )
+
+    if not _state_is_fresh(state):
+        integration.oauth_state = None
+        db.flush()
+        logger.warning("Gmail callback with an expired OAuth state for user %s", integration.user_id)
         raise ValidationFailed("This sign-in link has expired. Start the connection again.", code="invalid_state")
 
     credentials = exchange_code(code, state=state)
@@ -324,6 +390,7 @@ __all__ = [
     "handle_callback",
     "is_configured",
     "load_credentials",
+    "new_state",
     "revoke_token",
     "start_authorization",
     "store_credentials",

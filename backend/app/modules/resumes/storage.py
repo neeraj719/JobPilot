@@ -15,6 +15,7 @@ import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.core.exceptions import ValidationFailed
@@ -51,6 +52,35 @@ def max_upload_bytes() -> int:
 
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+#: How much of an upload is pulled into memory at a time.
+READ_CHUNK_BYTES = 256 * 1024
+
+
+def read_within_limit(fileobj: Any, limit: int | None = None) -> bytes:
+    """Read ``fileobj`` but stop as soon as it exceeds the upload limit.
+
+    Reading the whole request body first and *then* checking its size lets one
+    request pin an arbitrary amount of memory, so the limit is enforced while
+    streaming: at most ``limit`` bytes are ever retained.
+    """
+    cap = max_upload_bytes() if limit is None else int(limit)
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = fileobj.read(READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > cap:
+            raise ValidationFailed(
+                f"File is too large. The limit is {settings.MAX_UPLOAD_MB} MB.",
+                code="file_too_large",
+                details={"limit_bytes": cap},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _extension_of(filename: str) -> str:
@@ -160,6 +190,7 @@ __all__ = [
     "file_exists",
     "max_upload_bytes",
     "read_file",
+    "read_within_limit",
     "resume_dir",
     "safe_download_name",
     "save_resume_file",

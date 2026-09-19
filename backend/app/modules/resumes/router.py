@@ -38,7 +38,9 @@ def upload_resume(
 ) -> ResumeRead:
     """Store, extract and parse a resume. Parsing failures still return 201 with
     ``parse_status=FAILED`` so the user can edit the data by hand."""
-    content = file.file.read()
+    # Streamed with a hard cap: reading the whole body first would let one request
+    # pin an unbounded amount of memory before the size check ever runs.
+    content = storage.read_within_limit(file.file)
     resume = service.create_resume_from_bytes(
         db,
         user.id,

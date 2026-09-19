@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import EmailClassification, EmailProvider, IntegrationStatus
 
 if TYPE_CHECKING:
@@ -30,8 +30,8 @@ class EmailIntegration(UUIDMixin, TimestampMixin, Base):
         Enum(IntegrationStatus, native_enum=False, length=20), default=IntegrationStatus.DISCONNECTED, nullable=False
     )
     sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    connected_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_history_id: Mapped[str | None] = mapped_column(String(64))
     last_error: Mapped[str | None] = mapped_column(Text)
     oauth_state: Mapped[str | None] = mapped_column(String(128))  # CSRF state for the in-flight OAuth flow
@@ -41,7 +41,11 @@ class EmailIntegration(UUIDMixin, TimestampMixin, Base):
 
 class EmailMessage(UUIDMixin, Base):
     __tablename__ = "email_messages"
-    __table_args__ = (UniqueConstraint("user_id", "provider_message_id", name="uq_email_user_provider_msg"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider_message_id", name="uq_email_user_provider_msg"),
+        # GET /emails is "this user's messages, newest first".
+        Index("ix_email_messages_user_received_at", "user_id", "received_at"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     integration_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("email_integrations.id", ondelete="SET NULL"))
@@ -55,7 +59,7 @@ class EmailMessage(UUIDMixin, Base):
     subject: Mapped[str] = mapped_column(String(1000), default="", nullable=False)
     snippet: Mapped[str | None] = mapped_column(Text)
     body_text: Mapped[str | None] = mapped_column(Text)
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
 
     classification: Mapped[EmailClassification] = mapped_column(
         Enum(EmailClassification, native_enum=False, length=30), default=EmailClassification.OTHER, nullable=False, index=True
@@ -68,6 +72,6 @@ class EmailMessage(UUIDMixin, Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # did this email move the application status
     raw_headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     application: Mapped[Application | None] = relationship(back_populates="emails")

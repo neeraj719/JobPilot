@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -36,7 +38,11 @@ def is_running(application_id: uuid.UUID | str) -> bool:
             return False
         if thread is threading.current_thread():
             return True
-        if not thread.is_alive():
+        # ``Thread.ident`` is None until ``start()`` runs. ``run_in_background`` claims the
+        # slot *before* starting the thread, so testing ``is_alive()`` alone reported "not
+        # running" and dropped the claim - which is exactly the duplicate run (and
+        # duplicate submission) this registry exists to prevent.
+        if thread.ident is not None and not thread.is_alive():
             _running.pop(key, None)
             return False
         return True
@@ -87,18 +93,38 @@ def run_in_background(application_id: uuid.UUID) -> threading.Thread:
         daemon=True,
     )
     _claim(application_id, thread)
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:  # a thread that never started must not hold the slot
+        _release(application_id)
+        raise
     logger.info("Application %s is running in the background", application_id)
     return thread
 
 
-def run_now(application_id: uuid.UUID, db: Session | None = None) -> Any:
-    """Run synchronously in the calling thread (tests, and the automation pipeline)."""
+@contextmanager
+def single_flight(application_id: uuid.UUID) -> Iterator[None]:
+    """Hold this application's run slot for the duration of the block.
+
+    ``is_running()`` on its own is only a *test*: two threads can both read "not running"
+    and then both drive the adapter. ``_claim`` decides under the registry lock, so
+    exactly one of them proceeds and every other caller gets ``ConflictError``.
+
+    Deliberately not re-entrant - a claim is never nested in this codebase (approval and
+    the runner are separate entry points), and allowing it would weaken the one guarantee
+    the registry exists to give: at most one thing drives an application at a time.
+    """
     _claim(application_id, threading.current_thread())
     try:
-        return _execute(application_id, db)
+        yield
     finally:
         _release(application_id)
+
+
+def run_now(application_id: uuid.UUID, db: Session | None = None) -> Any:
+    """Run synchronously in the calling thread (tests, and the automation pipeline)."""
+    with single_flight(application_id):
+        return _execute(application_id, db)
 
 
 def wait_for(application_id: uuid.UUID, timeout: float = 30.0) -> bool:
@@ -120,4 +146,12 @@ def reset() -> None:
         _running.clear()
 
 
-__all__ = ["is_running", "reset", "run_in_background", "run_now", "running_ids", "wait_for"]
+__all__ = [
+    "is_running",
+    "reset",
+    "run_in_background",
+    "run_now",
+    "running_ids",
+    "single_flight",
+    "wait_for",
+]

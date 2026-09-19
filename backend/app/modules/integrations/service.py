@@ -78,14 +78,14 @@ def overview(db: Session, user_id: uuid.UUID) -> IntegrationsOverview:
 # --------------------------------------------------------------------------- gmail flow
 
 
-def connect_gmail(db: Session, user_id: uuid.UUID) -> str:
-    """Start the OAuth flow and return Google's consent URL."""
+def connect_gmail(db: Session, user_id: uuid.UUID) -> tuple[str, str]:
+    """Start the OAuth flow. Returns ``(consent_url, state)`` — the caller sets the cookie."""
     return gmail_oauth.start_authorization(db, user_id)
 
 
-def complete_gmail_connect(db: Session, code: str, state: str) -> EmailIntegration:
+def complete_gmail_connect(db: Session, code: str, state: str, cookie_state: str | None = None) -> EmailIntegration:
     """Finish the OAuth flow (called by the unauthenticated redirect handler)."""
-    return gmail_oauth.handle_callback(db, code, state)
+    return gmail_oauth.handle_callback(db, code, state, cookie_state=cookie_state)
 
 
 def disconnect_gmail(db: Session, user_id: uuid.UUID) -> GmailStatus:

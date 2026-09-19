@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, UUIDMixin
+from app.models.base import Base, UTCDateTime, UUIDMixin
 from app.models.enums import Actor, AuditLevel
 
 
@@ -16,6 +16,8 @@ class AuditLog(UUIDMixin, Base):
     relevant user actions (login, credential changes, integration connects)."""
 
     __tablename__ = "audit_logs"
+    #: The activity feed and GET /audit both read "this user, newest first".
+    __table_args__ = (Index("ix_audit_logs_user_created_at", "user_id", "created_at"),)
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("applications.id", ondelete="SET NULL"), index=True)
@@ -26,4 +28,4 @@ class AuditLog(UUIDMixin, Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)

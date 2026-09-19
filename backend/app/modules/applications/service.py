@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.audit import audit
@@ -55,7 +55,7 @@ from app.modules.applications import answers as answers_engine
 from app.modules.applications.questions import FormQuestion
 from app.modules.applications.review import SUBMITTABLE_STATUSES, build_review, review_counts
 from app.modules.applications.schemas import ApplicationRead, QueueItem, ReviewCounts
-from app.modules.common.pagination import Pagination, paginate_sequence
+from app.modules.common.pagination import Pagination, paginate
 from app.modules.common.schemas import PageResponse
 from app.modules.notifications.service import notify
 
@@ -388,15 +388,18 @@ def pause(
         actor=Actor.AUTOMATION,
         meta={"pause_reason": reason.value},
     )
-    notify(
-        db,
-        application.user_id,
-        NotificationType.INPUT_REQUIRED,
-        f"Action needed: {job_label(application.job)}",
-        body=message,
-        link=application_link(application),
-        meta={"application_id": str(application.id), "pause_reason": reason.value},
-    )
+    # ``AutomationConfig.notify_on_input_required`` is exposed in Settings; it used to be
+    # written but never read, so turning it off did nothing.
+    if get_automation_config(db, application.user_id).notify_on_input_required:
+        notify(
+            db,
+            application.user_id,
+            NotificationType.INPUT_REQUIRED,
+            f"Action needed: {job_label(application.job)}",
+            body=message,
+            link=application_link(application),
+            meta={"application_id": str(application.id), "pause_reason": reason.value},
+        )
     audit(
         db,
         action="application.paused",
@@ -818,19 +821,25 @@ def resume_automation(
     """Continue after the user resolved a pause (answered a question, did a CAPTCHA)."""
     from app.modules.applications import executor
 
+    # Same rails as ``start_application``: resuming an application that is already in
+    # (or past) APPLIED would re-drive the adapter and submit the form a second time.
+    if application.status in SUBMITTED_STATUSES:
+        raise ConflictError("This application has already been submitted", code="already_submitted")
+    if executor.is_running(application.id):
+        raise ConflictError("This application is already being processed", code="already_running")
+
     if answers:
         answers_engine.save_user_answers(db, application, answers)
     application.automation_state = AutomationState.RUNNING
     application.pause_reason = None
     application.pause_message = None
-    if application.status not in SUBMITTED_STATUSES:
-        transition(
-            db,
-            application,
-            ApplicationStatus.IN_PROGRESS,
-            actor=Actor.USER,
-            message="Automation resumed",
-        )
+    transition(
+        db,
+        application,
+        ApplicationStatus.IN_PROGRESS,
+        actor=Actor.USER,
+        message="Automation resumed",
+    )
     record_event(db, application, ApplicationEventType.RESUMED, "Automation resumed by you", actor=Actor.USER)
     audit(
         db,
@@ -905,7 +914,22 @@ def _submit_through_adapter(db: Session, application: Application) -> Any:
 
 
 def approve(db: Session, application: Application, user: User) -> Application:
-    """Human-in-the-loop submission. Refuses anything the review flags as a blocker."""
+    """Human-in-the-loop submission. Refuses anything the review flags as a blocker.
+
+    Approving drives the adapter (and, for browser adapters, the user's Playwright
+    context) exactly like a run does, so it runs under the executor's single-flight
+    claim. That claim is atomic - a plain ``is_running()`` test is check-then-act, and
+    two simultaneous approvals of the same application would both pass it and submit,
+    creating a duplicate application at the ATS and over-counting the daily limit.
+    """
+    from app.modules.applications import executor
+
+    with executor.single_flight(application.id):
+        return _approve_locked(db, application, user)
+
+
+def _approve_locked(db: Session, application: Application, user: User) -> Application:
+    """The body of :func:`approve`, always called with the run slot held."""
     review = build_review(db, application)
     if not review.can_submit:
         raise ValidationFailed(
@@ -1165,28 +1189,47 @@ def list_applications(
         needle = f"%{q.strip()}%"
         stmt = stmt.where(or_(Job.title.ilike(needle), Company.name.ilike(needle), Application.notes.ilike(needle)))
 
-    rows = list(db.scalars(stmt).unique().all())
-    rows = _sort_applications(rows, sort)
-    page = paginate_sequence(rows, pagination)
+    stmt = _apply_sort(stmt, sort)
+    page = paginate(db, stmt, pagination, transform=to_read)
     return PageResponse[ApplicationRead](
-        items=[to_read(row) for row in page.items],
+        items=page.items,
         total=page.total,
         page=page.page,
         page_size=page.page_size,
     )
 
 
-def _sort_applications(rows: list[Application], sort: str | None) -> list[Application]:
+def _priority_rank_expression() -> Any:
+    """``PRIORITY_RANK`` as a SQL CASE so the queue can be ordered in the database."""
+    return case(
+        *[(Application.priority == value, rank) for value, rank in PRIORITY_RANK.items()],
+        else_=5,
+    )
+
+
+def _apply_sort(stmt: Select[Any], sort: str | None) -> Select[Any]:
+    """Order ``GET /applications`` in SQL (§11 ``recent|applied|score|company|priority``).
+
+    Done in the database rather than in Python so a page costs one ``LIMIT``-ed query
+    instead of materialising every application the user has ever had. ``Application.id``
+    is always the final tiebreaker, which also makes ``LIMIT/OFFSET`` paging stable.
+    """
     key = (sort or "recent").lower()
     if key in {"score", "match"}:
-        return sorted(rows, key=lambda a: (-(a.match_score or 0), -_aware(a.created_at).timestamp()))
-    if key == "company":
-        return sorted(rows, key=lambda a: (getattr(getattr(a.job, "company", None), "name", "") or "").lower())
-    if key == "applied":
-        return sorted(rows, key=lambda a: -_aware(a.applied_at or a.created_at).timestamp())
-    if key == "priority":
-        return sorted(rows, key=lambda a: (PRIORITY_RANK.get(a.priority, 5), -(a.match_score or 0)))
-    return sorted(rows, key=lambda a: -_aware(a.last_update_at or a.updated_at or a.created_at).timestamp())
+        order = [func.coalesce(Application.match_score, 0).desc(), Application.created_at.desc()]
+    elif key == "company":
+        order = [func.lower(func.coalesce(Company.name, "")).asc()]
+    elif key == "applied":
+        order = [func.coalesce(Application.applied_at, Application.created_at).desc()]
+    elif key == "priority":
+        order = [_priority_rank_expression().asc(), func.coalesce(Application.match_score, 0).desc()]
+    else:
+        order = [
+            func.coalesce(
+                Application.last_update_at, Application.updated_at, Application.created_at
+            ).desc()
+        ]
+    return stmt.order_by(*order, Application.id.asc())
 
 
 def list_queue(
@@ -1204,19 +1247,32 @@ def list_queue(
         stmt = stmt.where(Application.priority == priority)
     if status is not None:
         stmt = stmt.where(Application.status == status)
-    rows = list(db.scalars(stmt).unique().all())
     if ready_only:
-        rows = [row for row in rows if is_ready(row)]
-    ordered = sorted(
-        rows,
-        key=lambda a: (
-            PRIORITY_RANK.get(a.priority, 5),
-            -int(a.match_score or 0),
-            -_aware(getattr(a.job, "posted_at", None)).timestamp(),
-            str(a.id),
-        ),
+        # ``is_ready`` expressed in SQL so the filter happens before LIMIT/OFFSET.
+        answered = (
+            select(ApplicationAnswer.id)
+            .where(ApplicationAnswer.application_id == Application.id)
+            .exists()
+        )
+        blocked = (
+            select(ApplicationAnswer.id)
+            .where(
+                ApplicationAnswer.application_id == Application.id,
+                ApplicationAnswer.required.is_(True),
+                ApplicationAnswer.status == AnswerStatus.NEEDS_USER_INPUT,
+            )
+            .exists()
+        )
+        stmt = stmt.where(
+            answered, ~blocked, Application.status.in_(tuple(SUBMITTABLE_STATUSES))
+        )
+    stmt = stmt.order_by(
+        _priority_rank_expression().asc(),
+        func.coalesce(Application.match_score, 0).desc(),
+        func.coalesce(Job.posted_at, _EPOCH).desc(),
+        Application.id.asc(),
     )
-    page = paginate_sequence(ordered, pagination)
+    page = paginate(db, stmt, pagination)
     job_cards = _job_cards(db, user_id, [row.job_id for row in page.items])
     items = [
         QueueItem(
@@ -1230,18 +1286,22 @@ def list_queue(
 
 
 def _job_cards(db: Session, user_id: uuid.UUID, job_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Any]:
-    """Job cards for the queue, via the jobs module (best effort)."""
+    """Job cards for the queue, via the jobs module (best effort).
+
+    Batched on purpose: building them one at a time cost four statements per queue row.
+    """
     out: dict[uuid.UUID, Any] = {}
-    try:
-        from app.modules.jobs.service import get_job_detail
-    except Exception as exc:  # pragma: no cover - jobs module always present
-        logger.debug("jobs.service.get_job_detail unavailable: %s", exc)
+    if not job_ids:
         return out
-    for job_id in job_ids:
-        try:
-            out[job_id] = get_job_detail(db, user_id, job_id)
-        except Exception as exc:  # noqa: BLE001 - one bad job must not break the page
-            logger.warning("Could not build a job card for %s: %s", job_id, exc)
+    try:
+        from app.modules.jobs.service import get_job_details
+    except Exception as exc:  # pragma: no cover - jobs module always present
+        logger.debug("jobs.service.get_job_details unavailable: %s", exc)
+        return out
+    try:
+        out.update(get_job_details(db, user_id, job_ids))
+    except Exception as exc:  # noqa: BLE001 - a bad page of jobs must not break the queue
+        logger.warning("Could not build job cards for the queue: %s", exc)
     return out
 
 

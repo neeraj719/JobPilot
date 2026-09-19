@@ -385,3 +385,42 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
 * integrator (core): a **file-backed** SQLite `DATABASE_URL` is opened with `journal_mode=WAL`, `busy_timeout=10000` and `synchronous=NORMAL` so the API, the automation threads and the in-process demo ATS can write concurrently; `:memory:` (the test suite) is untouched.
 * integrator (seed): `TODAY_APPLICATIONS = 3` of the APPLIED applications are dated a few hours ago **today** (in `DEMO_TIMEZONE`, via `automation.limits.day_bounds`) so `GET /dashboard/stats -> today.applications` is non-zero on first login; the rest of §14's three-week history is unchanged and the seed stays idempotent.
 * integrator (scripts): added `backend/scripts/smoke_e2e.py --base-url [--with-browser]`, an HTTP-level end-to-end smoke test (login, every list screen, demo ATS, discovery, a full automation run, an email that advances an application, and optionally the queue -> autofill -> answer -> approve -> confirmation-email browser path) that prints PASS/FAIL per step and exits non-zero on any failure.
+* reviewer R2 (core): every `DateTime(timezone=True)` column is now `app.models.base.UTCDateTime`, a
+  `TypeDecorator` that normalises to UTC on bind and re-attaches `timezone.utc` on load. SQLite has no
+  time-zone type, so §0's "timezone-aware UTC, ISO-8601 in JSON" only held on PostgreSQL — the demo/dev
+  database returned offset-less timestamps that every client read as local time. Same DDL, no migration.
+* reviewer R2 (applications): `POST /{id}/resume-automation` returns **409** `already_submitted` for an
+  application already in/past `APPLIED` (it used to re-drive the adapter and submit twice), and both
+  `approve()` and `resume_automation()` now run under `applications.executor`'s single-flight claim —
+  `approve()` holds it for the whole submission, so two concurrent approvals submit exactly once
+  (409 `already_running` for the loser). `executor.is_running()` no longer treats an unstarted claimed
+  thread as finished.
+* reviewer R2 (applications): `AutomationConfig.notify_on_input_required` is now actually read — the
+  `INPUT_REQUIRED` notification on pause is skipped when the user turned it off.
+* reviewer R2 (emails): `POST /emails/{id}/link` returns **409** `already_linked` when the message is
+  linked to a *different* application (unlink first) — silently moving the link advanced two
+  applications off one email. Re-sending the same link/classification is now a no-op. A sender domain is
+  learned onto the **global** `companies.email_domains` only from a non-`OTHER` classification, and the
+  job-title link strategy is skipped for bulk job-board senders.
+* reviewer R2 (jobs): `GET /jobs?status=<unknown>` is **422** `invalid_status` instead of 500;
+  `IngestResult` gained `skipped` (a listing whose company name normalises to "" is dropped instead of
+  aborting the whole batch); `build_search_query` forwards the user's `work_modes`; `JobCard.sources`
+  is de-duplicated. `jobs.service.get_job_details(db, user_id, job_ids)` is the batch form of
+  `get_job_detail` (the queue page used to cost four statements per row).
+* reviewer R2 (profiles/matching): a JSON `null` sent for a NOT NULL JSON column (`skills`,
+  `work_authorization`, `desired_titles`, …) is stored as the empty list/dict instead of 500-ing the
+  whole request; `min_match_score = 0` is honoured rather than silently replaced by the default.
+* reviewer R2 (automation): a **dry run** no longer sets `AutomationConfig.last_run_at`, so previewing
+  does not consume the day's scheduled slot; `POST /automation/run` takes the per-user lock before
+  inserting the run row (the guard used to be check-then-act) and always closes the row out if the
+  background thread fails; `POST /automation/runs/{id}/cancel` no longer force-releases that lock while
+  the pipeline is still executing its current step.
+* reviewer R2 (dashboard): `responses`/`response_rate` count only applications that were actually sent
+  (a replied-then-skipped application used to push the rate past 100%), an interview folds into the
+  response set so the funnel stays monotonic, and the week/month/chart windows start at **local
+  midnight** rather than `now − N×24h` (which lost a day across a DST change).
+* reviewer R2 (scalability): `GET /applications`, `/applications/queue` and `/companies` order and
+  paginate in SQL instead of materialising every row and slicing in Python; composite indexes for the
+  "(owner, sort column)" access pattern live in the models and in
+  `alembic/versions/a1c4f7b28e10_composite_indexes.py`. Per-page query budgets are documented in
+  `backend/README.md` and pinned by `tests/test_review_regressions.py`.

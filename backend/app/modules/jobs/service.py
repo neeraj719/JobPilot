@@ -16,7 +16,7 @@ from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.audit import audit
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationFailed
 from app.models.application import Application
 from app.models.automation import ConnectedAccount
 from app.models.base import utcnow
@@ -82,6 +82,7 @@ __all__ = [
     "list_jobs",
     "get_job",
     "get_job_detail",
+    "get_job_details",
     "discover_jobs",
     "queue_job",
     "skip_job",
@@ -355,12 +356,24 @@ def ingest_discovered(db: Session, user_id: uuid.UUID, jobs: list[DiscoveredJob]
         )
         bucket["found"] += 1
 
-        company = get_or_create_company(
-            db,
-            discovered.company_name,
-            domain=discovered.company_domain,
-            logo_url=discovered.company_logo_url,
-        )
+        try:
+            company = get_or_create_company(
+                db,
+                discovered.company_name,
+                domain=discovered.company_domain,
+                logo_url=discovered.company_logo_url,
+            )
+        except Exception as exc:  # noqa: BLE001 - one unusable listing must not lose the batch
+            logger.warning(
+                "Skipping %s listing %s (company_name=%r): %s",
+                discovered.source.value,
+                discovered.external_id,
+                discovered.company_name,
+                exc,
+            )
+            bucket["skipped"] = bucket.get("skipped", 0) + 1
+            result.skipped += 1
+            continue
         title_norm = normalize_title(discovered.title)
         location_norm = normalize_location(discovered.location)
         dedupe_hash = dedupe.compute_dedupe_hash(company.normalized_name, title_norm, location_norm or "")
@@ -483,7 +496,17 @@ def _apply_filters(
         if status.upper() == STATUS_NONE:
             stmt = stmt.where(Application.id.is_(None))
         else:
-            stmt = stmt.where(Application.status == ApplicationStatus(status.upper()))
+            # The router types this filter as a free-form str, so an unknown value used
+            # to raise ValueError out of the service and surface as a 500.
+            try:
+                resolved_status = ApplicationStatus(status.upper())
+            except ValueError as exc:
+                raise ValidationFailed(
+                    f"Unknown application status '{status}'",
+                    code="invalid_status",
+                    details={"allowed": [s.value for s in ApplicationStatus] + [STATUS_NONE]},
+                ) from exc
+            stmt = stmt.where(Application.status == resolved_status)
     if priority is not None:
         # Priority is *derived* (see companies.service.resolve_priority), so the filter works
         # off the resolved company ids rather than an exact normalised-name join - otherwise
@@ -539,7 +562,7 @@ def _to_card(
         salary_currency=job.salary_currency,
         experience_min=job.experience_min,
         experience_max=job.experience_max,
-        sources=[s.source for s in sources],
+        sources=list(dict.fromkeys(s.source for s in sources)),
         primary_source=sources[0].source if sources else None,
         posted_at=job.posted_at,
         application_type=job.application_type,
@@ -599,13 +622,12 @@ def get_job(db: Session, job_id: uuid.UUID) -> Job:
     return job
 
 
-def get_job_detail(db: Session, user_id: uuid.UUID, job_id: uuid.UUID) -> JobDetail:
-    job = get_job(db, job_id)
-    match = db.scalars(select(JobMatch).where(JobMatch.job_id == job.id, JobMatch.user_id == user_id)).first()
-    application = db.scalars(
-        select(Application).where(Application.job_id == job.id, Application.user_id == user_id)
-    ).first()
-    priority = get_company_priority(db, user_id, job.company)
+def _to_detail(
+    job: Job,
+    match: JobMatch | None,
+    application: Application | None,
+    priority: CompanyPriority,
+) -> JobDetail:
     card = _to_card(job, match, application, priority)
     return JobDetail(
         **card.model_dump(),
@@ -621,6 +643,61 @@ def get_job_detail(db: Session, user_id: uuid.UUID, job_id: uuid.UUID) -> JobDet
     )
 
 
+def get_job_detail(db: Session, user_id: uuid.UUID, job_id: uuid.UUID) -> JobDetail:
+    job = get_job(db, job_id)
+    match = db.scalars(select(JobMatch).where(JobMatch.job_id == job.id, JobMatch.user_id == user_id)).first()
+    application = db.scalars(
+        select(Application).where(Application.job_id == job.id, Application.user_id == user_id)
+    ).first()
+    priority = get_company_priority(db, user_id, job.company)
+    return _to_detail(job, match, application, priority)
+
+
+def get_job_details(
+    db: Session, user_id: uuid.UUID, job_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, JobDetail]:
+    """Batch :func:`get_job_detail` — a constant number of queries for a whole page.
+
+    ``get_job_detail`` costs ~4 queries per job (job, match, application, priority) plus a
+    lazy load of ``Job.sources``; calling it in a loop made ``GET /applications/queue``
+    issue 4×page_size statements. This resolves every part in one query each instead.
+    """
+    unique_ids = list(dict.fromkeys(job_id for job_id in job_ids if job_id is not None))
+    if not unique_ids:
+        return {}
+
+    jobs = list(
+        db.scalars(
+            select(Job).where(Job.id.in_(unique_ids)).options(selectinload(Job.sources))
+        )
+        .unique()
+        .all()
+    )
+    matches = {
+        match.job_id: match
+        for match in db.scalars(
+            select(JobMatch).where(JobMatch.job_id.in_(unique_ids), JobMatch.user_id == user_id)
+        ).all()
+    }
+    applications = {
+        application.job_id: application
+        for application in db.scalars(
+            select(Application).where(Application.job_id.in_(unique_ids), Application.user_id == user_id)
+        ).all()
+    }
+    priorities = get_company_priority_map(db, user_id, [job.company for job in jobs])
+
+    out: dict[uuid.UUID, JobDetail] = {}
+    for job in jobs:
+        out[job.id] = _to_detail(
+            job,
+            matches.get(job.id),
+            applications.get(job.id),
+            priorities.get(job.company_id, CompanyPriority.P2),
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- discovery
 
 
@@ -632,7 +709,19 @@ def build_search_query(preference: JobPreference, limit: int | None = None) -> S
         keywords=[str(tech) for tech in (preference.preferred_technologies or []) if tech],
         posted_within_hours=preference.only_posted_within_hours,
         limit=limit or DEFAULT_DISCOVER_LIMIT,
+        # Every adapter honours ``work_modes``; not forwarding it meant a "remote only"
+        # candidate still got onsite postings from every source.
+        work_modes=[m for m in (_coerce_work_mode(v) for v in (preference.work_modes or [])) if m is not None],
     )
+
+
+def _coerce_work_mode(value: Any) -> WorkMode | None:
+    if isinstance(value, WorkMode):
+        return value
+    try:
+        return WorkMode(str(value).upper())
+    except ValueError:
+        return None
 
 
 def resolve_discovery_sources(db: Session, user_id: uuid.UUID, requested: list[JobSourceType] | None) -> list[JobSourceType]:

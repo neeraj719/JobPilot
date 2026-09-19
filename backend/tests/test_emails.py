@@ -853,3 +853,71 @@ def test_pipeline_against_the_real_applications_service(db, user, monkeypatch):
         if n.type is NotificationType.INTERVIEW_SCHEDULED
     ]
     assert len(scheduled) == 1, "the status change and the email must not both notify"
+
+
+# --------------------------------------------------------------- reference beats recency
+
+
+def test_a_quoted_reference_wins_over_the_most_recent_application_at_the_same_company(db, user) -> None:
+    """An acknowledgement naming an application must not land on a sibling application.
+
+    Applying twice to one company is ordinary. Both applications share the employer's
+    sending domain, so a domain match alone picks whichever was applied to most recently.
+    The reference the mail quotes names one of them outright and has to win.
+    """
+    company = Company(
+        name="Acme Cloud",
+        normalized_name=normalize_company_name("Acme Cloud"),
+        domain="acmecloud.io",
+    )
+    db.add(company)
+    db.flush()
+
+    older = make_application(
+        db,
+        user,
+        company=company,
+        title="Platform Engineer",
+        applied_at=utcnow() - timedelta(days=2),
+        external_application_id="DEMO-AAAAAA",
+    )
+    newer = make_application(
+        db,
+        user,
+        company=company,
+        title="Backend Engineer",
+        applied_at=utcnow(),
+        external_application_id="DEMO-BBBBBB",
+    )
+
+    message = incoming(
+        subject="Thank you for applying to Acme Cloud — Platform Engineer",
+        sender="Acme Cloud Recruiting <no-reply@acmecloud.io>",
+        body="Your application has been received.\n\nApplication ID: DEMO-AAAAAA\nRole: Platform Engineer\n",
+    )
+
+    result = linker.link(db, user.id, message)
+
+    assert result.application is not None
+    assert result.application.id == older.id, "the quoted reference must outrank the newer sibling"
+    assert result.matched_by == linker.MATCH_APPLICATION_ID
+    assert result.application.id != newer.id
+
+
+def test_the_domain_still_links_an_acknowledgement_that_quotes_no_reference(db, user) -> None:
+    """Without a reference the domain heuristic is still the right fallback."""
+    application = make_application(db, user, company_name="Northwind Labs", domain="northwindlabs.dev")
+
+    result = linker.link(
+        db,
+        user.id,
+        incoming(
+            subject="We received your application",
+            sender="careers@northwindlabs.dev",
+            body="Our team is reviewing it now.",
+        ),
+    )
+
+    assert result.application is not None
+    assert result.application.id == application.id
+    assert result.matched_by == linker.MATCH_DOMAIN

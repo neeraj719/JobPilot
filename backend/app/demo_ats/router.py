@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, RateLimitedError
 from app.demo_ats.catalog import NOTICE_PERIOD_OPTIONS, demo_companies, get_demo_job, job_payload, list_demo_jobs
 from app.models.user import User
 
@@ -42,6 +43,28 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 _write_lock = threading.Lock()
+
+#: The apply form is the only unauthenticated *write* on this API, and the global
+#: rate-limit middleware skips /demo-ats. Give it its own per-IP budget so nobody can
+#: fill the disk (or a JobPilot user's inbox) from an anonymous loop.
+DEMO_SUBMIT_LIMIT_PER_MINUTE = 20
+#: Fields of a stored submission that may be echoed back by ``/submissions.json``.
+#: The answers hold the applicant's real name, email, phone, salary and free text -
+#: the endpoint is unauthenticated, so it must never return them.
+PUBLIC_SUBMISSION_FIELDS = ("application_id", "slug", "job_title", "company", "company_domain", "submitted_at", "captcha_shown")
+
+
+def _demo_submit_rate_limit(request: Request) -> None:
+    from app.core.rate_limit import client_ip, rate_limiter
+
+    allowed, _ = rate_limiter.check(f"demo-ats:submit:{client_ip(request)}", DEMO_SUBMIT_LIMIT_PER_MINUTE)
+    if not allowed:
+        raise RateLimitedError("Too many demo applications from this address. Try again in a minute.")
+
+
+def max_upload_bytes() -> int:
+    return int(settings.MAX_UPLOAD_MB) * 1024 * 1024
+
 
 #: (name, human label) of every non-custom field on the apply form.
 FORM_FIELDS: list[tuple[str, str]] = [
@@ -140,7 +163,7 @@ def apply_form(slug: str, request: Request, captcha: int = 0) -> HTMLResponse:
     )
 
 
-@router.post("/jobs/{slug}/apply", response_class=HTMLResponse)
+@router.post("/jobs/{slug}/apply", response_class=HTMLResponse, dependencies=[Depends(_demo_submit_rate_limit)])
 async def submit_application(
     slug: str,
     request: Request,
@@ -164,7 +187,10 @@ async def submit_application(
 
     upload = form.get("resume")
     resume_filename = getattr(upload, "filename", "") or ""
-    resume_bytes = await upload.read() if resume_filename else b""
+    # Read at most the configured limit + 1 byte: an unauthenticated caller must not be
+    # able to push an arbitrarily large body into memory or onto the disk.
+    limit = max_upload_bytes()
+    resume_bytes = await upload.read(limit + 1) if resume_filename else b""
 
     errors: list[str] = []
     for name, label in REQUIRED_FIELDS:
@@ -172,6 +198,9 @@ async def submit_application(
             errors.append(f"{label} is required.")
     if not resume_filename:
         errors.append("Resume/CV is required.")
+    elif len(resume_bytes) > limit:
+        resume_bytes = b""
+        errors.append(f"Resume/CV is too large (limit {settings.MAX_UPLOAD_MB} MB).")
     for question in custom_questions:
         if question.get("required") and not values.get(question["key"]):
             errors.append(f"{question['label']} is required.")
@@ -235,7 +264,13 @@ async def submit_application(
 
 @router.get("/submissions.json")
 def submissions_json(limit: int = 50) -> JSONResponse:
-    """The most recent submissions (newest first) - for debugging and the demo script."""
+    """The most recent submissions (newest first) - for debugging and the demo script.
+
+    Metadata only. This endpoint has no authentication, and the autofill flow puts the
+    JobPilot user's real name, email, phone, LinkedIn, current/expected CTC and free-text
+    answers into every submission, so the applicant data and the on-disk resume path are
+    never echoed back.
+    """
     path = submissions_path()
     records: list[dict[str, Any]] = []
     if path.exists():
@@ -246,9 +281,12 @@ def submissions_json(limit: int = 50) -> JSONResponse:
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
+                record = json.loads(line)
             except json.JSONDecodeError:  # pragma: no cover - defensive
                 logger.warning("Skipping malformed submission line in %s", path)
+                continue
+            if isinstance(record, dict):
+                records.append({key: record.get(key) for key in PUBLIC_SUBMISSION_FIELDS if key in record})
     return JSONResponse(list(reversed(records)))
 
 
@@ -278,35 +316,74 @@ def _append_submission(record: dict[str, Any]) -> None:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _confirmation_body(full_name: str | None, job: dict[str, Any], application_id: str) -> str:
+    return (
+        f"Hi {full_name or 'there'},\n\n"
+        f"Thank you for applying to the {job['title']} role at {job['company']}.\n"
+        f"Your application has been received and is being reviewed by our recruiting team.\n\n"
+        f"Application ID: {application_id}\n"
+        f"Role: {job['title']}\n"
+        f"Location: {job['location']}\n\n"
+        f"We will be in touch if your profile matches what we are looking for.\n\n"
+        f"-- {job['company']} Recruiting (demo ATS)\n"
+    )
+
+
+def _ingest_confirmation(user_id: uuid.UUID, full_name: str | None, job: dict[str, Any], application_id: str) -> None:
+    """Deliver the confirmation mail in its own session, as a separate actor would."""
+    from app.core.database import session_scope
+    from app.modules.emails.service import ingest_simulated_email
+
+    with session_scope() as session:
+        ingest_simulated_email(
+            session,
+            user_id,
+            subject=f"Thank you for applying to {job['company']} — {job['title']}",
+            body=_confirmation_body(full_name, job, application_id),
+            sender=f"no-reply@{job['company_domain']}",
+        )
+
+
+def _deliver_later(delay: float, user_id: uuid.UUID, full_name: str | None, job: dict[str, Any], application_id: str) -> None:
+    def _run() -> None:
+        time.sleep(delay)
+        try:
+            _ingest_confirmation(user_id, full_name, job, application_id)
+            logger.info("Simulated confirmation email delivered for %s (%s)", user_id, application_id)
+        except Exception as exc:  # noqa: BLE001 - a demo mail must never crash anything
+            logger.warning("Deferred confirmation email skipped (%s): %s", exc.__class__.__name__, exc)
+
+    threading.Thread(target=_run, name=f"demo-ats-mail-{application_id}", daemon=True).start()
+
+
 def _send_confirmation_email(db: Session, job: dict[str, Any], email: str, application_id: str) -> None:
     """Best effort: if the applicant is a JobPilot user, simulate the ATS confirmation email.
 
-    Imported lazily and fully guarded so the demo form keeps working while the emails
-    module is still being written.
+    A real employer's system sends this *after* it has recorded the submission. Delivering
+    it inside the applicant's own submit request would race their side: the application has
+    no reference number yet, so the mail cannot be matched to it and can attach itself to an
+    older application at the same company instead. The delay models the real ordering, and
+    ``DEMO_ATS_EMAIL_DELAY_SECONDS=0`` restores inline delivery for the tests.
     """
     try:
         user = db.scalars(select(User).where(func.lower(User.email) == email.lower())).first()
         if user is None:
             logger.debug("No JobPilot user for %s - skipping simulated confirmation email", email)
             return
+
+        delay = 0.0 if settings.ENV == "test" else max(0.0, settings.DEMO_ATS_EMAIL_DELAY_SECONDS)
+        if delay > 0:
+            _deliver_later(delay, user.id, user.full_name, job, application_id)
+            logger.info("Simulated confirmation email scheduled for %s (%s) in %.1fs", email, application_id, delay)
+            return
+
         from app.modules.emails.service import ingest_simulated_email
 
-        subject = f"Thank you for applying to {job['company']} — {job['title']}"
-        body = (
-            f"Hi {user.full_name or 'there'},\n\n"
-            f"Thank you for applying to the {job['title']} role at {job['company']}.\n"
-            f"Your application has been received and is being reviewed by our recruiting team.\n\n"
-            f"Application ID: {application_id}\n"
-            f"Role: {job['title']}\n"
-            f"Location: {job['location']}\n\n"
-            f"We will be in touch if your profile matches what we are looking for.\n\n"
-            f"-- {job['company']} Recruiting (demo ATS)\n"
-        )
         ingest_simulated_email(
             db,
             user.id,
-            subject=subject,
-            body=body,
+            subject=f"Thank you for applying to {job['company']} — {job['title']}",
+            body=_confirmation_body(user.full_name, job, application_id),
             sender=f"no-reply@{job['company_domain']}",
         )
         logger.info("Simulated confirmation email queued for %s (%s)", email, application_id)

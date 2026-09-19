@@ -78,13 +78,38 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
+def client_ip(request: Request) -> str:
+    """The client address used for rate limiting and audit records.
+
+    Forwarding headers are attacker-controlled unless a reverse proxy rewrites them,
+    so they are ignored unless ``TRUST_PROXY_HEADERS`` is on — otherwise a client
+    could pick a fresh bucket per request and walk straight past the login limit.
+
+    When they *are* trusted (single-hop proxy, e.g. the bundled Nginx):
+
+    * ``X-Real-IP`` is preferred: the proxy sets it from the real peer and a client
+      cannot append to it;
+    * for ``X-Forwarded-For`` the **right-most** entry is used. Nginx appends the peer
+      address to whatever the client sent, so the left-most entry is exactly the part
+      an attacker controls.
+    """
+    if settings.TRUST_PROXY_HEADERS:
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip[:64]
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [part.strip() for part in forwarded.split(",") if part.strip()]
+            if parts:
+                return parts[-1][:64]
+    return (request.client.host if request.client else "unknown")[:64]
+
+
 def _client_key(request: Request) -> str:
     user_id = getattr(request.state, "user_id", None)
     if user_id:
         return f"rl:user:{user_id}"
-    forwarded = request.headers.get("x-forwarded-for")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-    return f"rl:ip:{ip}"
+    return f"rl:ip:{client_ip(request)}"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

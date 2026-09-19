@@ -322,7 +322,10 @@ class ApplicationRunner:
             application,
             reason,
             result.message or "The application needs your input",
-            form_snapshot=snapshot,
+            # ``pause`` deliberately leaves the stored snapshot alone when given None.
+            # Passing the empty dict instead wiped the form a previous run had recorded
+            # (e.g. a CAPTCHA blocking the second attempt), emptying the review screen.
+            form_snapshot=snapshot or None,
         )
         # Give the user something to answer in the UI for every unanswered required field.
         try:

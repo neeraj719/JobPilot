@@ -214,19 +214,31 @@ def _step(ctx: _Ctx, name: str) -> Generator[dict[str, Any], None, None]:
         finished = utcnow()
         record["finished_at"] = _iso(finished)
         record["duration_ms"] = int((finished - started).total_seconds() * 1000)
-        ctx.run.steps = [*(ctx.run.steps or []), record]
-        ctx.persist_stats()
-        audit(
-            ctx.db,
-            action="automation.step",
-            message=f"{name}: {record['status']}" + (f" - {record['message']}" if record["message"] else ""),
-            user_id=ctx.user_id,
-            automation_run_id=ctx.run.id,
-            actor=Actor.AUTOMATION,
-            level=AuditLevel.ERROR if record["status"] == STATUS_FAILED else AuditLevel.INFO,
-            meta={"step": name, "status": record["status"], **{k: v for k, v in record["data"].items() if _scalar(v)}},
-        )
-        ctx.db.flush()
+        try:
+            ctx.run.steps = [*(ctx.run.steps or []), record]
+            ctx.persist_stats()
+            audit(
+                ctx.db,
+                action="automation.step",
+                message=f"{name}: {record['status']}" + (f" - {record['message']}" if record["message"] else ""),
+                user_id=ctx.user_id,
+                automation_run_id=ctx.run.id,
+                actor=Actor.AUTOMATION,
+                level=AuditLevel.ERROR if record["status"] == STATUS_FAILED else AuditLevel.INFO,
+                meta={"step": name, "status": record["status"], **{k: v for k, v in record["data"].items() if _scalar(v)}},
+            )
+            ctx.db.flush()
+        except Exception:
+            # A step that died mid-``flush`` (IntegrityError, "database is locked", ...)
+            # leaves the session needing a rollback, and this bookkeeping flush would then
+            # raise ``PendingRollbackError`` straight out of the context manager - aborting
+            # the whole run and stranding the row at RUNNING. §14 says a failing step is
+            # recorded and the run continues, so un-poison the session and carry on.
+            logger.exception("Could not record automation step %s for run %s", name, ctx.run.id)
+            ctx.db.rollback()
+            ctx.run = ctx.db.merge(ctx.run)
+            ctx.config = ctx.db.merge(ctx.config)
+            ctx.failures += 1
 
 
 def _scalar(value: Any) -> bool:
@@ -358,7 +370,7 @@ def _step_collect(ctx: _Ctx, adapters: list[Any], query: Any) -> tuple[list[Any]
 
 
 def _build_candidates(ctx: _Ctx, job_ids: list[uuid.UUID]) -> list[_Candidate]:
-    from app.modules.jobs.service import get_company_priority
+    from app.modules.jobs.service import get_company_priority_map
 
     if not job_ids:
         return []
@@ -375,18 +387,19 @@ def _build_candidates(ctx: _Ctx, job_ids: list[uuid.UUID]) -> list[_Candidate]:
             select(Application).where(Application.user_id == ctx.user_id, Application.job_id.in_(job_ids))
         ).unique()
     }
-    priority_cache: dict[uuid.UUID, CompanyPriority] = {}
+    # One preference query for the whole run instead of one per distinct company.
+    priority_cache: dict[uuid.UUID, CompanyPriority] = get_company_priority_map(
+        ctx.db, ctx.user_id, [job.company for job in jobs]
+    )
     candidates: list[_Candidate] = []
     for job in jobs:
-        if job.company_id not in priority_cache:
-            priority_cache[job.company_id] = get_company_priority(ctx.db, ctx.user_id, job.company)
         match = matches.get(job.id)
         candidates.append(
             _Candidate(
                 job=job,
                 match=match,
                 application=applications.get(job.id),
-                priority=priority_cache[job.company_id],
+                priority=priority_cache.get(job.company_id, CompanyPriority.P2),
                 score=int(match.match_score) if match is not None else 0,
                 source=_primary_source(job),
             )
@@ -922,7 +935,11 @@ def _finish(ctx: _Ctx, *, cancelled: bool = False, fatal: bool = False) -> Autom
     run.current_step = None
     ctx.persist_stats()
 
-    ctx.config.last_run_at = now
+    # A dry run must not consume the day's scheduled slot: the worker's tick skips a user
+    # whose ``last_run_at`` is already today, so previewing at 08:00 used to silently
+    # cancel the real 09:00 run.
+    if not ctx.dry_run:
+        ctx.config.last_run_at = now
     ctx.config.next_run_at = automation_service.compute_next_run_at(ctx.config, now)
 
     try:

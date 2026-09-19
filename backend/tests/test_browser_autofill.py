@@ -178,7 +178,9 @@ def test_checkbox_checks_and_unchecks(answer: str, checked: bool) -> None:
     assert page.actions == [("check", "#consent", checked)]
 
 
-def test_file_is_uploaded_when_it_exists(tmp_path) -> None:
+def test_file_is_uploaded_when_it_exists(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # attachments are only accepted from inside UPLOAD_DIR (see _resolve_upload_path)
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
     resume = tmp_path / "resume.pdf"
     resume.write_bytes(b"%PDF-1.4")
     page = FakePage()
@@ -188,7 +190,8 @@ def test_file_is_uploaded_when_it_exists(tmp_path) -> None:
     assert result.filled[0]["value_preview"] == "resume.pdf"
 
 
-def test_missing_file_asks_the_user(tmp_path) -> None:
+def test_missing_file_asks_the_user(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
     page = FakePage()
     form = DetectedForm(fields=[field("resume", FieldType.FILE, label="Resume/CV", required=True)])
     result = fill_form(page, form, [Answer("resume_file", str(tmp_path / "nope.pdf"))])

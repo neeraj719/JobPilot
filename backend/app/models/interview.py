@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import InterviewStatus, InterviewType
 
 if TYPE_CHECKING:
@@ -16,13 +16,15 @@ if TYPE_CHECKING:
 
 class Interview(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "interviews"
+    #: "My upcoming interviews" is a (owner, scheduled_at) range scan.
+    __table_args__ = (Index("ix_interviews_user_scheduled_at", "user_id", "scheduled_at"),)
 
     application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     interview_type: Mapped[InterviewType] = mapped_column(Enum(InterviewType, native_enum=False, length=20), default=InterviewType.OTHER, nullable=False)
     status: Mapped[InterviewStatus] = mapped_column(Enum(InterviewStatus, native_enum=False, length=20), default=InterviewStatus.SCHEDULED, nullable=False)
     round_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     location_or_link: Mapped[str | None] = mapped_column(String(1000))
     interviewer: Mapped[str | None] = mapped_column(String(255))

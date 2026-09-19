@@ -201,8 +201,11 @@ def test_callback_forwards_a_google_error(client):
 
 def test_callback_stores_encrypted_credentials(client, db, user, google_configured, monkeypatch):
     integration = gmail_oauth.get_or_create_integration(db, user.id)
-    integration.oauth_state = "state-token-123"
+    state = gmail_oauth.new_state()
+    integration.oauth_state = state
     db.commit()
+    # the callback also requires the HttpOnly cookie set when the flow started
+    client.cookies.set(gmail_oauth.STATE_COOKIE_NAME, state)
 
     credentials = {
         "token": "ya29.access",
@@ -216,9 +219,7 @@ def test_callback_stores_encrypted_credentials(client, db, user, google_configur
     monkeypatch.setattr(gmail_oauth, "exchange_code", lambda code, state=None: credentials)
     monkeypatch.setattr(gmail_oauth, "fetch_account_email", lambda creds: "candidate@gmail.com")
 
-    response = client.get(
-        f"{API}/gmail/callback", params={"code": "auth-code", "state": "state-token-123"}, follow_redirects=False
-    )
+    response = client.get(f"{API}/gmail/callback", params={"code": "auth-code", "state": state}, follow_redirects=False)
     assert response.status_code == 302
     assert response.headers["location"] == f"{settings.FRONTEND_URL}/emails?connected=1"
 

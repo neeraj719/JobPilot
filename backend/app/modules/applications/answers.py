@@ -302,8 +302,15 @@ def generate_answers(
 
 
 def save_user_answers(db: Session, application: Application, updates: Iterable[Any]) -> list[ApplicationAnswer]:
-    """Persist user-typed answers (``{id, answer}`` items). Source becomes ``USER``."""
-    from app.core.exceptions import NotFoundError
+    """Persist user-typed answers (``{id, answer}`` items). Source becomes ``USER``.
+
+    File answers are refused: their value is a **server-side path** that the browser
+    step hands to ``set_input_files``. Letting the client type one would turn this
+    endpoint into an arbitrary-file-read primitive (upload ``.env`` or another user's
+    stored resume to the ATS). Attachments are always resolved from the application's
+    own resume row instead.
+    """
+    from app.core.exceptions import NotFoundError, ValidationFailed
 
     by_id = {str(row.id): row for row in (application.answers or [])}
     changed: list[ApplicationAnswer] = []
@@ -313,6 +320,13 @@ def save_user_answers(db: Session, application: Application, updates: Iterable[A
         row = by_id.get(answer_id)
         if row is None:
             raise NotFoundError(f"Answer {answer_id} does not belong to this application")
+        if row.field_type is FieldType.FILE:
+            raise ValidationFailed(
+                "File attachments come from your resume; they cannot be typed in. "
+                "Change the resume on the application instead.",
+                code="file_answer_not_editable",
+                details={"answer_id": answer_id, "question_key": row.question_key},
+            )
         row.answer = (str(text) if text is not None else "").strip() or None
         row.answer_source = AnswerSource.USER
         row.status = AnswerStatus.ANSWERED if row.answer else AnswerStatus.NEEDS_USER_INPUT
