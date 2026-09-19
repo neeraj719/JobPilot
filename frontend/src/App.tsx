@@ -24,7 +24,12 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={200}>
-        <BrowserRouter>
+        {/*
+          Opt in to the React Router v7 behaviours now: route updates run inside
+          React.startTransition, and splat routes resolve relative paths the v7
+          way. Without these the router logs a deprecation warning on every page.
+        */}
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AppRoutes />
         </BrowserRouter>
         <Toaster />
