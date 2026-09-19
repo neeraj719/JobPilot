@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Application received - {{ job.title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Thank you for applying</h1>
+  <p>Your application for <strong>{{ job.title }}</strong> at <strong>{{ job.company }}</strong> has been received.</p>
+  <p class="confirm-id">Application ID: {{ application_id }}</p>
+  <p class="meta">Submitted {{ submitted_at }} &middot; a confirmation email has been sent to {{ email }}.</p>
+  <p class="meta">Keep this ID: our recruiting team refers to it in every follow-up about this application.</p>
+</div>
+
+<div class="card">
+  <h2>What you submitted</h2>
+  <table class="answers">
+    <tbody>
+      {% for label, value in summary %}
+      <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="meta" style="margin-top:16px"><a href="/demo-ats/">Browse other open roles</a></p>
+</div>
+{% endblock %}

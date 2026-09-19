@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}JobPilot Demo ATS{% endblock %}</title>
+<style>
+  :root {
+    --ink: #1f2933;
+    --muted: #6b7785;
+    --line: #dfe3e8;
+    --bg: #f6f7f9;
+    --accent: #1f7a5c;
+    --accent-dark: #17614a;
+    --warn-bg: #fff8e6;
+    --warn-line: #f0d190;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent-dark); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+  .site-header { background: #fff; border-bottom: 1px solid var(--line); }
+  .site-header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 62px; }
+  .brand { font-weight: 700; font-size: 17px; text-decoration: none; color: var(--ink); letter-spacing: -0.2px; }
+  .badge {
+    background: var(--warn-bg); border: 1px solid var(--warn-line); color: #7a5c14;
+    border-radius: 999px; padding: 3px 12px; font-size: 12px; font-weight: 600;
+  }
+  main.wrap { padding-top: 28px; padding-bottom: 56px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 26px 28px; margin-bottom: 18px; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.4px; }
+  h2 { font-size: 19px; margin: 0 0 14px; letter-spacing: -0.2px; }
+  h3 { font-size: 15px; margin: 22px 0 8px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+  p { margin: 0 0 12px; }
+  .meta { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
+  .pill { display: inline-block; background: #eef2f5; border-radius: 4px; padding: 2px 9px; font-size: 12px; margin: 0 6px 6px 0; color: #3d4b59; }
+  .company-block { margin-bottom: 26px; }
+  .job-row { border-top: 1px solid var(--line); padding: 14px 0; display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+  .job-row:first-of-type { border-top: 0; }
+  .job-row a { font-weight: 600; text-decoration: none; font-size: 16px; }
+  .job-row a:hover { text-decoration: underline; }
+  .description { white-space: pre-wrap; }
+  .btn {
+    display: inline-block; background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 11px 22px; font-size: 15px; font-weight: 600; cursor: pointer; text-decoration: none;
+  }
+  .btn:hover, form button[type="submit"]:hover { background: var(--accent-dark); }
+  form button[type="submit"] {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 12px 26px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .field { margin-bottom: 18px; }
+  .field > label, fieldset > legend { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .req { color: #c0392b; }
+  input[type="text"], input[type="email"], input[type="tel"], input[type="url"],
+  input[type="number"], input[type="date"], input[type="file"], select, textarea {
+    width: 100%; padding: 9px 11px; border: 1px solid #c7ced6; border-radius: 5px;
+    font: inherit; color: var(--ink); background: #fff;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  fieldset { border: 0; padding: 0; margin: 0 0 18px; }
+  .choice { font-weight: 400; display: inline-flex; align-items: center; gap: 7px; margin-right: 22px; }
+  .choice input { width: auto; }
+  .checkbox-field label { font-weight: 400; display: flex; gap: 9px; align-items: flex-start; }
+  .checkbox-field input { margin-top: 4px; }
+  .errors { background: #fdecea; border: 1px solid #f5c2bd; color: #8c231b; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; }
+  .errors ul { margin: 6px 0 0; padding-left: 20px; }
+  .notice { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 14px; }
+  .g-recaptcha {
+    width: 302px; height: 76px; border: 1px solid #d3d3d3; border-radius: 4px; background: #f9f9f9;
+    display: flex; align-items: center; padding: 0 14px; color: #555; font-size: 13px; margin-bottom: 8px;
+  }
+  .site-footer { border-top: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 13px; }
+  .site-footer .wrap { padding-top: 18px; padding-bottom: 24px; }
+  .confirm-id { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+  table.answers { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.answers th, table.answers td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.answers th { width: 34%; color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/demo-ats/">Demo ATS</a>
+    <span class="badge">Practice site - fictional postings only</span>
+  </div>
+</header>
+<main class="wrap">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    This mock careers site is served by JobPilot AI itself so the application automation can be demonstrated
+    end to end without ever touching a real employer website. Every company, posting and logo here is fictional.
+  </div>
+</footer>
+</body>
+</html>
