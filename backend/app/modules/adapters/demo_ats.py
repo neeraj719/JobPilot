@@ -147,14 +147,10 @@ class GenericAtsFormAdapter(JobSourceAdapter):
 
         if unanswered_required:
             logger.info("%s is missing %d required answers", self.display_name, len(unanswered_required))
-            return ApplyStepResult(
-                state=AutomationState.REQUIRES_USER,
-                message="Some required questions could not be answered from your profile: "
-                + ", ".join(unanswered_required),
-                pause_reason=PauseReason.UNKNOWN_QUESTION,
-                form_snapshot=self._snapshot(detected, mapped, blockers, missing=unanswered_required),
-            )
 
+        # Fill everything the profile *does* know before pausing (contract §12: detect -> map ->
+        # merge -> fill -> pause). Stopping earlier would hand the reviewer an empty form snapshot
+        # and no screenshot, and the gaps are reported all the same via ``missing``/``needs_user``.
         application_id = getattr(ctx.application, "id", None)
         try:
             try:
@@ -164,23 +160,31 @@ class GenericAtsFormAdapter(JobSourceAdapter):
         except Exception as exc:  # pragma: no cover - needs a live browser
             return ApplyStepResult(state=AutomationState.FAILED, message=f"Could not fill the application form: {exc}")
 
-        snapshot = self._snapshot(detected, mapped, blockers)
+        snapshot = self._snapshot(detected, mapped, blockers, missing=unanswered_required)
         snapshot["filled"] = list(getattr(result, "filled", None) or [])
         snapshot["skipped"] = list(getattr(result, "skipped", None) or [])
         needs_user = list(getattr(result, "needs_user", None) or [])
         snapshot["needs_user"] = needs_user
-        if needs_user:
+        screenshot_path = getattr(result, "screenshot_path", None)
+        if unanswered_required or needs_user:
+            if unanswered_required:
+                message = "Some required questions could not be answered from your profile: " + ", ".join(
+                    unanswered_required
+                )
+            else:
+                message = "Some fields still need your input"
             return ApplyStepResult(
                 state=AutomationState.REQUIRES_USER,
-                message="Some fields still need your input",
+                message=message,
                 pause_reason=PauseReason.UNKNOWN_QUESTION,
                 form_snapshot=snapshot,
+                screenshot_path=screenshot_path,
             )
         return ApplyStepResult(
             state=AutomationState.SUCCESS,
             message=f"Filled {len(snapshot['filled'])} fields on the {self.display_name} form",
             form_snapshot=snapshot,
-            screenshot_path=getattr(result, "screenshot_path", None),
+            screenshot_path=screenshot_path,
         )
 
     # -- step 3: submit ----------------------------------------------------

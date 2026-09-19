@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -86,6 +87,7 @@ __all__ = [
     "skip_job",
     "list_sources",
     "get_company_priority",
+    "get_company_priority_map",
     "build_search_query",
     "APPLY_SOURCE_RANK",
 ]
@@ -161,10 +163,40 @@ def get_company_priority(db: Session, user_id: uuid.UUID, company: Company | Non
     return preference.priority if preference else CompanyPriority.P2
 
 
-def _priority_map(db: Session, user_id: uuid.UUID) -> dict[str, CompanyPriority]:
-    """All of the user's company priorities keyed by normalised name (list-page optimisation)."""
+def get_company_priority_map(
+    db: Session, user_id: uuid.UUID, companies: Sequence[Company]
+) -> dict[uuid.UUID, CompanyPriority]:
+    """Bulk :func:`get_company_priority` - one preference query for a whole page of jobs.
+
+    Delegates to ``companies.service.get_priority_map`` so the list page resolves priorities
+    with exactly the same rules as the detail page (company_id, exact normalised name, then
+    whole-word prefix), instead of the exact-name-only lookup it used to do.
+    """
+    companies = [company for company in companies if company is not None]
+    if not companies:
+        return {}
+    try:
+        from app.modules.companies.service import get_priority_map as _impl
+    except Exception as exc:  # pragma: no cover - companies module always present in practice
+        logger.debug("companies.service.get_priority_map unavailable: %s", exc)
+    else:
+        try:
+            return _impl(db, user_id, companies)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("companies.service.get_priority_map failed: %s", exc)
+    return {company.id: get_company_priority(db, user_id, company) for company in companies}
+
+
+def _prioritized_company_ids(db: Session, user_id: uuid.UUID) -> dict[uuid.UUID, CompanyPriority]:
+    """``{company_id: non-default priority}`` used to filter the job list by priority."""
+    try:
+        from app.modules.companies.service import prioritized_company_ids as _impl
+
+        return _impl(db, user_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("companies.service.prioritized_company_ids unavailable: %s", exc)
     rows = db.scalars(select(CompanyPreference).where(CompanyPreference.user_id == user_id)).all()
-    return {row.normalized_name: row.priority for row in rows}
+    return {row.company_id: row.priority for row in rows if row.company_id is not None}
 
 
 def get_job_preference(db: Session, user_id: uuid.UUID) -> JobPreference:
@@ -413,6 +445,7 @@ def _apply_filters(
     status: str | None = None,
     priority: CompanyPriority | None = None,
     is_active: bool | None = True,
+    prioritized_company_ids: dict[uuid.UUID, CompanyPriority] | None = None,
 ) -> Select[Any]:
     if is_active is not None:
         stmt = stmt.where(Job.is_active.is_(is_active))
@@ -452,22 +485,16 @@ def _apply_filters(
         else:
             stmt = stmt.where(Application.status == ApplicationStatus(status.upper()))
     if priority is not None:
-        pref = (
-            select(CompanyPreference.priority)
-            .where(
-                CompanyPreference.user_id == user_id,
-                or_(
-                    CompanyPreference.company_id == Company.id,
-                    CompanyPreference.normalized_name == Company.normalized_name,
-                ),
-            )
-            .limit(1)
-            .scalar_subquery()
-        )
+        # Priority is *derived* (see companies.service.resolve_priority), so the filter works
+        # off the resolved company ids rather than an exact normalised-name join - otherwise
+        # ?priority=P1 would hide jobs whose card already shows P1.
+        prioritized = prioritized_company_ids if prioritized_company_ids is not None else {}
         if priority == CompanyPriority.P2:
-            stmt = stmt.where(or_(pref == CompanyPriority.P2, pref.is_(None)))
+            if prioritized:
+                stmt = stmt.where(Job.company_id.notin_(list(prioritized)))
         else:
-            stmt = stmt.where(pref == priority)
+            matching = [company_id for company_id, value in prioritized.items() if value == priority]
+            stmt = stmt.where(Job.company_id.in_(matching))
     return stmt
 
 
@@ -537,19 +564,29 @@ def list_jobs(
     page = max(1, int(page or 1))
     page_size = max(1, min(MAX_PAGE_SIZE, int(page_size or DEFAULT_PAGE_SIZE)))
 
+    prioritized = _prioritized_company_ids(db, user_id) if filters.get("priority") is not None else None
+
     count_stmt = _apply_filters(
-        _base_statement(user_id, func.count(func.distinct(Job.id))), user_id, **filters
+        _base_statement(user_id, func.count(func.distinct(Job.id))),
+        user_id,
+        prioritized_company_ids=prioritized,
+        **filters,
     )
     total = int(db.scalar(count_stmt) or 0)
 
-    stmt = _apply_filters(_base_statement(user_id, Job, JobMatch, Application), user_id, **filters)
+    stmt = _apply_filters(
+        _base_statement(user_id, Job, JobMatch, Application),
+        user_id,
+        prioritized_company_ids=prioritized,
+        **filters,
+    )
     stmt = _apply_sort(stmt, sort).offset((page - 1) * page_size).limit(page_size)
     stmt = stmt.options(selectinload(Job.sources))
     rows = db.execute(stmt).unique().all()
 
-    priorities = _priority_map(db, user_id)
+    priorities = get_company_priority_map(db, user_id, [job.company for job, _match, _app in rows])
     items = [
-        _to_card(job, match, application, priorities.get(job.company.normalized_name, CompanyPriority.P2))
+        _to_card(job, match, application, priorities.get(job.company_id, CompanyPriority.P2))
         for job, match, application in rows
     ]
     return PageResponse[JobCard](items=items, total=total, page=page, page_size=page_size)

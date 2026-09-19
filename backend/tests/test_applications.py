@@ -457,6 +457,46 @@ def test_terminal_status_needs_a_manual_actor(ready_client: TestClient, db: Sess
     assert ready_client.patch(f"{API}/{application_id}/status", json={"status": "INTERVIEW"}).status_code == 200
 
 
+def test_submission_never_walks_a_status_backwards(ready_client: TestClient, db: Session):
+    """Regression: an ATS confirmation email can land while the submission is still running.
+
+    ``linker.LINKABLE_STATUSES`` deliberately accepts IN_PROGRESS applications, so by the time
+    ``mark_submitted`` runs the application may already be APPLICATION_RECEIVED - recording the
+    submission must not drag it back to APPLIED.
+    """
+    from app.modules.applications import service
+
+    job = make_job(db, title="Race Engineer")
+    application_id = ready_client.post(f"{JOBS_API}/{job.id}/queue").json()["id"]
+    ready_client.patch(f"{API}/{application_id}/status", json={"status": "APPLICATION_RECEIVED"})
+
+    db.expire_all()
+    application = db.get(Application, uuid.UUID(application_id))
+    assert application.status == ApplicationStatus.APPLICATION_RECEIVED
+
+    service.mark_submitted(
+        db,
+        application,
+        external_application_id="DEMO-ABC123",
+        confirmation_message="Thank you for applying",
+    )
+    db.flush()
+
+    assert application.status == ApplicationStatus.APPLICATION_RECEIVED, "the email's status must win"
+    assert application.external_application_id == "DEMO-ABC123"
+    assert application.applied_at is not None
+    assert application.automation_state == AutomationState.SUCCESS
+
+    # ...while the normal path still moves a queued application to APPLIED.
+    other = make_job(db, title="Plain Engineer", external_id="li-plain")
+    other_id = ready_client.post(f"{JOBS_API}/{other.id}/queue").json()["id"]
+    db.expire_all()
+    plain = db.get(Application, uuid.UUID(other_id))
+    service.mark_submitted(db, plain, external_application_id="DEMO-XYZ789")
+    db.flush()
+    assert plain.status == ApplicationStatus.APPLIED
+
+
 def test_skip_and_withdraw(ready_client: TestClient, db: Session):
     job = make_job(db, title="Skipped Engineer")
     application_id = ready_client.post(f"{JOBS_API}/{job.id}/queue").json()["id"]

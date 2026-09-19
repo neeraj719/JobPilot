@@ -507,6 +507,48 @@ def test_list_jobs_priority_filter(api, db, user):
     assert {i["title"] for i in p2["items"]} == {"Data Engineer", "Frontend Engineer"}
 
 
+def test_list_and_detail_agree_on_a_prefix_matched_priority(api, db, user):
+    """Regression: the list used to match preferences on the exact normalised name only.
+
+    ``companies.service.resolve_priority`` also matches a whole-word *prefix*, so
+    "Google" covers "Google (Demo Careers)" - the card and the detail page (and the
+    ?priority= filter) must all agree on P1.
+    """
+    service.ingest_discovered(
+        db,
+        user.id,
+        [
+            make_job(
+                JobSourceType.DEMO_ATS,
+                external_id="demo-google-1",
+                title="Software Engineer II, Full Stack",
+                company="Google (Demo Careers)",
+            )
+        ],
+    )
+    db.add(
+        CompanyPreference(
+            user_id=user.id,
+            company_id=None,
+            company_name="Google",
+            normalized_name="google",
+            priority=CompanyPriority.P1,
+        )
+    )
+    db.commit()
+
+    job = db.scalars(select(Job).join(Company).where(Company.name == "Google (Demo Careers)")).unique().first()
+    assert job is not None and job.company.normalized_name == "google demo careers"
+
+    card = next(i for i in api.get(API, params={"company": "Google"}).json()["items"] if i["id"] == str(job.id))
+    detail = api.get(f"{API}/{job.id}").json()
+    assert card["company_priority"] == detail["company_priority"] == CompanyPriority.P1.value
+
+    p1_ids = {i["id"] for i in api.get(API, params={"priority": "P1"}).json()["items"]}
+    p2_ids = {i["id"] for i in api.get(API, params={"priority": "P2"}).json()["items"]}
+    assert str(job.id) in p1_ids and str(job.id) not in p2_ids
+
+
 def test_job_detail_includes_sources_and_match(api, db, user):
     jobs = _seed_jobs(db, user)
     job_id = jobs["Backend Engineer"].id

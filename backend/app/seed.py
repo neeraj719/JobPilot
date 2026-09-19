@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 
 SEED_RANDOM = 20240917
 HISTORY_DAYS = 21
+#: Timezone the demo account (and therefore the dashboard's "today") lives in.
+DEMO_TIMEZONE = "Asia/Kolkata"
+#: How many of the APPLIED applications are dated earlier *today* so the dashboard's
+#: "Applications Today" tile is not zero on first login.
+TODAY_APPLICATIONS = 3
 DEMO_FULL_NAME = "Aarav Sharma"
 
 #: P1 / P3 / AVOID company priorities from the spec.
@@ -488,6 +493,26 @@ def _analyze(db: Session, user: User, jobs: list[Job]) -> list[JobMatch]:
 # --------------------------------------------------------------------------- history helpers
 
 
+def _today_slots(now: datetime, count: int) -> list[datetime]:
+    """``count`` timestamps a few hours ago **today** in :data:`DEMO_TIMEZONE`.
+
+    Without these every fabricated application is at least a day old and the dashboard
+    greets a brand-new demo account with "Applications Today: 0". Slots are spread over
+    the part of the local day that has already happened, so seeding just after local
+    midnight still produces timestamps inside today rather than in the future.
+    """
+    from app.modules.automation.limits import day_bounds
+
+    if count <= 0:
+        return []
+    day_start, _day_end = day_bounds(DEMO_TIMEZONE, now)
+    span = max(min(now - day_start, timedelta(hours=8)), timedelta(minutes=1))
+    return [
+        (now - span * ((index + 1) / (count + 1))).replace(second=0, microsecond=0)
+        for index in range(count)
+    ]
+
+
 def _weekday_biased_day(rng: random.Random, today: datetime, days_back_max: int) -> datetime:
     """A datetime in the last ``days_back_max`` days, weighted towards weekdays."""
     for _ in range(12):
@@ -572,6 +597,7 @@ def _build_history(
         logger.warning("Only %d jobs available for %d demo applications", len(pool), wanted)
 
     applications: list[Application] = []
+    today_slots = _today_slots(now, TODAY_APPLICATIONS)
     index = 0
     for status, count in HISTORY_MIX:
         for _ in range(count):
@@ -579,7 +605,13 @@ def _build_history(
                 break
             job = pool[index]
             index += 1
-            applications.append(_create_history_application(db, user, resume, job, matches, status, rng, now))
+            # a few of today's submissions so the dashboard's "today" tiles are alive
+            applied_at = today_slots.pop(0) if status == ApplicationStatus.APPLIED and today_slots else None
+            applications.append(
+                _create_history_application(
+                    db, user, resume, job, matches, status, rng, now, applied_at=applied_at
+                )
+            )
     summary.applications = len(applications)
     db.flush()
     return applications
@@ -594,8 +626,10 @@ def _create_history_application(
     status: ApplicationStatus,
     rng: random.Random,
     now: datetime,
+    *,
+    applied_at: datetime | None = None,
 ) -> Application:
-    applied_at = _weekday_biased_day(rng, now, HISTORY_DAYS)
+    applied_at = applied_at or _weekday_biased_day(rng, now, HISTORY_DAYS)
     score = _match_score(matches, job)
     source = _primary_source(job)
     application = Application(
@@ -1333,7 +1367,7 @@ def _configure_automation(db: Session, user: User) -> AutomationConfig:
     config = get_config(db, user.id)
     config.enabled = True
     config.schedule_time = "09:00"
-    config.timezone = "Asia/Kolkata"
+    config.timezone = DEMO_TIMEZONE
     config.daily_application_limit = 20
     config.per_platform_limit = {JobSourceType.LINKEDIN.value: 8, JobSourceType.NAUKRI.value: 8}
     config.min_match_score = 75

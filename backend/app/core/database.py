@@ -28,11 +28,20 @@ def _make_engine(url: str) -> Engine:
         kwargs.update(pool_size=10, max_overflow=20)
     eng = create_engine(url, **kwargs)
     if url.startswith("sqlite"):
+        file_backed = ":memory:" not in url
 
         @event.listens_for(eng, "connect")
-        def _fk_on(dbapi_conn, _):  # noqa: ANN001
+        def _sqlite_pragmas(dbapi_conn, _):  # noqa: ANN001
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
+            if file_backed:
+                # A file-backed SQLite database (the local demo DB) is written concurrently by
+                # the API, the automation threads and the bundled demo ATS. WAL lets readers and
+                # one writer coexist, and the busy timeout absorbs the rest, instead of failing
+                # outright with "database is locked".
+                cur.execute("PRAGMA journal_mode=WAL")
+                cur.execute("PRAGMA busy_timeout=10000")
+                cur.execute("PRAGMA synchronous=NORMAL")
             cur.close()
 
     return eng

@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
@@ -181,6 +181,35 @@ def get_priority_map(db: Session, user_id: uuid.UUID, companies: Sequence[Compan
     """Bulk variant of :func:`get_priority` - one query for any number of companies."""
     preferences = list_user_preferences(db, user_id)
     return {company.id: resolve_priority(preferences, company) for company in companies}
+
+
+def prioritized_company_ids(db: Session, user_id: uuid.UUID) -> dict[uuid.UUID, CompanyPriority]:
+    """``{company_id: priority}`` for every company the preference list resolves to a
+    **non-default** priority (anything missing from the map is :attr:`CompanyPriority.P2`).
+
+    Lets a SQL filter elsewhere (``GET /jobs?priority=``) use exactly the same resolution
+    rules as :func:`resolve_priority` - including the whole-word-prefix match - without
+    duplicating them in the query. Only companies that could possibly match a preference
+    are loaded, so the candidate set stays bounded by the user's own priority list.
+    """
+    preferences = list_user_preferences(db, user_id)
+    if not preferences:
+        return {}
+
+    clauses = []
+    linked_ids = {pref.company_id for pref in preferences if pref.company_id is not None}
+    if linked_ids:
+        clauses.append(Company.id.in_(linked_ids))
+    for name in {pref.normalized_name for pref in preferences if pref.normalized_name}:
+        # normalized names only contain [a-z0-9 ], so no LIKE wildcards need escaping.
+        clauses.append(Company.normalized_name == name)
+        clauses.append(Company.normalized_name.like(f"{name} %"))
+    if not clauses:
+        return {}
+
+    companies = list(db.scalars(select(Company).where(or_(*clauses))).unique())
+    resolved = {company.id: resolve_priority(preferences, company) for company in companies}
+    return {company_id: priority for company_id, priority in resolved.items() if priority != CompanyPriority.P2}
 
 
 # --------------------------------------------------------------------------- preference list

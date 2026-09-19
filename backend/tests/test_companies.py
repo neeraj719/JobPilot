@@ -160,6 +160,27 @@ def test_priority_map_bulk(db: Session, user) -> None:
     assert mapping == {google.id: CompanyPriority.P1, other.id: CompanyPriority.P2}
 
 
+def test_prioritized_company_ids_covers_prefix_matches(db: Session, user) -> None:
+    """The map backing ``GET /jobs?priority=`` must use the same rules as get_priority."""
+    google = service.get_or_create_company(db, "Google")
+    demo = service.get_or_create_company(db, "Google (Demo Careers)")
+    unrelated = service.get_or_create_company(db, "Other Corp")
+    service.upsert_preference(db, user.id, "Google", CompanyPriority.P1)
+    db.commit()
+
+    assert demo.normalized_name == "google demo careers"
+    mapping = service.prioritized_company_ids(db, user.id)
+    assert mapping == {google.id: CompanyPriority.P1, demo.id: CompanyPriority.P1}
+    assert unrelated.id not in mapping
+    assert service.get_priority(db, user.id, demo) == CompanyPriority.P1
+
+
+def test_prioritized_company_ids_without_preferences(db: Session, user) -> None:
+    service.get_or_create_company(db, "Nobody Cares Inc")
+    db.commit()
+    assert service.prioritized_company_ids(db, user.id) == {}
+
+
 # --------------------------------------------------------------------------- blacklist
 
 

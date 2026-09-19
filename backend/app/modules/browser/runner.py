@@ -245,15 +245,35 @@ class ApplicationRunner:
         if step != "fill":  # a successful non-fill step is just progress
             return
 
+        snapshot = self._record_fill(db, application, result, handle)
+
+        if self._auto_submit_allowed(application, config):
+            self._submit(db, application, adapter, ctx, handle)
+            return
+
+        applications_service.await_review(
+            db,
+            application,
+            "Your application is filled in and ready for review",
+            form_snapshot=snapshot,
+        )
+
+    def _record_fill(self, db: Session, application: Application, result: Any, handle: Any) -> dict[str, Any]:
+        """Persist the form snapshot and write the detected/filled event + audit trail.
+
+        Runs whether the attempt goes on to submit or pauses: the reviewer must be able to
+        see what the automation read off the page and what it typed, either way.
+        """
+        from app.modules.applications import service as applications_service
+
         snapshot = dict(result.form_snapshot or {})
-        application.form_snapshot = snapshot
         detected, filled_keys = snapshot_summary(snapshot)
         screenshot = result.screenshot_path
         if handle is not None and not screenshot:
             screenshot = handle.screenshot("after_fill", application.id) or None
         if screenshot:
             snapshot["screenshot_path"] = screenshot
-            application.form_snapshot = snapshot
+        application.form_snapshot = snapshot
 
         applications_service.record_event(
             db,
@@ -282,23 +302,17 @@ class ApplicationRunner:
             meta={"keys": filled_keys},
         )
         db.flush()
-
-        if self._auto_submit_allowed(application, config):
-            self._submit(db, application, adapter, ctx, handle)
-            return
-
-        applications_service.await_review(
-            db,
-            application,
-            "Your application is filled in and ready for review",
-            form_snapshot=snapshot,
-        )
+        return snapshot
 
     def _pause_for_user(self, db: Session, application: Application, result: Any, handle: Any) -> None:
         from app.modules.applications import service as applications_service
 
         snapshot = dict(result.form_snapshot or {})
-        if handle is not None:
+        if snapshot.get("fields"):
+            # The form was read (and partly filled) before we stopped — record that first so the
+            # review screen and the audit trail show what the automation actually did.
+            snapshot = self._record_fill(db, application, result, handle)
+        if handle is not None and not snapshot.get("screenshot_path"):
             shot = handle.screenshot("paused", application.id)
             if shot:
                 snapshot["screenshot_path"] = shot

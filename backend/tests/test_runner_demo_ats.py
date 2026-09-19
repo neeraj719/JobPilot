@@ -243,6 +243,13 @@ def test_demo_ats_end_to_end(db: Session, user: User, demo_job: Job):
     assert {"first_name", "last_name", "email", "resume_file"} <= keys, sorted(keys)
     assert snapshot.get("url", "").endswith(f"/demo-ats/jobs/{DEMO_SLUG}/apply")
 
+    # Regression: the adapter used to bail out *before* typing anything when a required
+    # question had no answer, leaving the reviewer an empty snapshot. Everything the
+    # profile knows must already be on the page when the automation pauses.
+    filled_keys = {str(row.get("key")) for row in snapshot.get("filled") or []}
+    assert {"first_name", "last_name", "email", "phone", "resume_file"} <= filled_keys, sorted(filled_keys)
+    assert snapshot.get("screenshot_path"), "the paused form must come with a screenshot"
+
     # Everything the profile knows is already answered from the profile.
     answers = {a.question_key: a for a in application.answers}
     assert answers["first_name"].answer == "Aarav"

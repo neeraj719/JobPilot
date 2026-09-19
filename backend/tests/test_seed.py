@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import io
+from datetime import timezone
 
 import pytest
 from sqlalchemy import func, select
 
 from app.core.config import settings
+from app.models.base import utcnow
 from app.models.application import Application, ApplicationAnswer, ApplicationEvent
 from app.models.audit import AuditLog
 from app.models.automation import AutomationConfig, AutomationRun
@@ -26,7 +28,7 @@ from app.models.profile import CompanyPreference, JobPreference, UserProfile
 from app.models.resume import Resume, Skill
 from app.models.user import User
 from app.modules.dashboard import service as dashboard
-from app.seed import HISTORY_MIX, QUEUE_SIZE, build_resume_pdf, seed_demo_data
+from app.seed import DEMO_TIMEZONE, HISTORY_MIX, QUEUE_SIZE, TODAY_APPLICATIONS, build_resume_pdf, seed_demo_data
 
 
 @pytest.fixture(scope="module")
@@ -44,6 +46,11 @@ def seeded(db):
 
 def _demo_user(db) -> User:
     return db.scalars(select(User).where(User.email == settings.DEMO_USER_EMAIL)).first()
+
+
+def _utc(value):
+    """SQLite hands datetimes back naive; treat them as UTC."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 # --------------------------------------------------------------------------- the PDF writer
@@ -207,6 +214,24 @@ def test_seed_enables_the_automation_config(db, seeded):
     assert config.next_run_at is not None
 
 
+def test_seed_dates_a_few_applications_earlier_today(db, seeded):
+    from app.modules.automation.limits import day_bounds
+
+    user = _demo_user(db)
+    now = utcnow()
+    day_start, day_end = day_bounds(DEMO_TIMEZONE, now)
+    applied = [
+        _utc(row.applied_at)
+        for row in db.scalars(
+            select(Application).where(Application.user_id == user.id, Application.applied_at.is_not(None))
+        ).unique()
+    ]
+    today = [moment for moment in applied if day_start <= moment < day_end]
+    assert len(today) == TODAY_APPLICATIONS
+    assert all(moment <= now for moment in today), "no application may be dated in the future"
+    assert len(applied) > len(today), "the rest of the history still spans the previous weeks"
+
+
 def test_seed_is_idempotent(db, seeded):
     before = db.scalar(select(func.count(Application.id)))
     again = seed_demo_data(db, force=False)
@@ -242,6 +267,10 @@ def test_dashboard_is_alive_after_seeding(db, seeded):
     assert stats.response_rate > 0
     assert stats.month.applications > 0
     assert stats.attention, "the demo must have something waiting for the user"
+
+    # "Applications Today" must not greet a fresh demo account with a zero.
+    assert stats.today.applications == TODAY_APPLICATIONS
+    assert stats.week.applications >= stats.today.applications
 
     charts = dashboard.build_charts(db, user.id, "30d")
     assert sum(point.count for point in charts.applications_per_day) > 0

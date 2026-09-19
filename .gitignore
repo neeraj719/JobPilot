@@ -14,7 +14,10 @@ htmlcov/
 
 # uploads / runtime data
 backend/uploads/
+backend/smoke_uploads/
 backend/*.db
+backend/*.db-wal
+backend/*.db-shm
 backend/playwright-screenshots/
 
 # node

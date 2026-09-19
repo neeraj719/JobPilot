@@ -490,6 +490,24 @@ def mark_failed(db: Session, application: Application, error: str, *, final: boo
     return application
 
 
+def _is_past_applied(status: ApplicationStatus | None) -> bool:
+    """True when ``status`` is *further along* the funnel than ``APPLIED``.
+
+    Uses the emails module's ``STATUS_ORDER`` (the single definition of "further along"),
+    imported lazily because emails imports this module.
+    """
+    if status is None:
+        return False
+    if status in TERMINAL_STATUSES:
+        return True
+    try:
+        from app.modules.emails.service import status_rank
+
+        return status_rank(status) > status_rank(ApplicationStatus.APPLIED)
+    except Exception:  # pragma: no cover - emails module always present in practice
+        return status in RESPONSE_STATUSES
+
+
 def mark_submitted(
     db: Session,
     application: Application,
@@ -518,14 +536,21 @@ def mark_submitted(
         actor=actor,
         meta={"external_application_id": application.external_application_id, "via": via},
     )
-    transition(
-        db,
-        application,
-        ApplicationStatus.APPLIED,
-        actor=actor,
-        message=f"Submitted to {job_label(application.job)}",
-        meta={"via": via},
-    )
+    if _is_past_applied(application.status):
+        # An ATS confirmation email can land while the submission is still finishing (the
+        # linker deliberately accepts IN_PROGRESS applications) - never walk the status back.
+        logger.info("Application %s is already %s; keeping it", application.id, application.status.value)
+        application.last_update_at = utcnow()
+        db.flush()
+    else:
+        transition(
+            db,
+            application,
+            ApplicationStatus.APPLIED,
+            actor=actor,
+            message=f"Submitted to {job_label(application.job)}",
+            meta={"via": via},
+        )
     notify(
         db,
         application.user_id,
@@ -908,6 +933,10 @@ def approve(db: Session, application: Application, user: User) -> Application:
         actor=Actor.USER,
     )
     db.flush()
+    # Submitting drives a real browser and takes seconds. Commit the approval first so the
+    # write transaction is not held open across it: the ATS answers in the same process
+    # (the bundled demo ATS writes its confirmation email) and a held writer would block it.
+    db.commit()
 
     try:
         result = _submit_through_adapter(db, application)
@@ -918,6 +947,10 @@ def approve(db: Session, application: Application, user: User) -> Application:
         raise AppError(f"Could not submit this application: {exc}", code="submit_failed") from exc
 
     if result.state == AutomationState.SUCCESS:
+        # End the snapshot the browser step read under and pick up anything that happened
+        # meanwhile - typically the ATS confirmation email that already moved us forward.
+        db.commit()
+        db.refresh(application)
         return mark_submitted(
             db,
             application,
