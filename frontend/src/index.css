@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 71% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 4%;
+
+    --primary: 243 75% 59%;
+    --primary-foreground: 210 20% 98%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 39% 11%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 39% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 98%;
+
+    --success: 142 71% 36%;
+    --success-foreground: 210 20% 98%;
+
+    --warning: 38 92% 45%;
+    --warning-foreground: 48 96% 97%;
+
+    --info: 199 89% 44%;
+    --info-foreground: 210 20% 98%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 243 75% 59%;
+
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 220 9% 40%;
+    --sidebar-accent: 243 75% 97%;
+    --sidebar-accent-foreground: 243 75% 45%;
+    --sidebar-border: 220 13% 91%;
+
+    --chart-1: 243 75% 59%;
+    --chart-2: 199 89% 44%;
+    --chart-3: 142 71% 36%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 340 75% 55%;
+
+    /* Marketing panel on the sign-in / sign-up screens. Deliberately identical in both
+       themes so the white copy on it always has the same contrast. */
+    --hero-from: 245 66% 34%;
+    --hero-to: 199 84% 31%;
+
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 224 47% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 224 42% 10%;
+    --card-foreground: 210 20% 96%;
+
+    --popover: 224 42% 10%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: 243 75% 66%;
+    --primary-foreground: 226 57% 12%;
+
+    --secondary: 222 27% 17%;
+    --secondary-foreground: 210 20% 96%;
+
+    --muted: 222 27% 16%;
+    --muted-foreground: 218 11% 65%;
+
+    --accent: 222 27% 18%;
+    --accent-foreground: 210 20% 96%;
+
+    --destructive: 0 63% 55%;
+    --destructive-foreground: 210 20% 98%;
+
+    --success: 142 62% 45%;
+    --success-foreground: 144 80% 6%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 26 83% 8%;
+
+    --info: 199 89% 55%;
+    --info-foreground: 204 80% 8%;
+
+    --border: 222 24% 20%;
+    --input: 222 24% 22%;
+    --ring: 243 75% 66%;
+
+    --sidebar: 224 45% 9%;
+    --sidebar-foreground: 218 11% 70%;
+    --sidebar-accent: 243 45% 20%;
+    --sidebar-accent-foreground: 210 20% 98%;
+    --sidebar-border: 222 24% 18%;
+
+    --chart-1: 243 75% 68%;
+    --chart-2: 199 89% 58%;
+    --chart-3: 142 62% 50%;
+    --chart-4: 38 92% 60%;
+    --chart-5: 340 75% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1,
+      'cv11' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Consistent focus ring everywhere. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Thin, theme-aware scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-[3px] border-solid border-transparent bg-border bg-clip-content;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40 bg-clip-content;
+  }
+
+  /* Remove the number-input spinners: salary / experience fields look cleaner without them. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  /* Subtle elevated surface used by cards, popovers and the sidebar. */
+  .surface {
+    @apply rounded-lg border border-border bg-card text-card-foreground shadow-sm;
+  }
+
+  /* Shimmering placeholder used by <Skeleton />. */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+
+  .shimmer::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-foreground/5 to-transparent;
+    content: '';
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}

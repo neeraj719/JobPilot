@@ -1,0 +1,136 @@
+import { Bell, CheckCheck } from 'lucide-react'
+import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
+
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+  useUnreadCount,
+} from '@/features/notifications/api'
+import { cn, formatRelative, notificationColor } from '@/lib/utils'
+import type { NotificationRead } from '@/types/api'
+
+export function NotificationsBell() {
+  const [open, setOpen] = React.useState(false)
+  const navigate = useNavigate()
+
+  const unread = useUnreadCount()
+  const list = useNotifications({ page: 1, page_size: 10 })
+  const markRead = useMarkNotificationRead()
+  const markAllRead = useMarkAllNotificationsRead()
+
+  const count = unread.data?.count ?? 0
+  const items = list.data?.items ?? []
+
+  function handleOpen(notification: NotificationRead) {
+    if (!notification.is_read) markRead.mutate(notification.id)
+    setOpen(false)
+    if (notification.link) navigate(notification.link)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
+          <Bell />
+          {count > 0 ? (
+            <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground">
+              {count > 99 ? '99+' : count}
+            </span>
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent align="end" className="w-[22rem] p-0">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">Notifications</p>
+            <p className="text-xs text-muted-foreground">
+              {count > 0 ? `${count} unread` : 'You are all caught up'}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={count === 0 || markAllRead.isPending}
+            onClick={() => markAllRead.mutate()}
+          >
+            <CheckCheck />
+            Mark all
+          </Button>
+        </div>
+        <Separator />
+
+        <ScrollArea className="max-h-96">
+          {list.isLoading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 3 }, (_, index) => (
+                <div key={index} className="space-y-2">
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : items.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">No notifications yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {items.map((notification) => (
+                <li key={notification.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleOpen(notification)}
+                    className={cn(
+                      'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent',
+                      !notification.is_read && 'bg-primary/[0.04]',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'mt-1.5 size-2 shrink-0 rounded-full',
+                        notification.is_read ? 'bg-transparent' : 'bg-primary',
+                      )}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 space-y-0.5">
+                      <span className={cn('block truncate text-sm font-medium', notificationColor(notification.type))}>
+                        {notification.title}
+                      </span>
+                      {notification.body ? (
+                        <span className="line-clamp-2 block text-xs text-muted-foreground">{notification.body}</span>
+                      ) : null}
+                      <span className="block text-[11px] text-muted-foreground/80">
+                        {formatRelative(notification.created_at)}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ScrollArea>
+
+        <Separator />
+        <div className="p-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full"
+            onClick={() => {
+              setOpen(false)
+              navigate('/settings')
+            }}
+          >
+            Notification settings
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
