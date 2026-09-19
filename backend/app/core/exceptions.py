@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -79,7 +80,9 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
-        return JSONResponse(status_code=422, content=_error_body("validation_error", "Invalid request", exc.errors()))
+        # pydantic stores the raising exception object in ``ctx`` for custom validators;
+        # jsonable_encoder turns it into a string instead of crashing the handler.
+        return JSONResponse(status_code=422, content=_error_body("validation_error", "Invalid request", jsonable_encoder(exc.errors())))
 
     @app.exception_handler(Exception)
     async def _unhandled(_: Request, exc: Exception) -> JSONResponse:

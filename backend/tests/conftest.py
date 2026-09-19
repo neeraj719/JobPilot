@@ -39,6 +39,16 @@ def _clean_tables():
             conn.execute(table.delete())
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The in-memory rate limiter is process-wide; reset it so a large suite never trips 429."""
+    from app.core.rate_limit import _MemoryBackend, rate_limiter
+
+    rate_limiter._backend = _MemoryBackend()
+    rate_limiter._tried_redis = True  # never try to reach Redis from tests
+    yield
+
+
 @pytest.fixture
 def db() -> Session:
     session = SessionLocal()
