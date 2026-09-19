@@ -12,6 +12,7 @@ shares nothing with the JobPilot schema.
 from __future__ import annotations
 
 import hashlib
+import uuid
 import json
 import logging
 import re
@@ -80,7 +81,9 @@ def _empty_values(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _generate_application_id(slug: str, email: str, timestamp: str) -> str:
-    digest = hashlib.sha256(f"{slug}|{email.lower()}|{timestamp}".encode("utf-8")).digest()
+    # A random nonce keeps ids unique even when two submissions share a timestamp tick.
+    nonce = uuid.uuid4().hex
+    digest = hashlib.sha256(f"{slug}|{email.lower()}|{timestamp}|{nonce}".encode("utf-8")).digest()
     number = int.from_bytes(digest[:8], "big")
     code = "".join(ID_ALPHABET[(number >> (6 * i)) % len(ID_ALPHABET)] for i in range(6))
     return f"DEMO-{code}"
