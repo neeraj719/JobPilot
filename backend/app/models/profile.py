@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, SCHEMA_MASTER, TimestampMixin, UUIDMixin
 from app.models.enums import CompanyPriority
 
 if TYPE_CHECKING:
@@ -19,8 +19,9 @@ class UserProfile(UUIDMixin, TimestampMixin, Base):
     application engine uses to answer form questions (never invented)."""
 
     __tablename__ = "user_profiles"
+    __table_args__ = {"schema": SCHEMA_MASTER}
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), unique=True, nullable=False)
 
     # Personal
     full_name: Mapped[str | None] = mapped_column(String(255))
@@ -67,8 +68,9 @@ class UserProfile(UUIDMixin, TimestampMixin, Base):
 
 class JobPreference(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "job_preferences"
+    __table_args__ = {"schema": SCHEMA_MASTER}
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), unique=True, nullable=False)
 
     desired_titles: Mapped[list[Any]] = mapped_column(JSON, default=list)
     min_salary: Mapped[int | None] = mapped_column(Integer)  # annual
@@ -93,10 +95,10 @@ class CompanyPreference(UUIDMixin, TimestampMixin, Base):
     can prioritise a company we have not yet seen a job from."""
 
     __tablename__ = "company_preferences"
-    __table_args__ = (UniqueConstraint("user_id", "normalized_name", name="uq_company_pref_user_name"),)
+    __table_args__ = (UniqueConstraint("user_id", "normalized_name", name="uq_company_pref_user_name"), {"schema": SCHEMA_MASTER})
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("master.companies.id", ondelete="SET NULL"))
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     priority: Mapped[CompanyPriority] = mapped_column(Enum(CompanyPriority, native_enum=False, length=10), nullable=False)

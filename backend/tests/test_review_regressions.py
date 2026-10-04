@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select, text
+from sqlalchemy import event, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.database import engine
@@ -234,8 +234,13 @@ def test_hot_query_paths_have_composite_indexes() -> None:
         "notifications": {"ix_notifications_user_read_created"},
         "interviews": {"ix_interviews_user_scheduled_at"},
     }
+    # Metadata is keyed by the schema-qualified name now that the tables live in named
+    # schemas ("transaction.applications", not "applications"), so look each one up by
+    # its bare name rather than hardcoding which schema it ended up in.
+    by_name = {table.name: table for table in Base.metadata.tables.values()}
     for table, names in expected.items():
-        present = {index.name for index in Base.metadata.tables[table].indexes}
+        assert table in by_name, f"no table named {table} in the metadata"
+        present = {index.name for index in by_name[table].indexes}
         assert names <= present, f"{table} is missing {names - present}"
 
 
@@ -260,24 +265,35 @@ def _iso_datetimes(payload: object, out: list[str] | None = None) -> list[str]:
     return out
 
 
-def test_sqlite_datetimes_load_back_timezone_aware(auth_client: TestClient, db: Session) -> None:
-    """SQLite drops tzinfo on write. ``app.models.base.UTCDateTime`` re-attaches UTC on
-    read, so an application row written before the fix still loads aware."""
+def test_naive_datetimes_load_back_timezone_aware(auth_client: TestClient, db: Session) -> None:
+    """A naive timestamp must never reach the application layer from either backend.
+
+    PostgreSQL's ``timestamptz`` always hands back an aware value, but SQLite (the
+    no-Docker local run) has no time-zone type and drops tzinfo entirely, which made
+    every client read UTC instants as local time. ``app.models.base.UTCDateTime``
+    re-attaches UTC on read so both backends behave identically.
+    """
+    # The decorator carries the guarantee, so assert it directly — this holds whichever
+    # database the suite is pointed at.
+    from app.models.base import UTCDateTime
+
+    naive = datetime(2026, 3, 1, 8, 30)
+    loaded = UTCDateTime().process_result_value(naive, None)
+    assert loaded.tzinfo is not None, "naive datetime leaked out of the DB"
+    assert loaded.utcoffset() == timedelta(0)
+    assert loaded.replace(tzinfo=None) == naive, "the instant must not be shifted, only labelled"
+
+    # And end to end: a value written without a zone comes back aware.
     user = current_user(auth_client, db)
     job = seed_jobs(db, user.id, 1)[0]
     application = db.scalars(select(Application).where(Application.job_id == job.id)).one()
-
-    # Simulate the legacy on-disk representation: a naive UTC timestamp.
-    db.execute(
-        text("UPDATE applications SET applied_at = :value WHERE id = :id"),
-        {"value": "2026-03-01 08:30:00.000000", "id": str(application.id).replace("-", "")},
-    )
+    db.execute(update(Application).where(Application.id == application.id).values(applied_at=naive))
     db.commit()
     db.expire_all()
 
     reloaded = db.get(Application, application.id)
     assert reloaded.applied_at is not None
-    assert reloaded.applied_at.tzinfo is not None, "naive datetime leaked out of the DB"
+    assert reloaded.applied_at.tzinfo is not None
     assert reloaded.applied_at.utcoffset() == timedelta(0)
     assert reloaded.created_at.tzinfo is not None
 

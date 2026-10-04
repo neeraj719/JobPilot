@@ -2,15 +2,25 @@ name: jobpilot
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
+    # Come back by themselves after a Docker Desktop restart, a crash or a reboot.
+    # The named volume below already survives all of those; this just means you do not
+    # have to remember to run "docker compose up -d" again afterwards.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jobpilot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobpilot}
       POSTGRES_DB: ${POSTGRES_DB:-jobpilot}
     ports:
-      - "5432:5432"
+      # Published on 5433 because a natively installed PostgreSQL commonly already holds
+      # 5432 on a developer machine. Inside the compose network the services still reach
+      # this container as postgres:5432; only the host-side port differs.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18's image stores data in a major-version subdirectory, so the mount
+      # goes at /var/lib/postgresql, not .../data as it did up to 17. Mounting the old
+      # path makes an 18 container refuse to start. See docker-library/postgres#1259.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobpilot} -d ${POSTGRES_DB:-jobpilot}"]
       interval: 5s
@@ -19,6 +29,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:

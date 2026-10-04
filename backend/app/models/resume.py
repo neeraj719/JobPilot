@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import Base, SCHEMA_MASTER, SCHEMA_MEDIA, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ResumeParseStatus
 
 if TYPE_CHECKING:
@@ -16,8 +16,9 @@ if TYPE_CHECKING:
 
 class Resume(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "resumes"
+    __table_args__ = {"schema": SCHEMA_MEDIA}
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g. "Software Engineer - Backend"
     target_role: Mapped[str | None] = mapped_column(String(255))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -47,8 +48,9 @@ class ResumeVersion(UUIDMixin, Base):
     """Immutable history of a resume's file + parsed data."""
 
     __tablename__ = "resume_versions"
+    __table_args__ = {"schema": SCHEMA_MEDIA}
 
-    resume_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), index=True, nullable=False)
+    resume_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("media.resumes.id", ondelete="CASCADE"), index=True, nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     parsed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -62,6 +64,7 @@ class Skill(UUIDMixin, Base):
     """Lightweight skill taxonomy used for normalisation ("ReactJS" -> "React")."""
 
     __tablename__ = "skills"
+    __table_args__ = {"schema": SCHEMA_MASTER}
 
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)

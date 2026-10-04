@@ -8,11 +8,27 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
+from typing import Annotated, Literal
 
 from cryptography.fernet import Fernet
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+#: ``app/core/config.py`` -> ``app/core`` -> ``app`` -> ``backend``
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+
+#: Where to look for a ``.env``, lowest precedence first (pydantic-settings lets a later
+#: file override an earlier one).
+#:
+#: The repo root is the canonical location: ``docker-compose.yml`` lives there and Compose
+#: reads ``./.env`` for both variable substitution and ``env_file``. Resolving it from this
+#: module's own path — rather than relying on the working directory — means
+#: ``cd backend && uvicorn ...`` picks up the same settings as ``docker compose up``.
+#: Without this the backend silently fell back to the built-in development defaults,
+#: including the secrets published in this repository, with nothing to warn you.
+ENV_FILES = (REPO_ROOT / ".env", BACKEND_DIR / ".env", ".env")
 
 #: Development-only secrets. They are published in this repository (and in
 #: ``.env.example``), so a production deployment must override both.
@@ -36,7 +52,7 @@ ALLOWED_GMAIL_SCOPES = frozenset(
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore")
 
     # --- App ---
     APP_NAME: str = "JobPilot AI"
@@ -45,7 +61,11 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
     FRONTEND_URL: str = "http://localhost:5173"
     PUBLIC_API_URL: str = "http://localhost:8000"
-    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"])
+    #: ``NoDecode`` stops pydantic-settings from running ``json.loads`` on the raw
+    #: value first, which is what it does for any list field. Without it the plain
+    #: comma-separated form every ``.env`` and ``docker compose`` env var uses raises
+    #: SettingsError before ``_split_csv`` below ever sees it.
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"])
 
     # --- Security ---
     # NOTE: these two defaults are *development only* and are published in this
@@ -88,7 +108,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/gmail/callback"
-    GMAIL_SCOPES: list[str] = Field(
+    GMAIL_SCOPES: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "https://www.googleapis.com/auth/gmail.readonly",
             "openid",

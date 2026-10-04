@@ -14,14 +14,24 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
+from app.models.base import SQLITE_SCHEMA_TRANSLATE_MAP
 
 
-def _make_engine(url: str) -> Engine:
-    kwargs: dict = {"echo": settings.DB_ECHO, "pool_pre_ping": True, "future": True}
+def make_engine(url: str, *, echo: bool | None = None) -> Engine:
+    """Build an engine for ``url``, teaching SQLite to ignore the named schemas.
+
+    The models name five PostgreSQL schemas (``master``, ``unified``, ``transaction``,
+    ``media``, ``audit``). SQLite has no such concept, so a SQLite engine carries a
+    ``schema_translate_map`` that rewrites every one of them to "no schema" at
+    statement-compile time. All 25 table names are unique, so they coexist happily in
+    SQLite's single namespace and no model or query has to branch on the backend.
+    PostgreSQL gets no map at all — the schema names in the SQL are the real ones.
+    """
+    kwargs: dict = {"echo": settings.DB_ECHO if echo is None else echo, "pool_pre_ping": True, "future": True}
     if url.startswith("sqlite"):
         from sqlalchemy.pool import StaticPool
 
-        kwargs.update(connect_args={"check_same_thread": False})
+        kwargs.update(connect_args={"check_same_thread": False}, execution_options={"schema_translate_map": SQLITE_SCHEMA_TRANSLATE_MAP})
         if ":memory:" in url:
             kwargs.update(poolclass=StaticPool)
     else:
@@ -47,7 +57,10 @@ def _make_engine(url: str) -> Engine:
     return eng
 
 
-engine: Engine = _make_engine(settings.DATABASE_URL)
+#: Backwards-compatible private alias (the factory used to be private).
+_make_engine = make_engine
+
+engine: Engine = make_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, class_=Session)
 
 

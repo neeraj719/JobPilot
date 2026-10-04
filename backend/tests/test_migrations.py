@@ -1,10 +1,16 @@
 """The Alembic migration chain must reproduce ``Base.metadata`` exactly.
 
-``alembic upgrade head`` is executed programmatically against a throw-away SQLite file and
-the resulting schema is diffed against the models with ``alembic.autogenerate.compare_metadata``.
+``alembic upgrade head`` is executed programmatically against a throw-away **PostgreSQL**
+database and the resulting schema is diffed against the models with
+``alembic.autogenerate.compare_metadata``.
+
+PostgreSQL is the only backend with real schemas, so it is the only place the five-schema
+layout can be checked at all: a SQLite run would see the translated (schema-less) shape
+and could never catch a table left behind in ``public``.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,46 +19,51 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
 
-from app.models import Base
+from app.models import SCHEMAS, Base
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-#: The 25 tables of the JobPilot AI schema.
+#: ``tests/conftest.py`` has already pinned this to the PostgreSQL test database.
+TEST_DATABASE_URL = os.environ["DATABASE_URL"]
+
+#: A database of its own, so upgrade/downgrade can never disturb the suite's own tables.
+MIGRATION_DATABASE = "jobpilot_migration_check"
+
+#: The 25 tables of the JobPilot AI schema, as ``schema.table``.
 EXPECTED_TABLES = {
-    "users",
-    "refresh_tokens",
-    "user_profiles",
-    "job_preferences",
-    "company_preferences",
-    "companies",
-    "jobs",
-    "job_sources",
-    "job_matches",
-    "resumes",
-    "resume_versions",
-    "skills",
-    "applications",
-    "application_answers",
-    "application_events",
-    "application_documents",
-    "interviews",
-    "email_integrations",
-    "email_messages",
-    "automation_configs",
-    "automation_runs",
-    "connected_accounts",
-    "browser_sessions",
-    "audit_logs",
-    "notifications",
+    "master.users",
+    "master.refresh_tokens",
+    "master.user_profiles",
+    "master.job_preferences",
+    "master.company_preferences",
+    "master.companies",
+    "master.skills",
+    "master.email_integrations",
+    "master.automation_configs",
+    "master.connected_accounts",
+    "master.browser_sessions",
+    "unified.jobs",
+    "unified.job_sources",
+    "unified.job_matches",
+    "media.resumes",
+    "media.resume_versions",
+    "media.application_documents",
+    "transaction.applications",
+    "transaction.application_answers",
+    "transaction.application_events",
+    "transaction.interviews",
+    "transaction.email_messages",
+    "transaction.automation_runs",
+    "transaction.notifications",
+    "audit.audit_logs",
 }
 
-#: Differences we deliberately ignore.
-#:
-#: SQLite has no real ``DateTime``/``Uuid``/``JSON`` types (everything is an affinity), so a
-#: reflected column can never match the model type object exactly. ``compare_type=False``
-#: already suppresses that, and nothing else is ignored — the assertion below is exact.
+#: Differences we deliberately ignore. None: ``compare_type=False`` already absorbs the
+#: type-object identity noise, so the assertion below is exact.
 ALLOWED_DIFF_KINDS: frozenset[str] = frozenset()
 
 
@@ -60,7 +71,7 @@ def _config(url: str) -> Config:
     """An Alembic config that does not touch logging (no ini file → no ``fileConfig``)."""
     config = Config()
     config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    config.set_main_option("sqlalchemy.url", url)
+    config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     return config
 
 
@@ -72,35 +83,60 @@ def _diff_kind(diff: Any) -> str:
     return str(diff)
 
 
+def _recreate_database(url: str) -> None:
+    """Drop and re-create the throw-away migration database."""
+    admin = create_engine(make_url(url).set(database="postgres"), isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{MIGRATION_DATABASE}" WITH (FORCE)'))
+            conn.execute(text(f'CREATE DATABASE "{MIGRATION_DATABASE}"'))
+    finally:
+        admin.dispose()
+
+
 @pytest.fixture
-def migrated(tmp_path, monkeypatch):
-    """Run ``alembic upgrade head`` on a fresh SQLite file and yield its URL."""
-    db_path = tmp_path / "migration-check.db"
-    url = f"sqlite+pysqlite:///{db_path.as_posix()}"
+def migrated(monkeypatch):
+    """Run ``alembic upgrade head`` on a brand-new PostgreSQL database and yield its URL."""
+    url = make_url(TEST_DATABASE_URL).set(database=MIGRATION_DATABASE).render_as_string(hide_password=False)
+    _recreate_database(url)
     # alembic/env.py prefers DATABASE_URL over the ini value.
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(_config(url), "head")
     yield url
 
 
+def _named_schema_tables(engine) -> set[str]:
+    inspector = inspect(engine)
+    return {f"{schema}.{name}" for schema in SCHEMAS for name in inspector.get_table_names(schema=schema)}
+
+
 def test_upgrade_creates_every_table(migrated: str) -> None:
-    engine = create_engine(migrated)
+    engine = create_engine(migrated, poolclass=NullPool)
     try:
-        tables = set(inspect(engine).get_table_names())
+        tables = _named_schema_tables(engine)
+        public = set(inspect(engine).get_table_names(schema="public"))
     finally:
         engine.dispose()
-    assert EXPECTED_TABLES <= tables
-    assert "alembic_version" in tables
+    assert tables == EXPECTED_TABLES
     assert len(EXPECTED_TABLES) == 25
+    # Only Alembic's own bookkeeping is left behind in ``public``.
+    assert public == {"alembic_version"}
 
 
 def test_migration_matches_models(migrated: str) -> None:
-    engine = create_engine(migrated)
+    engine = create_engine(migrated, poolclass=NullPool)
     try:
         with engine.connect() as connection:
             context = MigrationContext.configure(
                 connection,
-                opts={"compare_type": False, "compare_server_default": False, "target_metadata": Base.metadata},
+                opts={
+                    "compare_type": False,
+                    "compare_server_default": False,
+                    "target_metadata": Base.metadata,
+                    "include_schemas": True,
+                    # ``None`` is the default schema (``public``); see alembic/env.py.
+                    "version_table_schema": None,
+                },
             )
             diffs = list(compare_metadata(context, Base.metadata))
     finally:
@@ -110,14 +146,17 @@ def test_migration_matches_models(migrated: str) -> None:
 
 
 def test_indexes_and_unique_constraints(migrated: str) -> None:
-    engine = create_engine(migrated)
+    """``ALTER TABLE ... SET SCHEMA`` has to carry indexes and constraints along with it."""
+    engine = create_engine(migrated, poolclass=NullPool)
     try:
         inspector = inspect(engine)
-        application_indexes = {index["name"] for index in inspector.get_indexes("applications")}
+        application_indexes = {index["name"] for index in inspector.get_indexes("applications", schema="transaction")}
         job_source_uniques = {
-            constraint["name"] for constraint in inspector.get_unique_constraints("job_sources")
+            constraint["name"] for constraint in inspector.get_unique_constraints("job_sources", schema="unified")
         }
-        match_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("job_matches")}
+        match_uniques = {
+            constraint["name"] for constraint in inspector.get_unique_constraints("job_matches", schema="unified")
+        }
     finally:
         engine.dispose()
     assert {"ix_applications_user_id", "ix_applications_status", "ix_applications_applied_at"} <= application_indexes
@@ -127,9 +166,13 @@ def test_indexes_and_unique_constraints(migrated: str) -> None:
 
 def test_downgrade_removes_every_table(migrated: str) -> None:
     command.downgrade(_config(migrated), "base")
-    engine = create_engine(migrated)
+    engine = create_engine(migrated, poolclass=NullPool)
     try:
-        tables = set(inspect(engine).get_table_names())
+        inspector = inspect(engine)
+        schemas = set(inspector.get_schema_names())
+        public = set(inspector.get_table_names(schema="public"))
     finally:
         engine.dispose()
-    assert not (EXPECTED_TABLES & tables)
+    # The five schemas go with their tables, and ``public`` is empty again.
+    assert not (set(SCHEMAS) & schemas)
+    assert public <= {"alembic_version"}

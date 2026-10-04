@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import Base, SCHEMA_MEDIA, SCHEMA_TRANSACTION, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import (
     Actor,
     AnswerSource,
@@ -38,12 +38,13 @@ class Application(UUIDMixin, TimestampMixin, Base):
         # automation budget counts (owner, applied_at) inside a day window.
         Index("ix_applications_user_status", "user_id", "status"),
         Index("ix_applications_user_applied_at", "user_id", "applied_at"),
+        {"schema": SCHEMA_TRANSACTION},
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True, nullable=False)
-    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id", ondelete="SET NULL"))
-    automation_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("automation_runs.id", ondelete="SET NULL"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unified.jobs.id", ondelete="CASCADE"), index=True, nullable=False)
+    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media.resumes.id", ondelete="SET NULL"))
+    automation_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("transaction.automation_runs.id", ondelete="SET NULL"))
 
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(ApplicationStatus, native_enum=False, length=30), default=ApplicationStatus.DISCOVERED, nullable=False, index=True
@@ -97,8 +98,9 @@ class ApplicationAnswer(UUIDMixin, TimestampMixin, Base):
     refused to guess (missing facts) and the user must fill it in."""
 
     __tablename__ = "application_answers"
+    __table_args__ = {"schema": SCHEMA_TRANSACTION}
 
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False)
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("transaction.applications.id", ondelete="CASCADE"), index=True, nullable=False)
     order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     question_key: Mapped[str] = mapped_column(String(120), nullable=False)  # canonical key e.g. "phone", "expected_salary", "custom:why_us"
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -122,9 +124,10 @@ class ApplicationEvent(UUIDMixin, Base):
     #: Timelines are always read per application, oldest first.
     __table_args__ = (
         Index("ix_application_events_application_created", "application_id", "created_at"),
+        {"schema": SCHEMA_TRANSACTION},
     )
 
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False)
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("transaction.applications.id", ondelete="CASCADE"), index=True, nullable=False)
     event_type: Mapped[ApplicationEventType] = mapped_column(Enum(ApplicationEventType, native_enum=False, length=30), nullable=False)
     actor: Mapped[Actor] = mapped_column(Enum(Actor, native_enum=False, length=20), default=Actor.SYSTEM, nullable=False)
     from_status: Mapped[ApplicationStatus | None] = mapped_column(Enum(ApplicationStatus, native_enum=False, length=30))
@@ -138,9 +141,10 @@ class ApplicationEvent(UUIDMixin, Base):
 
 class ApplicationDocument(UUIDMixin, Base):
     __tablename__ = "application_documents"
+    __table_args__ = {"schema": SCHEMA_MEDIA}
 
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True, nullable=False)
-    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id", ondelete="SET NULL"))
+    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("transaction.applications.id", ondelete="CASCADE"), index=True, nullable=False)
+    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media.resumes.id", ondelete="SET NULL"))
     document_type: Mapped[DocumentType] = mapped_column(Enum(DocumentType, native_enum=False, length=20), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str | None] = mapped_column(String(1024))

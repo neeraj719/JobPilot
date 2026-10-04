@@ -705,3 +705,33 @@ def test_production_accepts_a_freshly_generated_key() -> None:
 
     assert production.COOKIE_SECURE is True
     assert production.docs_enabled is False
+
+
+# --------------------------------------------- configuration actually reaches the app
+
+def test_comma_separated_list_settings_parse_from_the_environment() -> None:
+    """``CORS_ORIGINS=a,b`` is the form every .env and docker compose env var uses.
+
+    pydantic-settings runs ``json.loads`` on a list field before any validator sees it,
+    so without ``NoDecode`` the plain comma-separated form raised SettingsError at
+    startup — which would have taken down ``docker compose up`` as well as a local run.
+    """
+    plain = Settings(_env_file=None, CORS_ORIGINS="http://a.test,http://b.test")
+    assert plain.CORS_ORIGINS == ["http://a.test", "http://b.test"]
+
+    # The JSON-array form has to keep working for anyone already using it.
+    as_json = Settings(_env_file=None, CORS_ORIGINS='["http://c.test"]')
+    assert as_json.CORS_ORIGINS == ["http://c.test"]
+
+
+def test_settings_read_the_repo_root_env_file_from_any_working_directory() -> None:
+    """The backend must find the same ``.env`` Compose uses, wherever it is launched from.
+
+    ``env_file=".env"`` resolves against the *current* directory, so running from
+    ``backend/`` silently fell back to the built-in defaults — including the development
+    secrets published in this repository — with nothing to warn the operator.
+    """
+    from app.core.config import ENV_FILES, REPO_ROOT
+
+    assert ENV_FILES[0] == REPO_ROOT / ".env"
+    assert (REPO_ROOT / "docker-compose.yml").exists(), "REPO_ROOT should be the directory holding docker-compose.yml"

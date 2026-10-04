@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import Base, SCHEMA_MASTER, SCHEMA_TRANSACTION, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import AutomationRunStatus, AutomationRunTrigger, BrowserSessionStatus, IntegrationStatus, JobSourceType
 
 if TYPE_CHECKING:
@@ -18,8 +18,9 @@ class AutomationConfig(UUIDMixin, TimestampMixin, Base):
     """Per-user daily automation settings with hard safety rails (spec §14)."""
 
     __tablename__ = "automation_configs"
+    __table_args__ = {"schema": SCHEMA_MASTER}
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), unique=True, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     schedule_time: Mapped[str] = mapped_column(String(5), default="09:00", nullable=False)  # HH:MM 24h
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
@@ -46,8 +47,9 @@ class AutomationRun(UUIDMixin, Base):
     """One execution of the daily pipeline (scheduled or manual)."""
 
     __tablename__ = "automation_runs"
+    __table_args__ = {"schema": SCHEMA_TRANSACTION}
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     trigger: Mapped[AutomationRunTrigger] = mapped_column(Enum(AutomationRunTrigger, native_enum=False, length=20), nullable=False)
     status: Mapped[AutomationRunStatus] = mapped_column(
         Enum(AutomationRunStatus, native_enum=False, length=20), default=AutomationRunStatus.RUNNING, nullable=False, index=True
@@ -69,9 +71,9 @@ class ConnectedAccount(UUIDMixin, TimestampMixin, Base):
     are stored Fernet-encrypted and never returned by the API."""
 
     __tablename__ = "connected_accounts"
-    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_connected_account_user_source"),)
+    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_connected_account_user_source"), {"schema": SCHEMA_MASTER})
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[JobSourceType] = mapped_column(Enum(JobSourceType, native_enum=False, length=30), nullable=False)
     account_identifier: Mapped[str | None] = mapped_column(String(255))  # email/username shown in UI
     encrypted_credentials: Mapped[str | None] = mapped_column(Text)
@@ -92,9 +94,9 @@ class BrowserSession(UUIDMixin, TimestampMixin, Base):
     (cookies/localStorage) is encrypted at rest."""
 
     __tablename__ = "browser_sessions"
-    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_browser_session_user_source"),)
+    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_browser_session_user_source"), {"schema": SCHEMA_MASTER})
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[JobSourceType] = mapped_column(Enum(JobSourceType, native_enum=False, length=30), nullable=False)
     encrypted_storage_state: Mapped[str | None] = mapped_column(Text)
     status: Mapped[BrowserSessionStatus] = mapped_column(

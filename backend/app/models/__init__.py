@@ -2,7 +2,16 @@
 from app.models.application import Application, ApplicationAnswer, ApplicationDocument, ApplicationEvent
 from app.models.audit import AuditLog
 from app.models.automation import AutomationConfig, AutomationRun, BrowserSession, ConnectedAccount
-from app.models.base import Base
+from app.models.base import (
+    SCHEMA_AUDIT,
+    SCHEMA_MASTER,
+    SCHEMA_MEDIA,
+    SCHEMA_TRANSACTION,
+    SCHEMA_UNIFIED,
+    SCHEMAS,
+    SQLITE_SCHEMA_TRANSLATE_MAP,
+    Base,
+)
 from app.models.company import Company
 from app.models.email import EmailIntegration, EmailMessage
 from app.models.enums import *  # noqa: F401,F403
@@ -15,6 +24,13 @@ from app.models.user import RefreshToken, User
 
 __all__ = [
     "Base",
+    "SCHEMA_MASTER",
+    "SCHEMA_UNIFIED",
+    "SCHEMA_TRANSACTION",
+    "SCHEMA_MEDIA",
+    "SCHEMA_AUDIT",
+    "SCHEMAS",
+    "SQLITE_SCHEMA_TRANSLATE_MAP",
     "User",
     "RefreshToken",
     "UserProfile",

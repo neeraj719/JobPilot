@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, SCHEMA_MASTER, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from app.models.job import Job
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 class Company(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "companies"
+    __table_args__ = {"schema": SCHEMA_MASTER}
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)

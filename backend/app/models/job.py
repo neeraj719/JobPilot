@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import Base, SCHEMA_UNIFIED, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ApplicationType, CompanyPriority, EmploymentType, JobSourceType, WorkMode
 
 if TYPE_CHECKING:
@@ -22,8 +22,9 @@ class Job(UUIDMixin, TimestampMixin, Base):
     Job with several JobSource rows (see spec §17 duplicate detection)."""
 
     __tablename__ = "jobs"
+    __table_args__ = {"schema": SCHEMA_UNIFIED}
 
-    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.companies.id", ondelete="CASCADE"), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_title: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -58,9 +59,9 @@ class JobSource(UUIDMixin, Base):
     """Where a Job was seen (LinkedIn, Naukri, company site...)."""
 
     __tablename__ = "job_sources"
-    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_job_source_external"),)
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_job_source_external"), {"schema": SCHEMA_UNIFIED})
 
-    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True, nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unified.jobs.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[JobSourceType] = mapped_column(Enum(JobSourceType, native_enum=False, length=30), nullable=False, index=True)
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -84,11 +85,12 @@ class JobMatch(UUIDMixin, TimestampMixin, Base):
         UniqueConstraint("job_id", "user_id", name="uq_job_match_job_user"),
         # Match summary / job-list sorting read (owner, score) ranges.
         Index("ix_job_matches_user_score", "user_id", "match_score"),
+        {"schema": SCHEMA_UNIFIED},
     )
 
-    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True, nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id", ondelete="SET NULL"))
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unified.jobs.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
+    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media.resumes.id", ondelete="SET NULL"))
 
     match_score: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # 0-100
     skill_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
