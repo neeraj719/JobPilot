@@ -264,7 +264,10 @@ export interface UserRead {
   id: UUID
   email: string
   full_name: string
+  /** The most privileged role held, derived from the user_roles junction. */
   role: UserRole
+  /** Every role held, additive to `role` — a user can hold more than one. */
+  roles: string[]
   is_active: boolean
   is_verified: boolean
   created_at: ISODateString

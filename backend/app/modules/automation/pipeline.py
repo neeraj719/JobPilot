@@ -44,6 +44,7 @@ from app.models.enums import (
     JobSourceType,
     NotificationType,
     PauseReason,
+    SourceApplyMode,
 )
 from app.models.job import Job, JobMatch
 from app.models.user import User
@@ -81,6 +82,7 @@ BASE_STATS: tuple[str, ...] = (
     "high_match",
     "filtered_out",
     "queued",
+    "discover_only",
     "prepared",
     "ready_for_review",
     "requires_user",
@@ -323,6 +325,26 @@ def _has_answers(db: Session, application: Application) -> bool:
     return db.scalars(select(ApplicationAnswer.id).where(ApplicationAnswer.application_id == application.id)).first() is not None
 
 
+def _source_mode(ctx: _Ctx, source: JobSourceType | None) -> SourceApplyMode:
+    """The user's per-source apply mode, resolved by the one rule in the service."""
+    return automation_service.resolve_source_mode(ctx.config, source)
+
+
+def _discover_only(ctx: _Ctx, candidate: _Candidate) -> bool:
+    return _source_mode(ctx, candidate.source) is SourceApplyMode.DISCOVER_ONLY
+
+
+def _candidate_payload(candidate: _Candidate) -> dict[str, Any]:
+    return {
+        "job_id": str(candidate.job.id),
+        "title": candidate.job.title,
+        "company": candidate.company_name,
+        "priority": candidate.priority.value,
+        "match_score": candidate.score,
+        "source": candidate.source.value if candidate.source else None,
+    }
+
+
 def _auto_submit_allowed(ctx: _Ctx, source: JobSourceType | None) -> bool:
     if not ctx.config.auto_submit_enabled or source is None:
         return False
@@ -470,6 +492,11 @@ def _step_enforce_limits(ctx: _Ctx, candidates: list[_Candidate]) -> tuple[list[
     budget = limits.compute_budget(ctx.db, ctx.user_id, ctx.config, run_id=ctx.run.id)
     selected: list[_Candidate] = []
     for candidate in candidates:
+        if _discover_only(ctx, candidate):
+            # Never becomes an application, so it must not eat the day's budget — the
+            # queue step reports it under ``discover_only`` instead.
+            selected.append(candidate)
+            continue
         if budget.can_take(candidate.source):
             budget.take(candidate.source)
             selected.append(candidate)
@@ -488,7 +515,7 @@ def _queue_application(ctx: _Ctx, candidate: _Candidate, auto_submit: bool) -> A
         logger.debug("applications.service.queue_job unavailable (%s); creating the row directly", exc)
         return _queue_application_fallback(ctx, candidate, auto_submit)
     try:
-        return queue_job(
+        application = queue_job(
             ctx.db,
             ctx.user_id,
             candidate.job.id,
@@ -496,6 +523,12 @@ def _queue_application(ctx: _Ctx, candidate: _Candidate, auto_submit: bool) -> A
             priority=candidate.priority,
             auto_submit=auto_submit,
         )
+        # ``queue_job`` re-queues an existing DISCOVERED/SKIPPED row without touching its
+        # flags; the auto-submit decision belongs to *this* run, so pin it either way.
+        if application is not None and bool(application.auto_submit) != auto_submit:
+            application.auto_submit = auto_submit
+            ctx.db.flush()
+        return application
     except TypeError:  # signature drift — retry with the minimal contract
         application = queue_job(ctx.db, ctx.user_id, candidate.job.id)
         application.automation_run_id = ctx.run.id
@@ -613,9 +646,13 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
     try:
         with _step(ctx, STEP_SEARCH) as record:
             adapters, query = _step_search(ctx)
+            # The run log must show the mode every source actually ran in.
+            modes = {a.source.value: _source_mode(ctx, a.source).value for a in adapters}
+            run.config_snapshot = {**(run.config_snapshot or {}), "source_modes": modes}
             record["message"] = f"{len(adapters)} sources enabled"
             record["data"] = {
                 "sources": [a.source.value for a in adapters],
+                "source_modes": modes,
                 "titles": list(getattr(query, "titles", []) or []),
                 "locations": list(getattr(query, "locations", []) or []),
                 "posted_within_hours": getattr(query, "posted_within_hours", None),
@@ -706,50 +743,43 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
             record["message"] = f"{len(ctx.selected)} within today's budget of {budget.daily_limit}"
             record["data"] = {"selected": len(ctx.selected), "budget": budget.as_dict()}
 
+        # DISCOVER_ONLY sources: real jobs with real scores that simply never become
+        # applications. They are reported on the queue step, in dry runs too.
+        to_queue = [c for c in ctx.selected if not _discover_only(ctx, c)]
+        discover_only = [c for c in ctx.selected if _discover_only(ctx, c)]
+        discover_only_payload = [_candidate_payload(c) for c in discover_only]
+        ctx.set_stat("discover_only", len(discover_only))
+
         if ctx.dry_run:
             with _step(ctx, STEP_QUEUE) as record:
                 record["status"] = STATUS_SKIPPED
-                record["message"] = f"Dry run - {len(ctx.selected)} applications would be queued"
+                record["message"] = f"Dry run - {len(to_queue)} applications would be queued"
+                if discover_only:
+                    record["message"] += f"; {len(discover_only)} discover-only"
                 record["data"] = {
-                    "would_queue": [
-                        {
-                            "job_id": str(c.job.id),
-                            "title": c.job.title,
-                            "company": c.company_name,
-                            "priority": c.priority.value,
-                            "match_score": c.score,
-                            "source": c.source.value if c.source else None,
-                        }
-                        for c in ctx.selected
-                    ]
+                    "would_queue": [_candidate_payload(c) for c in to_queue],
+                    "discover_only": discover_only_payload,
                 }
-            ctx.set_stat("would_queue", len(ctx.selected))
+            ctx.set_stat("would_queue", len(to_queue))
             return _finish(ctx)
         _check_cancelled(ctx)
 
         with _step(ctx, STEP_QUEUE) as record:
             queued_payload = []
-            for candidate in ctx.selected:
+            for candidate in to_queue:
                 auto_submit = _auto_submit_allowed(ctx, candidate.source)
                 application = _queue_application(ctx, candidate, auto_submit)
                 if application is None:
                     continue
                 ctx.queued.append(application)
                 queued_payload.append(
-                    {
-                        "application_id": str(application.id),
-                        "job_id": str(candidate.job.id),
-                        "company": candidate.company_name,
-                        "title": candidate.job.title,
-                        "priority": candidate.priority.value,
-                        "match_score": candidate.score,
-                        "source": candidate.source.value if candidate.source else None,
-                        "auto_submit": auto_submit,
-                    }
+                    {"application_id": str(application.id), **_candidate_payload(candidate), "auto_submit": auto_submit}
                 )
             ctx.set_stat("queued", len(ctx.queued))
             record["message"] = f"{len(ctx.queued)} applications queued"
-            record["data"] = {"applications": queued_payload}
+            if discover_only:
+                record["message"] += f"; {len(discover_only)} discover-only jobs left for you to apply to by hand"
+            record["data"] = {"applications": queued_payload, "discover_only": discover_only_payload}
         _check_cancelled(ctx)
 
         browser_ready = _browser_available()
@@ -762,13 +792,12 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
             unavailable = False
             delay = float(ctx.config.delay_between_actions_seconds or 0)
             for index, application in enumerate(ctx.queued):
-                source = application.source
-                adapter = _adapter_for(source)
+                adapter = _adapter_for(application.source)
                 uses_browser = bool(getattr(adapter, "uses_browser", False))
-                if uses_browser and source == JobSourceType.DEMO_ATS and not browser_ready:
-                    deferred.append(str(application.id))
-                    continue
-                if uses_browser and source != JobSourceType.DEMO_ATS:
+                # The only reason to hold a browser-backed application back is that there
+                # is no browser. Which source it is does not matter: the per-source apply
+                # mode already decided, at the queue step, whether it may be applied to.
+                if uses_browser and not browser_ready:
                     deferred.append(str(application.id))
                     continue
                 if uses_browser:
@@ -792,7 +821,7 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
             else:
                 record["message"] = f"{prepared} applications prepared"
             if deferred:
-                record["message"] += f"; {len(deferred)} left QUEUED for manual start"
+                record["message"] += f"; {len(deferred)} left QUEUED until a browser is available"
             record["data"] = {
                 "prepared": prepared,
                 "failed": failed,
@@ -806,7 +835,7 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
             if not browser_apps:
                 record["status"] = STATUS_SKIPPED
                 record["message"] = (
-                    "Chromium is not available; browser-backed applications await manual start"
+                    "Chromium is not available; browser-backed applications stay QUEUED until it is"
                     if deferred and not browser_ready
                     else "No browser-backed applications in this run"
                 )

@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_MASTER, SCHEMA_MEDIA, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MASTER, SCHEMA_MEDIA, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ResumeParseStatus
 
 if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Resume(UUIDMixin, TimestampMixin, Base):
+class Resume(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     __tablename__ = "resumes"
     __table_args__ = {"schema": SCHEMA_MEDIA}
 
@@ -44,7 +44,7 @@ class Resume(UUIDMixin, TimestampMixin, Base):
     versions: Mapped[list[ResumeVersion]] = relationship(back_populates="resume", cascade="all, delete-orphan", order_by="ResumeVersion.version_number")
 
 
-class ResumeVersion(UUIDMixin, Base):
+class ResumeVersion(UUIDMixin, LifecycleMixin, Base):
     """Immutable history of a resume's file + parsed data."""
 
     __tablename__ = "resume_versions"
@@ -60,7 +60,7 @@ class ResumeVersion(UUIDMixin, Base):
     resume: Mapped[Resume] = relationship(back_populates="versions")
 
 
-class Skill(UUIDMixin, Base):
+class Skill(UUIDMixin, LifecycleMixin, Base):
     """Lightweight skill taxonomy used for normalisation ("ReactJS" -> "React")."""
 
     __tablename__ = "skills"

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import audit
 from app.core.config import settings
+from app.core.database import restore, soft_delete
 from app.core.exceptions import ConflictError, UnauthorizedError, ValidationFailed
 from app.core.security import (
     create_access_token,
@@ -34,7 +35,7 @@ from app.models.automation import AutomationConfig
 from app.models.base import utcnow
 from app.models.enums import Actor, AuditLevel, UserRole
 from app.models.profile import JobPreference, UserProfile
-from app.models.user import RefreshToken, User
+from app.models.user import DEFAULT_ROLES, RefreshToken, Role, User, UserRoleAssignment
 from app.modules.auth.schemas import PASSWORD_POLICY, check_password_policy
 
 logger = logging.getLogger(__name__)
@@ -107,12 +108,14 @@ def create_user(db: Session, email: str, password: str, full_name: str, *, role:
         email=email,
         hashed_password=hash_password(password),
         full_name=full_name,
-        role=role,
         is_active=True,
         is_verified=False,
     )
     db.add(user)
     db.flush()
+
+    # The role is a row in ``master.user_roles``, not a column on ``users``.
+    assign_role(db, user, role)
 
     db.add(UserProfile(user_id=user.id, full_name=full_name or None, email=email))
     db.add(
@@ -137,6 +140,82 @@ def create_user(db: Session, email: str, password: str, full_name: str, *, role:
     audit(db, action="auth.register", message=f"Account created for {email}", user_id=user.id, actor=Actor.USER)
     logger.info("Registered user %s", email)
     return user
+
+
+# --------------------------------------------------------------------------- roles
+
+
+def ensure_default_roles(db: Session) -> list[Role]:
+    """Create any missing row of :data:`app.models.user.DEFAULT_ROLES` (idempotent).
+
+    Production never needs this — the migration inserts the rows. It exists for the
+    paths that build the schema from ``Base.metadata`` instead of from the migration
+    chain (the test fixtures), so that "the roles table is reference data" holds there too.
+    """
+    existing = {role.name for role in db.scalars(select(Role).execution_options(include_deleted=True))}
+    created: list[Role] = []
+    for name, description in DEFAULT_ROLES:
+        if name in existing:
+            continue
+        role = Role(name=name, description=description)
+        db.add(role)
+        created.append(role)
+    if created:
+        db.flush()
+    return created
+
+
+def get_role(db: Session, name: str | UserRole) -> Role | None:
+    """Look up a role by name. The rows are created by the migration, not by the seed,
+    so a freshly migrated database already knows ``USER`` and ``ADMIN``."""
+    wanted = name.value if isinstance(name, UserRole) else str(name)
+    return db.scalars(select(Role).where(Role.name == wanted)).first()
+
+
+def _require_role(db: Session, name: str | UserRole) -> Role:
+    role = get_role(db, name)
+    if role is None:
+        raise ValidationFailed(f"Unknown role {name}", code="unknown_role")
+    return role
+
+
+def assign_role(db: Session, user: User, role_name: str | UserRole) -> UserRoleAssignment:
+    """Link ``user`` to a role through ``user_roles`` (idempotent).
+
+    A previously revoked link is *restored* rather than duplicated: the partial unique
+    index only covers live rows, so a second INSERT would succeed and leave two mappings
+    where the user sees one role.
+    """
+    role = _require_role(db, role_name)
+    existing = db.scalars(
+        select(UserRoleAssignment)
+        .where(UserRoleAssignment.user_id == user.id, UserRoleAssignment.role_id == role.id)
+        .order_by(UserRoleAssignment.created_at.desc())
+        .execution_options(include_deleted=True)
+    ).first()
+    if existing is not None:
+        restore(existing)
+        mapping = existing
+    else:
+        mapping = UserRoleAssignment(user_id=user.id, role_id=role.id)
+        db.add(mapping)
+    db.flush()
+    db.expire(user, ["roles"])
+    return mapping
+
+
+def revoke_role(db: Session, user: User, role_name: str | UserRole) -> bool:
+    """Soft-delete the user's link to ``role_name``. Returns False if they did not hold it."""
+    role = _require_role(db, role_name)
+    mapping = db.scalars(
+        select(UserRoleAssignment).where(UserRoleAssignment.user_id == user.id, UserRoleAssignment.role_id == role.id)
+    ).first()
+    if mapping is None:
+        return False
+    soft_delete(mapping)
+    db.flush()
+    db.expire(user, ["roles"])
+    return True
 
 
 #: Bcrypt hash of an unguessable string, used to keep the "unknown email" path as slow

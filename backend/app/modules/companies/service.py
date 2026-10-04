@@ -15,6 +15,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
+from app.core.database import soft_delete
 from app.core.exceptions import NotFoundError, ValidationFailed
 from app.models.application import Application, ApplicationEvent
 from app.models.base import utcnow
@@ -267,7 +268,7 @@ def replace_preferences(db: Session, user_id: uuid.UUID, items: Sequence[Company
 
     for pref in list_user_preferences(db, user_id):
         if pref.normalized_name not in keep:
-            db.delete(pref)
+            soft_delete(pref)
     db.flush()
     logger.info("Replaced company preferences for user %s (%d entries)", user_id, len(keep))
     return list_user_preferences(db, user_id)
@@ -279,7 +280,7 @@ def delete_preference(db: Session, user_id: uuid.UUID, preference_id: uuid.UUID)
     ).first()
     if pref is None:
         raise NotFoundError("Company preference not found")
-    db.delete(pref)
+    soft_delete(pref)
     db.flush()
 
 

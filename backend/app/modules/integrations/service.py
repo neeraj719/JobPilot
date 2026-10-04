@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import audit
 from app.core.config import settings
+from app.core.database import soft_delete
 from app.core.exceptions import AppError, NotFoundError, ValidationFailed
 from app.core.security import encrypt_str
 from app.models.automation import ConnectedAccount
@@ -265,7 +266,7 @@ def connect_account(db: Session, user_id: uuid.UUID, payload: ConnectedAccountCr
 def remove_account(db: Session, user_id: uuid.UUID, account_id: uuid.UUID) -> None:
     account = get_account(db, user_id, account_id)
     source = account.source
-    db.delete(account)
+    soft_delete(account)
     db.flush()
     audit(
         db,

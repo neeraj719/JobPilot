@@ -1,7 +1,7 @@
 """Shared pytest fixtures.
 
 The suite runs against a **real PostgreSQL** database (``jobpilot_test``), not SQLite:
-the 25 tables live in five named schemas (``master``, ``unified``, ``transaction``,
+the 27 tables live in five named schemas (``master``, ``unified``, ``transaction``,
 ``media``, ``audit``) and only PostgreSQL has schemas, so testing anywhere else would
 test a translated layout rather than the one that ships.
 
@@ -50,7 +50,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.core.database import SessionLocal, engine  # noqa: E402
-from app.models import SCHEMAS, Base  # noqa: E402
+from app.models import DEFAULT_ROLES, SCHEMAS, Base  # noqa: E402
 
 _SAFE_URL = make_url(TEST_DATABASE_URL).render_as_string(hide_password=True)
 UNREACHABLE = (
@@ -67,6 +67,24 @@ UNREACHABLE = (
 
 #: Every table, schema-qualified and quoted — ``transaction`` is a reserved word.
 _ALL_TABLES = ", ".join(f'"{table.schema}"."{table.name}"' for table in Base.metadata.sorted_tables)
+
+
+def _seed_roles(conn) -> None:
+    """Re-create the ``master.roles`` reference rows.
+
+    In production the Alembic migration inserts them, so they simply exist. The suite
+    builds its schema from ``Base.metadata`` and wipes every table between tests, so the
+    two rows have to be put back each time or the first ``create_user`` after a truncate
+    would have no ``USER`` role to map to.
+    """
+    for name, description in DEFAULT_ROLES:
+        conn.execute(
+            text(
+                'INSERT INTO "master"."roles" (id, name, description, is_active, created_at, updated_at) '
+                "VALUES (gen_random_uuid(), :name, :description, true, now(), now())"
+            ),
+            {"name": name, "description": description},
+        )
 
 
 def _ensure_database() -> None:
@@ -93,6 +111,8 @@ def _create_schema():
         for schema in SCHEMAS:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        _seed_roles(conn)
     yield
     Base.metadata.drop_all(bind=engine)
     with engine.begin() as conn:
@@ -104,12 +124,14 @@ def _create_schema():
 def _clean_tables():
     """Truncate every table between tests to keep them independent.
 
-    One ``TRUNCATE`` over all 25 tables is a single statement and ignores foreign-key
-    ordering (``CASCADE``), which is both faster and less fragile than 25 DELETEs.
+    One ``TRUNCATE`` over all 27 tables is a single statement and ignores foreign-key
+    ordering (``CASCADE``), which is both faster and less fragile than 27 DELETEs.
+    ``master.roles`` is reference data, so it is put straight back afterwards.
     """
     yield
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE TABLE {_ALL_TABLES} RESTART IDENTITY CASCADE"))
+        _seed_roles(conn)
 
 
 @pytest.fixture(autouse=True)

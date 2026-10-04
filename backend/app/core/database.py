@@ -14,6 +14,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
+
+# Importing the module is what installs the global soft-delete filter: it registers a
+# ``do_orm_execute`` listener on ``Session`` itself, so every session in the process —
+# ``SessionLocal``, a test's own ``Session(bind=...)``, a script's — is covered without
+# anyone having to remember to opt in. Re-exported below so callers have one import.
+from app.core.soft_delete import INCLUDE_DELETED, is_deleted, restore, soft_delete  # noqa: F401
 from app.models.base import SQLITE_SCHEMA_TRANSLATE_MAP
 
 
@@ -89,3 +95,16 @@ def session_scope() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
+
+
+__all__ = [
+    "INCLUDE_DELETED",
+    "SessionLocal",
+    "engine",
+    "get_db",
+    "is_deleted",
+    "make_engine",
+    "restore",
+    "session_scope",
+    "soft_delete",
+]

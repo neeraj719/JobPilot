@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationFailed
 from app.models.automation import AutomationConfig, AutomationRun
 from app.models.base import utcnow
-from app.models.enums import Actor, AutomationRunStatus, AutomationRunTrigger, JobSourceType
+from app.models.enums import Actor, AutomationRunStatus, AutomationRunTrigger, JobSourceType, SourceApplyMode
 from app.modules.automation import limits, locks
 from app.modules.automation.schemas import (
     AutomationConfigRead,
@@ -53,6 +53,8 @@ __all__ = [
     "get_status",
     "is_cancel_requested",
     "list_runs",
+    "resolve_source_mode",
+    "resolved_source_modes",
     "running_run",
     "start_manual_run",
     "to_config_read",
@@ -82,7 +84,10 @@ def get_config(db: Session, user_id: uuid.UUID) -> AutomationConfig:
 
 
 def to_config_read(config: AutomationConfig) -> AutomationConfigRead:
-    return AutomationConfigRead.model_validate(config)
+    """``AutomationConfigRead`` with ``source_modes`` resolved for every registered source."""
+    read = AutomationConfigRead.model_validate(config)
+    read.source_modes = {s.value: m for s, m in resolved_source_modes(config).items()}
+    return read
 
 
 def auto_apply_sources() -> set[JobSourceType]:
@@ -90,6 +95,91 @@ def auto_apply_sources() -> set[JobSourceType]:
     from app.modules.adapters.registry import list_adapters
 
     return {info.source for info in list_adapters() if info.supports_auto_apply}
+
+
+def _adapter_supports_auto_apply(source: JobSourceType) -> bool:
+    try:
+        from app.modules.adapters.registry import get_adapter
+
+        return bool(getattr(get_adapter(source), "supports_auto_apply", False))
+    except Exception as exc:  # unknown / unregistered source
+        logger.debug("No adapter for %s while resolving its apply mode: %s", source, exc)
+        return False
+
+
+def resolve_source_mode(config: AutomationConfig | None, source: JobSourceType | str | None) -> SourceApplyMode:
+    """The apply mode the pipeline must use for ``source`` — **the** rule, used everywhere.
+
+    1. An explicit entry in ``config.source_modes`` wins.
+    2. Otherwise ``AUTO_APPLY`` when the adapter supports automated applications, else
+       ``DISCOVER_ONLY``.
+    3. An adapter without ``supports_auto_apply`` can never resolve to ``AUTO_APPLY``,
+       whatever the stored value says — the stored value is downgraded, not trusted.
+    """
+    if source is None:
+        return SourceApplyMode.DISCOVER_ONLY
+    try:
+        resolved = source if isinstance(source, JobSourceType) else JobSourceType(str(source).upper())
+    except ValueError:
+        logger.debug("Unknown job source %r resolves to DISCOVER_ONLY", source)
+        return SourceApplyMode.DISCOVER_ONLY
+
+    supported = _adapter_supports_auto_apply(resolved)
+    stored = (getattr(config, "source_modes", None) or {}).get(resolved.value) if config is not None else None
+    if stored is not None:
+        try:
+            mode = SourceApplyMode(str(stored).upper())
+        except ValueError:
+            logger.debug("Ignoring invalid stored apply mode %r for %s", stored, resolved.value)
+            mode = None
+        if mode is SourceApplyMode.AUTO_APPLY and not supported:
+            logger.debug("%s is stored as AUTO_APPLY but its adapter cannot apply; using DISCOVER_ONLY", resolved.value)
+            return SourceApplyMode.DISCOVER_ONLY
+        if mode is not None:
+            return mode
+    return SourceApplyMode.AUTO_APPLY if supported else SourceApplyMode.DISCOVER_ONLY
+
+
+def resolved_source_modes(
+    config: AutomationConfig | None, sources: list[JobSourceType] | None = None
+) -> dict[JobSourceType, SourceApplyMode]:
+    """``resolve_source_mode`` over ``sources`` (default: every registered adapter), in registry order."""
+    if sources is None:
+        from app.modules.adapters.registry import ADAPTERS
+
+        sources = list(ADAPTERS)
+    return {source: resolve_source_mode(config, source) for source in sources}
+
+
+def _validate_source_modes(raw: dict[str, Any]) -> dict[str, str]:
+    """Normalise a ``source_modes`` patch; 422 on unknown sources, modes or unsupported AUTO_APPLY."""
+    out: dict[str, str] = {}
+    for key, value in dict(raw).items():
+        try:
+            source = JobSourceType(str(key).upper())
+        except ValueError as exc:
+            raise ValidationFailed(
+                f"Unknown job source '{key}' in source_modes",
+                code="unknown_source",
+                details={"field": "source_modes", "value": key},
+            ) from exc
+        try:
+            mode = SourceApplyMode(str(value).upper())
+        except ValueError as exc:
+            raise ValidationFailed(
+                f"Unknown apply mode '{value}' for {source.value}; use AUTO_APPLY or DISCOVER_ONLY",
+                code="invalid_source_mode",
+                details={"field": "source_modes", "source": source.value, "value": value},
+            ) from exc
+        if mode is SourceApplyMode.AUTO_APPLY and not _adapter_supports_auto_apply(source):
+            raise ValidationFailed(
+                f"{source.value} cannot be set to AUTO_APPLY: its adapter does not support automated "
+                "applications, so it can only be used to discover jobs",
+                code="auto_apply_unsupported",
+                details={"field": "source_modes", "source": source.value},
+            )
+        out[source.value] = mode.value
+    return out
 
 
 def _coerce_sources(values: list[str] | None, field: str) -> list[JobSourceType]:
@@ -172,6 +262,9 @@ def validate_config_update(payload: AutomationConfigUpdate) -> dict[str, Any]:
                 details={"invalid": invalid, "allowed": sorted(s.value for s in allowed)},
             )
         values["auto_submit_sources"] = [s.value for s in requested]
+
+    if "source_modes" in data and data["source_modes"] is not None:
+        values["source_modes"] = _validate_source_modes(data["source_modes"])
 
     for key in (
         "enabled",
@@ -280,8 +373,28 @@ def config_snapshot(config: AutomationConfig) -> dict[str, Any]:
         "retry_limit": int(config.retry_limit or 0),
         "auto_submit_enabled": bool(config.auto_submit_enabled),
         "auto_submit_sources": [str(s) for s in (config.auto_submit_sources or [])],
+        # Resolved per enabled source so the run log shows the mode each one ran in. The
+        # pipeline's search step overwrites this with the adapters it actually resolved.
+        "source_modes": {s.value: m.value for s, m in resolved_source_modes(config, _snapshot_sources(config)).items()},
         "auto_generate_cover_letters": bool(config.auto_generate_cover_letters),
     }
+
+
+def _snapshot_sources(config: AutomationConfig) -> list[JobSourceType]:
+    """The sources a run would search: the explicit list, else everything that can discover."""
+    requested: list[JobSourceType] = []
+    for value in config.enabled_sources or []:
+        try:
+            source = JobSourceType(str(value).upper())
+        except ValueError:
+            continue
+        if source not in requested:
+            requested.append(source)
+    if requested:
+        return requested
+    from app.modules.adapters.registry import DISCOVERY_SOURCES
+
+    return list(DISCOVERY_SOURCES)
 
 
 def ensure_not_running(db: Session, user_id: uuid.UUID) -> None:

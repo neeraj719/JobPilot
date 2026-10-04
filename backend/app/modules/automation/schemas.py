@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import AutomationRunStatus, AutomationRunTrigger, JobSourceType
+from app.models.enums import AutomationRunStatus, AutomationRunTrigger, JobSourceType, SourceApplyMode
 
 __all__ = [
     "AutomationConfigRead",
@@ -44,6 +44,9 @@ class AutomationConfigRead(BaseModel):
     retry_limit: int = 3
     auto_submit_enabled: bool = False
     auto_submit_sources: list[JobSourceType] = Field(default_factory=list)
+    #: *Resolved* mode for every registered source (not just the stored overrides), so a
+    #: client can render the complete table. Built by ``automation.service.to_config_read``.
+    source_modes: dict[str, SourceApplyMode] = Field(default_factory=dict)
     auto_generate_cover_letters: bool = True
     notify_on_input_required: bool = True
     last_run_at: datetime | None = None
@@ -70,6 +73,8 @@ class AutomationConfigUpdate(BaseModel):
     retry_limit: int | None = Field(default=None, ge=0, le=10)
     auto_submit_enabled: bool | None = None
     auto_submit_sources: list[str] | None = None
+    #: ``{source: "AUTO_APPLY" | "DISCOVER_ONLY"}``; keys and values are validated in the service.
+    source_modes: dict[str, str] | None = None
     auto_generate_cover_letters: bool | None = None
     notify_on_input_required: bool | None = None
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_MASTER, SCHEMA_TRANSACTION, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MASTER, SCHEMA_TRANSACTION, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import EmailClassification, EmailProvider, IntegrationStatus
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class EmailIntegration(UUIDMixin, TimestampMixin, Base):
+class EmailIntegration(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """Gmail connection via OAuth. Only the *encrypted* OAuth token bundle is stored,
     never a password. Scopes are least-privilege (gmail.readonly)."""
 
@@ -40,7 +40,7 @@ class EmailIntegration(UUIDMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="email_integration")
 
 
-class EmailMessage(UUIDMixin, Base):
+class EmailMessage(UUIDMixin, LifecycleMixin, Base):
     __tablename__ = "email_messages"
     __table_args__ = (
         UniqueConstraint("user_id", "provider_message_id", name="uq_email_user_provider_msg"),

@@ -33,9 +33,11 @@ TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 #: A database of its own, so upgrade/downgrade can never disturb the suite's own tables.
 MIGRATION_DATABASE = "jobpilot_migration_check"
 
-#: The 25 tables of the JobPilot AI schema, as ``schema.table``.
+#: The 27 tables of the JobPilot AI schema, as ``schema.table``.
 EXPECTED_TABLES = {
     "master.users",
+    "master.roles",
+    "master.user_roles",
     "master.refresh_tokens",
     "master.user_profiles",
     "master.job_preferences",
@@ -118,7 +120,7 @@ def test_upgrade_creates_every_table(migrated: str) -> None:
     finally:
         engine.dispose()
     assert tables == EXPECTED_TABLES
-    assert len(EXPECTED_TABLES) == 25
+    assert len(EXPECTED_TABLES) == 27
     # Only Alembic's own bookkeeping is left behind in ``public``.
     assert public == {"alembic_version"}
 

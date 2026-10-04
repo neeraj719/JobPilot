@@ -128,8 +128,14 @@ def test_delete_own_session(auth_client: TestClient, db: Session) -> None:
     session_id = row.id
 
     assert auth_client.delete(f"{PREFIX}/sessions/{session_id}").status_code == 204
-    db.expire_all()
+    # Deletes are soft. Drop the identity map first: the global filter rewrites queries,
+    # it cannot make an instance this session is already holding disappear.
+    db.expunge_all()
     assert db.get(BrowserSession, session_id) is None
+    tombstoned = db.get(BrowserSession, session_id, execution_options={"include_deleted": True})
+    assert tombstoned is not None
+    assert tombstoned.deleted_at is not None
+    assert tombstoned.is_active is False
 
 
 # --------------------------------------------------------------------------- screenshots

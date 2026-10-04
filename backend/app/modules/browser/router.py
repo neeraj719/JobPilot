@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import audit
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, soft_delete
 from app.core.deps import get_current_user
 from app.core.exceptions import NotFoundError, ValidationFailed
 from app.models.application import Application
@@ -68,7 +68,9 @@ def delete_session(
     if row is None:
         raise NotFoundError("Browser session not found")
     source = row.source
-    db.delete(row)
+    # Soft delete: the row is tombstoned, so the partial unique index on
+    # (user_id, source) frees the key and the next login can store a fresh context.
+    soft_delete(row)
     audit(
         db,
         action="browser.session_deleted",

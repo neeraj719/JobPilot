@@ -31,6 +31,11 @@ Layering rule (spec §21): **router → service → (AI | browser | adapters) �
 all business logic lives in `service.py` files; cross-module calls go through the functions listed
 in `docs/CONTRACTS.md`.
 
+Database rule: all 27 tables carry a uuid `id`, `is_active` and `deleted_at`; deletes are soft and
+hidden by one global ORM filter in `app/core/soft_delete.py` (escape hatch:
+`execution_options(include_deleted=True)`), and roles live in `master.roles` + `master.user_roles`
+rather than in a column — see `docs/DATABASE.md` § Conventions.
+
 ## 2. Backend module map
 
 | Module (`backend/app/modules/…`) | Responsibility |

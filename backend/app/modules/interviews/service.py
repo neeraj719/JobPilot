@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
+from app.core.database import soft_delete
 from app.core.exceptions import NotFoundError
 from app.models.application import Application
 from app.models.base import utcnow
@@ -157,7 +158,7 @@ def update_interview(db: Session, user_id: uuid.UUID, interview_id: uuid.UUID, p
 def delete_interview(db: Session, user_id: uuid.UUID, interview_id: uuid.UUID) -> None:
     interview = get_interview(db, user_id, interview_id)
     application_id = interview.application_id
-    db.delete(interview)
+    soft_delete(interview)
     db.flush()
     audit(
         db,

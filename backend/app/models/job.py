@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_UNIFIED, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_UNIFIED, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import ApplicationType, CompanyPriority, EmploymentType, JobSourceType, WorkMode
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Job(UUIDMixin, TimestampMixin, Base):
+class Job(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """A normalised job posting. The same posting seen on several platforms is ONE
     Job with several JobSource rows (see spec §17 duplicate detection)."""
 
@@ -46,7 +46,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
         Enum(ApplicationType, native_enum=False, length=20), default=ApplicationType.UNKNOWN, nullable=False
     )
     dedupe_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)  # company+title+location fingerprint
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    #: ``is_active`` comes from :class:`LifecycleMixin`: False once the posting closes.
     raw: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     company: Mapped[Company] = relationship(back_populates="jobs", lazy="joined")
@@ -55,7 +55,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
     applications: Mapped[list[Application]] = relationship(back_populates="job")
 
 
-class JobSource(UUIDMixin, Base):
+class JobSource(UUIDMixin, LifecycleMixin, Base):
     """Where a Job was seen (LinkedIn, Naukri, company site...)."""
 
     __tablename__ = "job_sources"
@@ -77,7 +77,7 @@ class JobSource(UUIDMixin, Base):
     job: Mapped[Job] = relationship(back_populates="sources")
 
 
-class JobMatch(UUIDMixin, TimestampMixin, Base):
+class JobMatch(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """AI/heuristic match of a Job against a user's profile, resume and preferences."""
 
     __tablename__ = "job_matches"

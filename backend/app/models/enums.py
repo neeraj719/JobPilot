@@ -256,6 +256,19 @@ class AutomationRunStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class SourceApplyMode(StrEnum):
+    """What the daily pipeline may do with the jobs one source discovers (spec §14).
+
+    ``AUTO_APPLY``: prepare answers, open the browser, fill the form and — only when
+    ``auto_submit_enabled`` *and* the source is in ``auto_submit_sources`` — submit.
+    ``DISCOVER_ONLY``: discover and score the jobs but never queue an application; the
+    job stays on the Jobs page with a manual apply action.
+    """
+
+    AUTO_APPLY = "AUTO_APPLY"
+    DISCOVER_ONLY = "DISCOVER_ONLY"
+
+
 class NotificationType(StrEnum):
     JOB_FOUND = "JOB_FOUND"
     INPUT_REQUIRED = "INPUT_REQUIRED"

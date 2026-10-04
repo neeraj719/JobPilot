@@ -60,7 +60,7 @@ from app.models.job import Job, JobMatch
 from app.models.notification import Notification
 from app.models.profile import CompanyPreference, JobPreference, UserProfile
 from app.models.resume import Resume, Skill
-from app.models.user import User
+from app.models.user import User, UserRoleAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -255,21 +255,39 @@ class SeedSummary:
 
 
 def _purge_user(db: Session, user: User) -> None:
-    """Remove every row belonging to ``user`` (jobs/companies are global and stay)."""
+    """Really remove every row belonging to ``user`` (jobs/companies are global and stay).
+
+    ``--force`` is a *rebuild* tool, so this is the one place that still hard-deletes.
+    Soft-deleting here would leave the previous demo run's tombstones behind and the
+    rebuild would stack a second generation of rows on top of them.
+
+    Every read therefore carries ``include_deleted=True``: rows the demo user
+    soft-deleted during the run being replaced are invisible to the global ORM filter,
+    and skipping them would leave orphan tombstones behind forever.
+    """
     user_id = user.id
-    for resume in db.scalars(select(Resume).where(Resume.user_id == user_id)):
+    for resume in db.scalars(
+        select(Resume).where(Resume.user_id == user_id).execution_options(include_deleted=True)
+    ):
         try:
             Path(resume.file_path).unlink(missing_ok=True)
         except OSError as exc:  # pragma: no cover - a stale file must not stop a rebuild
             logger.warning("Could not delete %s: %s", resume.file_path, exc)
-    applications = list(db.scalars(select(Application).where(Application.user_id == user_id)).unique())
+    applications = list(
+        db.scalars(
+            select(Application).where(Application.user_id == user_id).execution_options(include_deleted=True)
+        ).unique()
+    )
     for application in applications:
         db.delete(application)
     db.flush()
     for model in (EmailMessage, Interview, JobMatch, AutomationRun, AuditLog, BrowserSession, ConnectedAccount,
-                  Notification, CompanyPreference, EmailIntegration):
+                  Notification, CompanyPreference, EmailIntegration, UserRoleAssignment):
         db.execute(delete(model).where(model.user_id == user_id))
     db.flush()
+    # The role grants were just deleted out from under the ``User.roles`` collection;
+    # without this the ORM would try to delete the same junction rows a second time.
+    db.expire(user, ["roles"])
     db.delete(user)
     db.flush()
     logger.info("Removed the previous demo user %s and %d applications", user.email, len(applications))
@@ -1390,12 +1408,16 @@ def _configure_automation(db: Session, user: User) -> AutomationConfig:
 
 def seed_demo_data(db: Session, *, force: bool = False) -> SeedSummary:
     """Create (or recreate with ``force``) the whole demo dataset. Idempotent."""
-    from app.modules.auth.service import create_user, get_user_by_email
+    from app.modules.auth.service import create_user
 
     summary = SeedSummary(email=settings.DEMO_USER_EMAIL)
     rng = random.Random(SEED_RANDOM)
 
-    existing = get_user_by_email(db, settings.DEMO_USER_EMAIL)
+    # Tombstones included: a soft-deleted demo account still owns the email address as
+    # far as a rebuild is concerned, and --force has to find it to clear it out.
+    existing = db.scalars(
+        select(User).where(User.email == settings.DEMO_USER_EMAIL.strip().lower()).execution_options(include_deleted=True)
+    ).first()
     if existing is not None and not force:
         summary.user_id = existing.id
         summary.messages.append("Demo user already exists - nothing to do (pass --force to rebuild).")

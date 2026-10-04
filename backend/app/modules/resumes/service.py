@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
+from app.core.database import soft_delete
 from app.core.exceptions import NotFoundError, ValidationFailed
 from app.models.base import utcnow
 from app.models.enums import Actor, ResumeParseStatus
@@ -277,15 +278,20 @@ def reparse(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> Resume:
 
 
 def delete_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> None:
-    """Delete the row and its file; promote the newest remaining resume if needed."""
+    """Tombstone the row; promote the newest remaining resume if needed.
+
+    The uploaded file is deliberately **left on disk**. The row is soft-deleted, so the
+    delete is reversible, and throwing the bytes away would make it reversible in name
+    only. ``storage`` is pruned separately, not from a user-facing endpoint.
+    """
     resume = get_resume(db, user_id, resume_id)
     was_default = resume.is_default
-    file_path = resume.file_path
     name = resume.name
 
-    db.delete(resume)
+    # Soft delete: the row is tombstoned but the uploaded file stays on disk, so a
+    # resume deleted by mistake is still recoverable by clearing ``deleted_at``.
+    soft_delete(resume)
     db.flush()
-    storage.delete_file(file_path)
 
     promoted: Resume | None = None
     if was_default:

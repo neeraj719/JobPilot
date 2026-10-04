@@ -28,7 +28,7 @@ JWT bearer access tokens with a rotating refresh token in an HttpOnly cookie.
   "access_token": "eyJhbGciOi...",
   "token_type": "bearer",
   "expires_in": 1800,
-  "user": { "id": "…", "email": "demo@jobpilot.ai", "full_name": "Aarav Sharma", "role": "USER" }
+  "user": { "id": "…", "email": "demo@jobpilot.ai", "full_name": "Aarav Sharma", "role": "USER", "roles": ["USER"] }
 }
 ```
 

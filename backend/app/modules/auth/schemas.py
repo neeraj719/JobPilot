@@ -13,7 +13,7 @@ import re
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.enums import UserRole
 
@@ -59,11 +59,23 @@ class UserRead(BaseModel):
     id: uuid.UUID
     email: EmailStr
     full_name: str
+    #: The single most privileged role held, derived from ``master.user_roles``.
+    #: Kept as a scalar because every client and guard reads one value.
     role: UserRole
+    #: Every role held, additive to ``role``: a user can hold more than one.
+    roles: list[str] = Field(default_factory=list)
     is_active: bool
     is_verified: bool
     created_at: datetime
     last_login_at: datetime | None = None
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _role_names(cls, value: object) -> list[str]:
+        """``User.roles`` is a list of ``Role`` rows; the contract exposes their names."""
+        if value is None:
+            return []
+        return sorted(getattr(item, "name", item) for item in value)
 
 
 class TokenResponse(BaseModel):

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_MEDIA, SCHEMA_TRANSACTION, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MEDIA, SCHEMA_TRANSACTION, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
 from app.models.enums import (
     Actor,
     AnswerSource,
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Application(UUIDMixin, TimestampMixin, Base):
+class Application(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     __tablename__ = "applications"
     __table_args__ = (
         UniqueConstraint("user_id", "job_id", name="uq_application_user_job"),
@@ -93,7 +93,7 @@ class Application(UUIDMixin, TimestampMixin, Base):
     interviews: Mapped[list[Interview]] = relationship(back_populates="application", cascade="all, delete-orphan")
 
 
-class ApplicationAnswer(UUIDMixin, TimestampMixin, Base):
+class ApplicationAnswer(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """One answer to one form question. ``status=NEEDS_USER_INPUT`` means the engine
     refused to guess (missing facts) and the user must fill it in."""
 
@@ -119,7 +119,7 @@ class ApplicationAnswer(UUIDMixin, TimestampMixin, Base):
     application: Mapped[Application] = relationship(back_populates="answers")
 
 
-class ApplicationEvent(UUIDMixin, Base):
+class ApplicationEvent(UUIDMixin, LifecycleMixin, Base):
     __tablename__ = "application_events"
     #: Timelines are always read per application, oldest first.
     __table_args__ = (
@@ -139,7 +139,7 @@ class ApplicationEvent(UUIDMixin, Base):
     application: Mapped[Application] = relationship(back_populates="events")
 
 
-class ApplicationDocument(UUIDMixin, Base):
+class ApplicationDocument(UUIDMixin, LifecycleMixin, Base):
     __tablename__ = "application_documents"
     __table_args__ = {"schema": SCHEMA_MEDIA}
 

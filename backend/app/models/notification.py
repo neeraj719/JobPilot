@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_TRANSACTION, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_TRANSACTION, Base, LifecycleMixin, UTCDateTime, UUIDMixin
 from app.models.enums import NotificationType
 
 if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Notification(UUIDMixin, Base):
+class Notification(UUIDMixin, LifecycleMixin, Base):
     __tablename__ = "notifications"
     #: GET /notifications filters on (owner, is_read) and orders by created_at.
     __table_args__ = (

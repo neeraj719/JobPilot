@@ -4,17 +4,26 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_MASTER, SCHEMA_TRANSACTION, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import (
+    SCHEMA_MASTER,
+    SCHEMA_TRANSACTION,
+    Base,
+    LifecycleMixin,
+    TimestampMixin,
+    UTCDateTime,
+    UUIDMixin,
+    soft_delete_where,
+)
 from app.models.enums import AutomationRunStatus, AutomationRunTrigger, BrowserSessionStatus, IntegrationStatus, JobSourceType
 
 if TYPE_CHECKING:
     from app.models.user import User
 
 
-class AutomationConfig(UUIDMixin, TimestampMixin, Base):
+class AutomationConfig(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """Per-user daily automation settings with hard safety rails (spec §14)."""
 
     __tablename__ = "automation_configs"
@@ -35,6 +44,12 @@ class AutomationConfig(UUIDMixin, TimestampMixin, Base):
     # Auto-submit is OFF by default; only allowed for sources listed in auto_submit_sources
     auto_submit_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auto_submit_sources: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # Per-source apply mode: {"GREENHOUSE": "AUTO_APPLY", "LINKEDIN": "DISCOVER_ONLY"}. Sources
+    # without an entry fall back to the adapter's ``supports_auto_apply`` — see
+    # ``automation.service.resolve_source_mode``, the one place the rule lives.
+    source_modes: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, default=dict, nullable=True, server_default=text("'{}'")
+    )
     auto_generate_cover_letters: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notify_on_input_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -43,7 +58,7 @@ class AutomationConfig(UUIDMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="automation_config")
 
 
-class AutomationRun(UUIDMixin, Base):
+class AutomationRun(UUIDMixin, LifecycleMixin, Base):
     """One execution of the daily pipeline (scheduled or manual)."""
 
     __tablename__ = "automation_runs"
@@ -66,12 +81,17 @@ class AutomationRun(UUIDMixin, Base):
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
-class ConnectedAccount(UUIDMixin, TimestampMixin, Base):
+class ConnectedAccount(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """A job platform account the user connected (spec §1.13). Credentials, if any,
     are stored Fernet-encrypted and never returned by the API."""
 
     __tablename__ = "connected_accounts"
-    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_connected_account_user_source"), {"schema": SCHEMA_MASTER})
+    #: Partial unique: disconnecting an account tombstones the row, and the user must be
+    #: able to connect the same platform again afterwards.
+    __table_args__ = (
+        Index("uq_connected_account_user_source_active", "user_id", "source", unique=True, **soft_delete_where()),
+        {"schema": SCHEMA_MASTER},
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[JobSourceType] = mapped_column(Enum(JobSourceType, native_enum=False, length=30), nullable=False)
@@ -89,12 +109,17 @@ class ConnectedAccount(UUIDMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="connected_accounts")
 
 
-class BrowserSession(UUIDMixin, TimestampMixin, Base):
+class BrowserSession(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """Isolated Playwright browser context state per (user, source). Storage state
     (cookies/localStorage) is encrypted at rest."""
 
     __tablename__ = "browser_sessions"
-    __table_args__ = (UniqueConstraint("user_id", "source", name="uq_browser_session_user_source"), {"schema": SCHEMA_MASTER})
+    #: Partial unique: forgetting a stored context tombstones the row; the next login
+    #: for the same platform creates a fresh one.
+    __table_args__ = (
+        Index("uq_browser_session_user_source_active", "user_id", "source", unique=True, **soft_delete_where()),
+        {"schema": SCHEMA_MASTER},
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[JobSourceType] = mapped_column(Enum(JobSourceType, native_enum=False, length=30), nullable=False)

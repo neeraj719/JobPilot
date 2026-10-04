@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
-from app.models.enums import ResumeParseStatus, UserRole
+from app.models.enums import ResumeParseStatus
 from app.models.resume import Resume
 from app.models.user import User
 from app.modules.resumes import service, storage
@@ -53,7 +53,6 @@ def _create_user(db: Session, email: str, full_name: str = "Test User") -> User:
         email=email,
         hashed_password=hash_password("StrongPass123!"),
         full_name=full_name,
-        role=UserRole.USER,
         is_active=True,
     )
     db.add(user)
@@ -255,7 +254,12 @@ def test_download_is_owner_only(api: TestClient, client: TestClient, db: Session
     assert client.get(RESUMES).json() == []
 
 
-def test_delete_removes_the_file_and_promotes_a_new_default(api: TestClient, db: Session) -> None:
+def test_delete_tombstones_the_row_keeps_the_file_and_promotes_a_new_default(api: TestClient, db: Session) -> None:
+    """Deleting a resume is a soft delete, and the uploaded bytes stay on disk.
+
+    A soft delete that threw the file away would be reversible in name only, so the row
+    is tombstoned and the file is left for a separate storage sweep.
+    """
     first = _upload(api, build_docx(), "first.docx", DOCX_MIME).json()
     second = _upload(api, build_pdf(), "second.pdf").json()
     stored_path = db.get(Resume, uuid.UUID(first["id"])).file_path
@@ -263,7 +267,12 @@ def test_delete_removes_the_file_and_promotes_a_new_default(api: TestClient, db:
 
     response = api.delete(f"{RESUMES}/{first['id']}")
     assert response.status_code == 204
-    assert not storage.file_exists(stored_path)
+    assert storage.file_exists(stored_path)
+
+    db.expunge_all()
+    assert db.get(Resume, uuid.UUID(first["id"])) is None
+    tombstoned = db.get(Resume, uuid.UUID(first["id"]), execution_options={"include_deleted": True})
+    assert tombstoned.deleted_at is not None and tombstoned.is_active is False
 
     remaining = api.get(RESUMES).json()
     assert [r["id"] for r in remaining] == [second["id"]]

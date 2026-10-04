@@ -3,10 +3,10 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SCHEMA_MASTER, TimestampMixin, UUIDMixin
+from app.models.base import SCHEMA_MASTER, Base, LifecycleMixin, TimestampMixin, UUIDMixin, soft_delete_where
 from app.models.enums import CompanyPriority
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class UserProfile(UUIDMixin, TimestampMixin, Base):
+class UserProfile(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """Structured candidate profile. This is the single source of truth the
     application engine uses to answer form questions (never invented)."""
 
@@ -66,7 +66,7 @@ class UserProfile(UUIDMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="profile")
 
 
-class JobPreference(UUIDMixin, TimestampMixin, Base):
+class JobPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     __tablename__ = "job_preferences"
     __table_args__ = {"schema": SCHEMA_MASTER}
 
@@ -90,12 +90,17 @@ class JobPreference(UUIDMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="job_preference")
 
 
-class CompanyPreference(UUIDMixin, TimestampMixin, Base):
+class CompanyPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     """User's priority list: P1/P2/P3 or AVOID. ``company_id`` is optional so a user
     can prioritise a company we have not yet seen a job from."""
 
     __tablename__ = "company_preferences"
-    __table_args__ = (UniqueConstraint("user_id", "normalized_name", name="uq_company_pref_user_name"), {"schema": SCHEMA_MASTER})
+    #: Partial unique: removing a company from the priority list tombstones the row, so
+    #: adding the same company back has to be allowed to re-use the key.
+    __table_args__ = (
+        Index("uq_company_pref_user_name_active", "user_id", "normalized_name", unique=True, **soft_delete_where()),
+        {"schema": SCHEMA_MASTER},
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("master.companies.id", ondelete="SET NULL"))

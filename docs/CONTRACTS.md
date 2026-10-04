@@ -424,3 +424,30 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
   "(owner, sort column)" access pattern live in the models and in
   `alembic/versions/a1c4f7b28e10_composite_indexes.py`. Per-page query budgets are documented in
   `backend/README.md` and pinned by `tests/test_review_regressions.py`.
+* db conventions (core): every table now carries `is_active` and `deleted_at`
+  (`app.models.base.LifecycleMixin`) and **deletes are soft**. `DELETE /resumes/{id}`,
+  `/companies/preferences/{id}`, `/integrations/accounts/{id}`, `/interviews/{id}` and
+  `/browser/sessions/{id}` keep their status codes and bodies, but tombstone the row instead of
+  removing it; a global `do_orm_execute` filter (`app/core/soft_delete.py`) hides tombstones from
+  every ORM SELECT, `Session.get` included, unless the statement passes
+  `execution_options(include_deleted=True)`. `DELETE /resumes/{id}` additionally **keeps the
+  uploaded file on disk** (a soft delete that destroys the bytes is reversible in name only);
+  `app/seed.py --force` is the one caller that still hard-deletes, and it reads with
+  `include_deleted=True` so it also clears tombstones.
+* db conventions (auth): `users.role` (the enum column) is **gone**. Roles are rows in
+  `master.roles` and are granted through the `master.user_roles` junction;
+  `User.role` is now a read-only property returning the most privileged role held, so
+  `require_roles`, the JWT `role` claim and `UserRead.role` are byte-for-byte unchanged.
+  `UserRead` gains an additive `roles: list[str]` (every role held, sorted).
+  `auth.service` gains `assign_role(db, user, role_name)`, `revoke_role(db, user, role_name)`,
+  `get_role(db, name)` and `ensure_default_roles(db)`; `create_user(..., role=UserRole.USER)` keeps
+  its signature and now writes a `user_roles` row. `UserRole` stays the vocabulary of well-known
+  role names; the junction's model class is `UserRoleAssignment` because that name was taken.
+* db conventions (schema): the keys a user can delete and re-create became **partial unique
+  indexes** (`... WHERE deleted_at IS NULL`) — `users.email`,
+  `company_preferences (user_id, normalized_name)`, `connected_accounts (user_id, source)`,
+  `browser_sessions (user_id, source)`, `roles.name`, `user_roles (user_id, role_id)` — so a
+  tombstone no longer holds a unique key hostage. Keys nothing user-facing deletes stay plain
+  UNIQUE constraints. One migration (`c5e81b60a4d7`) adds the columns, creates the two tables with
+  their `USER`/`ADMIN` rows, backfills the grants from `users.role`, drops that column and swaps the
+  constraints; it runs on PostgreSQL and SQLite and downgrades cleanly.

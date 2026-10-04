@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, hash_password
 from app.models.company import Company
-from app.models.enums import AnswerSource, EmailClassification, UserRole
+from app.models.enums import AnswerSource, EmailClassification
 from app.models.job import Job, JobSource
 from app.models.user import User
 from app.modules.ai import answer_rules, tasks
@@ -101,7 +101,6 @@ def api(client: TestClient, db: Session) -> TestClient:
         email="ai-tester@example.com",
         hashed_password=hash_password("StrongPass123!"),
         full_name="AI Tester",
-        role=UserRole.USER,
         is_active=True,
     )
     db.add(user)

@@ -11,6 +11,7 @@ from app.models.base import (
     SCHEMAS,
     SQLITE_SCHEMA_TRANSLATE_MAP,
     Base,
+    LifecycleMixin,
 )
 from app.models.company import Company
 from app.models.email import EmailIntegration, EmailMessage
@@ -20,10 +21,11 @@ from app.models.job import Job, JobMatch, JobSource
 from app.models.notification import Notification
 from app.models.profile import CompanyPreference, JobPreference, UserProfile
 from app.models.resume import Resume, ResumeVersion, Skill
-from app.models.user import RefreshToken, User
+from app.models.user import DEFAULT_ROLES, RefreshToken, Role, User, UserRoleAssignment
 
 __all__ = [
     "Base",
+    "LifecycleMixin",
     "SCHEMA_MASTER",
     "SCHEMA_UNIFIED",
     "SCHEMA_TRANSACTION",
@@ -32,6 +34,9 @@ __all__ = [
     "SCHEMAS",
     "SQLITE_SCHEMA_TRANSLATE_MAP",
     "User",
+    "Role",
+    "DEFAULT_ROLES",
+    "UserRoleAssignment",
     "RefreshToken",
     "UserProfile",
     "JobPreference",

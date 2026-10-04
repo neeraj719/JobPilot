@@ -7,11 +7,11 @@ from typing import Any
 from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, SCHEMA_AUDIT, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_AUDIT, Base, LifecycleMixin, UTCDateTime, UUIDMixin
 from app.models.enums import Actor, AuditLevel
 
 
-class AuditLog(UUIDMixin, Base):
+class AuditLog(UUIDMixin, LifecycleMixin, Base):
     """Every automated action is logged here (spec §27). Also records security
     relevant user actions (login, credential changes, integration connects)."""
 
