@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MASTER, Base, LifecycleMixin, TimestampMixin, UUIDMixin, soft_delete_where
+from app.models.base import SCHEMA_MASTER, Base, StandardColumnsMixin, soft_delete_where
 from app.models.enums import CompanyPriority
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class UserProfile(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class UserProfile(StandardColumnsMixin, Base):
     """Structured candidate profile. This is the single source of truth the
     application engine uses to answer form questions (never invented)."""
 
@@ -63,10 +63,10 @@ class UserProfile(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     # Free-form canonical answers to recurring questions keyed by question_key
     canonical_answers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    user: Mapped[User] = relationship(back_populates="profile")
+    user: Mapped[User] = relationship(back_populates="profile", foreign_keys=lambda: [UserProfile.user_id])
 
 
-class JobPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class JobPreference(StandardColumnsMixin, Base):
     __tablename__ = "job_preferences"
     __table_args__ = {"schema": SCHEMA_MASTER}
 
@@ -87,10 +87,10 @@ class JobPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     min_match_score: Mapped[int] = mapped_column(Integer, default=75, nullable=False)
     only_posted_within_hours: Mapped[int | None] = mapped_column(Integer, default=24)
 
-    user: Mapped[User] = relationship(back_populates="job_preference")
+    user: Mapped[User] = relationship(back_populates="job_preference", foreign_keys=lambda: [JobPreference.user_id])
 
 
-class CompanyPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class CompanyPreference(StandardColumnsMixin, Base):
     """User's priority list: P1/P2/P3 or AVOID. ``company_id`` is optional so a user
     can prioritise a company we have not yet seen a job from."""
 
@@ -109,5 +109,5 @@ class CompanyPreference(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     priority: Mapped[CompanyPriority] = mapped_column(Enum(CompanyPriority, native_enum=False, length=10), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
-    user: Mapped[User] = relationship(back_populates="company_preferences")
+    user: Mapped[User] = relationship(back_populates="company_preferences", foreign_keys=lambda: [CompanyPreference.user_id])
     company: Mapped[Company | None] = relationship()

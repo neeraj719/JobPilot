@@ -22,10 +22,11 @@ to ``None`` on a SQLite engine; every table name is unique, so they coexist in t
 single SQLite namespace. Nothing outside this module and ``database.py`` needs to
 know which backend is in use.
 
-Every one of them also carries the same three conventions: a uuid ``id`` primary key
-(:class:`UUIDMixin`), ``created_at``/``updated_at`` where the row is mutable
-(:class:`TimestampMixin`) and the ``is_active``/``deleted_at`` pair
-(:class:`LifecycleMixin`). Every link between tables is a uuid foreign key.
+Every one of them also carries the same seven standard columns, from the single
+:class:`StandardColumnsMixin`: a uuid ``id`` primary key, the database-owned
+``created_at``/``updated_at`` pair, the ``created_by``/``updated_by`` audit pair and the
+``is_active``/``deleted_at`` lifecycle pair. Every link between tables is a uuid foreign
+key.
 """
 from __future__ import annotations
 
@@ -33,8 +34,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, MetaData, Uuid, func, text, true
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import JSON, Boolean, DateTime, FetchedValue, ForeignKey, MetaData, Uuid, func, text, true
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 
@@ -114,10 +115,53 @@ class UUIDMixin:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, server_default=func.now(), nullable=False)
+    """``created_at`` / ``updated_at``, owned by the **database** and nothing else.
+
+    There is deliberately no Python-side ``default=``/``onupdate=`` here. One mechanism
+    keeps the two timestamps honest, and it is the one that also sees the writes the ORM
+    never hears about: a hand-written ``UPDATE``, a psql session, a migration, a bulk
+    ``update()`` statement. ``created_at`` comes from ``DEFAULT now()`` on INSERT and
+    ``updated_at`` is bumped by the ``trg_<table>_updated_at`` trigger
+    (:mod:`app.core.db_triggers`) on every UPDATE that actually changes the row.
+
+    ``server_onupdate=FetchedValue()`` carries no DDL — it is the ORM being told that the
+    value changes server-side, so the attribute is expired after a flush and re-read on
+    next access instead of going stale in the identity map.
+
+    Consequence worth knowing: ``obj.created_at`` is ``None`` between ``Session.add()``
+    and the flush, because the value does not exist until the INSERT runs. Read it after
+    ``db.flush()``. Supplying a value explicitly still wins — a server default only
+    applies when the INSERT names no value — which is what lets ``app/seed.py`` fabricate
+    history on past dates.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utcnow, onupdate=utcnow, server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), server_onupdate=FetchedValue(), nullable=False
     )
+
+
+class AuditUserMixin:
+    """Who created and who last changed the row.
+
+    Both are nullable uuids pointing at ``master.users.id`` ``ON DELETE SET NULL``: the
+    audit trail must not keep a deleted account alive, and ``NULL`` is a meaningful value
+    — it means *no user did this*, i.e. a system/automation/migration write. They are
+    stamped from the acting user by the flush listeners in :mod:`app.core.actor`, never
+    by hand, and they are **not** API fields: this is a database-level trail, not a
+    feature. No index: audit columns are not query paths.
+
+    ``declared_attr`` rather than plain columns because a ``ForeignKey`` object belongs to
+    exactly one table, so each mapped class needs its own.
+    """
+
+    @declared_attr
+    def created_by(cls) -> Mapped[uuid.UUID | None]:  # noqa: N805
+        return mapped_column(Uuid, ForeignKey("master.users.id", ondelete="SET NULL"), nullable=True)
+
+    @declared_attr
+    def updated_by(cls) -> Mapped[uuid.UUID | None]:  # noqa: N805
+        return mapped_column(Uuid, ForeignKey("master.users.id", ondelete="SET NULL"), nullable=True)
 
 
 class LifecycleMixin:
@@ -154,6 +198,27 @@ class LifecycleMixin:
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class StandardColumnsMixin(UUIDMixin, TimestampMixin, AuditUserMixin, LifecycleMixin):
+    """The seven standard columns, in one place, on all 27 tables.
+
+    ===============  =========================================================
+    ``id``           uuid primary key (:class:`UUIDMixin`)
+    ``created_at``   ``timestamptz NOT NULL DEFAULT now()`` (:class:`TimestampMixin`)
+    ``updated_at``   ``timestamptz NOT NULL DEFAULT now()``, bumped by a trigger
+    ``created_by``   ``uuid NULL`` -> ``master.users.id`` (:class:`AuditUserMixin`)
+    ``updated_by``   ``uuid NULL`` -> ``master.users.id``
+    ``is_active``    the business switch (:class:`LifecycleMixin`)
+    ``deleted_at``   the soft-delete tombstone
+    ===============  =========================================================
+
+    Every model inherits this one mixin rather than picking from the four, so "which
+    columns does this table have" has a single answer and a new table cannot quietly
+    ship without the audit trail. The four pieces stay separate classes because other
+    code targets them by type: ``with_loader_criteria(LifecycleMixin, ...)`` in
+    :mod:`app.core.soft_delete` and the stamping listeners on :class:`AuditUserMixin`.
+    """
 
 
 def soft_delete_where(column: str = "deleted_at") -> dict[str, Any]:

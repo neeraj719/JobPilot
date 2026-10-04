@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MASTER, Base, LifecycleMixin, TimestampMixin, UUIDMixin
+from app.models.base import SCHEMA_MASTER, Base, StandardColumnsMixin
 
 if TYPE_CHECKING:
     from app.models.job import Job
 
 
-class Company(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Company(StandardColumnsMixin, Base):
     __tablename__ = "companies"
     __table_args__ = {"schema": SCHEMA_MASTER}
 

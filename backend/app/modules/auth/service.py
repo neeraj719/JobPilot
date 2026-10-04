@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.core.actor import actor_context
 from app.core.audit import audit
 from app.core.config import settings
 from app.core.database import restore, soft_delete
@@ -104,40 +105,50 @@ def create_user(db: Session, email: str, password: str, full_name: str, *, role:
     if get_user_by_email(db, email) is not None:
         raise ConflictError("An account with this email already exists", code="email_taken")
 
+    # The id is generated here rather than left to the column default so the account can
+    # be its own ``created_by``: registration has no acting user yet, and attributing the
+    # row to "nobody" would read as a system write. Everything created for the account
+    # below is attributed to it too, which is what ``actor_context`` is for.
     user = User(
+        id=uuid.uuid4(),
         email=email,
         hashed_password=hash_password(password),
         full_name=full_name,
         is_active=True,
         is_verified=False,
     )
+    user.created_by = user.updated_by = user.id
     db.add(user)
     db.flush()
 
-    # The role is a row in ``master.user_roles``, not a column on ``users``.
-    assign_role(db, user, role)
+    with actor_context(user.id):
+        # The role is a row in ``master.user_roles``, not a column on ``users``.
+        assign_role(db, user, role)
 
-    db.add(UserProfile(user_id=user.id, full_name=full_name or None, email=email))
-    db.add(
-        JobPreference(
-            user_id=user.id,
-            currency="INR",
-            min_match_score=settings.DEFAULT_MIN_MATCH_SCORE,
-            only_posted_within_hours=24,
+        db.add(UserProfile(user_id=user.id, full_name=full_name or None, email=email))
+        db.add(
+            JobPreference(
+                user_id=user.id,
+                currency="INR",
+                min_match_score=settings.DEFAULT_MIN_MATCH_SCORE,
+                only_posted_within_hours=24,
+            )
         )
-    )
-    db.add(
-        AutomationConfig(
-            user_id=user.id,
-            daily_application_limit=settings.DEFAULT_DAILY_APPLICATION_LIMIT,
-            min_match_score=settings.DEFAULT_MIN_MATCH_SCORE,
-            retry_limit=settings.AUTOMATION_RETRY_LIMIT,
-            delay_between_actions_seconds=settings.AUTOMATION_DELAY_SECONDS,
+        db.add(
+            AutomationConfig(
+                user_id=user.id,
+                daily_application_limit=settings.DEFAULT_DAILY_APPLICATION_LIMIT,
+                min_match_score=settings.DEFAULT_MIN_MATCH_SCORE,
+                retry_limit=settings.AUTOMATION_RETRY_LIMIT,
+                delay_between_actions_seconds=settings.AUTOMATION_DELAY_SECONDS,
+            )
         )
-    )
-    db.flush()
+        db.flush()
 
-    audit(db, action="auth.register", message=f"Account created for {email}", user_id=user.id, actor=Actor.USER)
+        audit(db, action="auth.register", message=f"Account created for {email}", user_id=user.id, actor=Actor.USER)
+        # Flushed inside the block on purpose: the stamping listeners run at flush time,
+        # so a row added here and flushed by the caller's commit would miss the actor.
+        db.flush()
     logger.info("Registered user %s", email)
     return user
 

@@ -804,7 +804,7 @@ def start_application(
     db.flush()
     if run_in_background:
         db.commit()  # the worker thread opens its own session and must see this row
-        executor.run_in_background(application.id)
+        executor.run_in_background(application.id, actor_id=application.user_id)
     else:
         executor.run_now(application.id, db=db)
         db.refresh(application)
@@ -852,7 +852,7 @@ def resume_automation(
     db.flush()
     if run_in_background:
         db.commit()
-        executor.run_in_background(application.id)
+        executor.run_in_background(application.id, actor_id=application.user_id)
     else:
         executor.run_now(application.id, db=db)
         db.refresh(application)

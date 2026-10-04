@@ -296,13 +296,14 @@ Service: `emails.service.ingest_message(db, user_id, msg: IncomingEmail) -> Emai
 ## 14. automation + dashboard + worker + seed
 
 Automation:
-* `GET /automation/config` → `AutomationConfigRead`; `PUT /automation/config AutomationConfigUpdate` (validates `daily_application_limit ≤ MAX_DAILY_APPLICATION_LIMIT`, `schedule_time` HH:MM, timezone valid, `auto_submit_sources ⊆ adapters with supports_auto_apply`).
+* `GET /automation/config` → `AutomationConfigRead`; `PUT /automation/config AutomationConfigUpdate` (validates `daily_application_limit ≤ MAX_DAILY_APPLICATION_LIMIT`, `schedule_time` HH:MM, timezone valid, `auto_submit_sources ⊆ adapters with supports_auto_apply`, `source_modes` keys ∈ `JobSourceType`, values ∈ `SourceApplyMode`, and `AUTO_APPLY` only for adapters with `supports_auto_apply` → else 422 `auto_apply_unsupported`).
+* **Per-source apply mode** (`AutomationConfig.source_modes: {source: AUTO_APPLY | DISCOVER_ONLY}`). Resolved by exactly one function, `automation.service.resolve_source_mode(config, source)`: stored entry → else `AUTO_APPLY` iff the adapter `supports_auto_apply` → and an adapter without `supports_auto_apply` can never resolve to `AUTO_APPLY` (stored value is downgraded, logged at debug). `AutomationConfigRead.source_modes` carries the *resolved* value for every registered source; `run.config_snapshot.source_modes` records the mode each searched source actually ran in.
 * `POST /automation/run {dry_run?: bool}` → starts a run in a background thread → `AutomationRunRead` (status RUNNING). Only one RUNNING run per user (else `ConflictError`).
 * `GET /automation/runs?page=` ; `GET /automation/runs/{id}` (with `steps`, `stats`) ; `POST /automation/runs/{id}/cancel`.
 * `GET /automation/status → {enabled, next_run_at, last_run: AutomationRunRead | None, running: bool, today: {applications_submitted, limit_remaining}}`.
 
 Pipeline (`automation/pipeline.py`) — `run_pipeline(user_id, trigger, run_id=None, dry_run=False)` executing, each as a recorded step with SUCCESS/FAILED/SKIPPED + stats:
-`search → collect → dedupe (ingest) → analyze → filter (min score, posted-within, AVOID, excluded keywords, already applied/skipped) → prioritize (P1 first, then score) → enforce limits (daily limit − submitted today; per-platform limits) → queue → generate answers (+cover letters) → autofill supported (DEMO_ATS & mock EASY_APPLY via ApplicationRunner) → approval queue (PAUSED/USER_REVIEW) → auto-submit only where allowed → finish (notification AUTOMATION_COMPLETED with summary)`. `delay_between_actions_seconds` between applications; failures never abort the run — they are recorded and continue; an exception in a step marks the run PARTIAL/FAILED with `error`.
+`search → collect → dedupe (ingest) → analyze → filter (min score, posted-within, AVOID, excluded keywords, already applied/skipped) → prioritize (P1 first, then score) → enforce limits (daily limit − submitted today; per-platform limits; `DISCOVER_ONLY` candidates pass through without consuming budget) → queue (`DISCOVER_ONLY` candidates are **not** queued: counted in `stats.discover_only` and listed in the step's `data.discover_only`) → generate answers (+cover letters; a browser-backed application is deferred — left QUEUED — only when no browser is available, whatever its source) → autofill (every `uses_browser` adapter via ApplicationRunner; mock EASY_APPLY in-process) → approval queue (PAUSED/USER_REVIEW) → auto-submit only where allowed (`_auto_submit_allowed`: `auto_submit_enabled` ∧ source ∈ `auto_submit_sources` ∧ adapter `supports_auto_apply`; refuses anything with an unanswered required question) → finish (notification AUTOMATION_COMPLETED with summary)`. `delay_between_actions_seconds` between applications; failures never abort the run — they are recorded and continue; an exception in a step marks the run PARTIAL/FAILED with `error`.
 
 Worker (`app/worker/`): `scheduler.py` `build_scheduler() -> BackgroundScheduler` with (a) a minute-tick job that finds enabled configs whose `schedule_time` in their `timezone` has passed today and `last_run_at` isn't today → `run_pipeline(SCHEDULED)`, (b) hourly Gmail sync for connected integrations, (c) nightly job marking `APPLIED` older than 21 days with no response as `NO_RESPONSE`. `main.py` runs it in the foreground (docker `worker` service). Uses a Redis lock (`SET NX EX`) so API and worker never run the same user's pipeline concurrently (in-memory fallback when Redis is down).
 
@@ -451,3 +452,20 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
   UNIQUE constraints. One migration (`c5e81b60a4d7`) adds the columns, creates the two tables with
   their `USER`/`ADMIN` rows, backfills the grants from `users.role`, drops that column and swaps the
   constraints; it runs on PostgreSQL and SQLite and downgrades cleanly.
+
+* database conventions (audit columns): every table gained `created_at`, `updated_at`, `created_by`
+  and `updated_by` (migration `b9f41c7d2e58`), so all 27 now carry the same seven standard columns
+  from one `StandardColumnsMixin`. The two timestamps are **database-owned** — no Python-side
+  `default=`/`onupdate=`, a `DEFAULT now()` server default on both, and one
+  `trg_<table>_updated_at` trigger per table calling `public.set_updated_at()` so a raw `UPDATE`
+  moves `updated_at` too. The trigger's `WHEN (OLD::text IS DISTINCT FROM NEW::text)` guard leaves
+  no-op updates alone; it compares row *text* because `OLD.* IS DISTINCT FROM NEW.*` raises on the
+  20 tables with a `json` column. Consequence for callers: `obj.created_at` is `None` until the
+  flush. `created_by`/`updated_by` are stamped by flush listeners from the actor published in
+  `app/core/actor.py` and are **not** exposed by any API schema; `NULL` means a system write.
+  Three deviations from the brief: the request actor is carried on the `Session` rather than only
+  in a `ContextVar` (a `ContextVar` set in a sync FastAPI dependency is discarded, and resetting it
+  in a `yield` dependency raises), `ActorMiddleware` publishes the `ContextVar` instead; the two
+  scheduler housekeeping jobs (`mark_no_response`, `cleanup_expired_browser_sessions`) deliberately
+  write with no actor because they act on nobody's behalf; and on SQLite the two audit columns are
+  added without their foreign key, since adding a constraint there means rewriting the table.

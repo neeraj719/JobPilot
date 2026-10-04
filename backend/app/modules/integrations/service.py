@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.actor import actor_context
 from app.core.audit import audit
 from app.core.config import settings
 from app.core.database import soft_delete
@@ -132,30 +133,34 @@ def sync_gmail(
 
     result = SyncResult()
     try:
-        gmail = client or GmailClient(gmail_oauth.load_credentials(integration))
-        message_ids = gmail.list_job_related_messages(max_results=max_results, newer_than_days=newer_than_days)
-        result.fetched = len(message_ids)
-        for message_id in message_ids:
-            if emails_service.find_by_provider_id(db, user_id, message_id) is not None:
-                continue
-            message = gmail.get_message(message_id)
-            email = emails_service.ingest_message(db, user_id, message, integration_id=integration.id)
-            result.new += 1
-            if email.classification is not EmailClassification.OTHER:
-                result.classified += 1
-            if email.application_id is not None:
-                result.linked += 1
-            if email.status_applied:
-                result.status_updates += 1
+        # Ingest acts for this mailbox's owner, from the scheduler as often as from a
+        # request, so the actor is published here rather than left to the HTTP layer:
+        # the emails, notifications and status changes written below are the user's.
+        with actor_context(user_id):
+            gmail = client or GmailClient(gmail_oauth.load_credentials(integration))
+            message_ids = gmail.list_job_related_messages(max_results=max_results, newer_than_days=newer_than_days)
+            result.fetched = len(message_ids)
+            for message_id in message_ids:
+                if emails_service.find_by_provider_id(db, user_id, message_id) is not None:
+                    continue
+                message = gmail.get_message(message_id)
+                email = emails_service.ingest_message(db, user_id, message, integration_id=integration.id)
+                result.new += 1
+                if email.classification is not EmailClassification.OTHER:
+                    result.classified += 1
+                if email.application_id is not None:
+                    result.linked += 1
+                if email.status_applied:
+                    result.status_updates += 1
 
-        if getattr(gmail, "refreshed", False):
-            gmail_oauth.store_credentials(integration, gmail.credentials_json_dict())
-            logger.info("Re-encrypted refreshed Gmail credentials for user %s", user_id)
+            if getattr(gmail, "refreshed", False):
+                gmail_oauth.store_credentials(integration, gmail.credentials_json_dict())
+                logger.info("Re-encrypted refreshed Gmail credentials for user %s", user_id)
 
-        integration.last_synced_at = utcnow()
-        integration.status = IntegrationStatus.CONNECTED
-        integration.last_error = None
-        db.flush()
+            integration.last_synced_at = utcnow()
+            integration.status = IntegrationStatus.CONNECTED
+            integration.last_error = None
+            db.flush()
     except Exception as exc:
         logger.warning("Gmail sync failed for user %s: %s", user_id, exc)
         _record_sync_error(db, integration, exc)

@@ -8,10 +8,13 @@ Enums: `backend/app/models/enums.py`.
 
 ## Conventions
 
-Five rules hold for **every** table. They are enforced by tests
+Six rules hold for **every** table. They are enforced by tests
 (`backend/tests/test_db_conventions.py`), not by review.
 
 ### 1. Every table has `id`, `is_active` and `deleted_at`
+
+(And `created_at`, `updated_at`, `created_by`, `updated_by` — seven columns in all; see
+rule 6 for the four this rule does not cover.)
 
 `id` is a uuid primary key (`UUIDMixin`). `is_active` and `deleted_at` come from
 `LifecycleMixin` in `backend/app/models/base.py` and mean two different things:
@@ -101,6 +104,89 @@ partial unique index is what lets the same role be granted again.
 auth path reads four columns, the answer engine reads forty, and they change on completely
 different schedules.
 
+### 6. Seven standard columns, with the timestamps owned by the database
+
+Every table carries the same seven columns, from the single `StandardColumnsMixin` in
+`backend/app/models/base.py`. A table that is missing one is a bug, not a variation.
+
+| Column | Shape | Who fills it |
+|---|---|---|
+| `id` | `uuid PRIMARY KEY` | the ORM (`uuid4`) |
+| `created_at` | `timestamptz NOT NULL DEFAULT now()` | the **database**, on INSERT |
+| `updated_at` | `timestamptz NOT NULL DEFAULT now()` | the **database**, on INSERT and on every real UPDATE |
+| `created_by` | `uuid NULL` → `master.users.id` `ON DELETE SET NULL` | the acting user, stamped at flush |
+| `updated_by` | `uuid NULL` → `master.users.id` `ON DELETE SET NULL` | the acting user, stamped at flush |
+| `is_active` | `boolean NOT NULL DEFAULT true` | the business switch (rule 1) |
+| `deleted_at` | `timestamptz NULL` | the soft-delete tombstone (rule 1) |
+
+**The timestamps are the database's, not the ORM's.** There is no Python-side
+`default=` or `onupdate=` on either — one mechanism, and it is the one that also sees
+the writes the ORM never hears about: a hand-written `UPDATE` in psql, a bulk
+`update()` statement, a migration, a restore. `updated_at` is maintained by one trigger
+per table, `trg_<table>_updated_at`, calling a single `public.set_updated_at()`
+function. The DDL lives in `backend/app/core/db_triggers.py` because two callers need
+it and must not drift: the migration, and `tests/conftest.py` (which builds its schema
+from `Base.metadata.create_all`, and metadata knows nothing about triggers — a trigger
+that existed only in production would make the test proving it meaningless).
+
+The trigger carries a `WHEN` guard so that a statement that changes nothing leaves the
+timestamp alone: "last modified" should mean it.
+
+```sql
+CREATE TRIGGER trg_jobs_updated_at BEFORE UPDATE ON "unified"."jobs" FOR EACH ROW
+WHEN (OLD::text IS DISTINCT FROM NEW::text) EXECUTE FUNCTION public.set_updated_at();
+```
+
+The comparison is on the row *text*, not on the rows. The obvious `OLD.* IS DISTINCT
+FROM NEW.*` is a trap: row comparison goes field by field and 20 of the 27 tables carry
+a `json` column, which has no equality operator — so it works right up until the two
+rows are equal as far as that column, i.e. it raises `could not identify an equality
+operator for type json` on exactly the no-op update the guard exists for.
+
+Two consequences worth knowing:
+
+* `obj.created_at` is `None` between `Session.add()` and the flush. Read it after
+  `db.flush()`; the value does not exist until the INSERT runs.
+* an explicitly supplied value still wins, because a server default only applies when
+  the INSERT names no value. That is what lets `app/seed.py` fabricate three weeks of
+  history on past dates.
+
+**`created_by` / `updated_by` are stamped from the acting user**, by two flush
+listeners on `AuditUserMixin` (`backend/app/core/actor.py`), never by hand — eighteen
+modules each remembering two assignments is eighteen chances to forget one. The actor
+is published once, at the entry point:
+
+* **HTTP** — `deps.get_current_user` records it on the request's `Session`
+  (`set_session_actor`), and `ActorMiddleware` publishes it in a `ContextVar` for the
+  whole request. It has to be the session for the dependency: Starlette runs sync
+  dependencies in a *copy* of the request's context, so a `ContextVar` set inside one
+  is discarded on return (and `ContextVar.reset` in a `yield` dependency raises
+  outright, because `__enter__` and `__exit__` land in different contexts).
+* **background work** — `actor_context(user_id)` around the entry point:
+  `automation.pipeline.run_pipeline`, the apply thread in
+  `applications.executor.run_in_background` (a new thread starts with an empty context,
+  so the id is passed across the boundary by hand), and `integrations.service.sync_gmail`.
+* **registration** — `auth.service.create_user` generates the user's id up front so the
+  account can be its own `created_by`, and wraps the profile / preferences / automation
+  config / role rows it creates in `actor_context(user.id)`.
+
+`NULL` is a real answer and means *no user did this*: a scheduler decision
+(`mark_no_response`, `cleanup_expired_browser_sessions`), a migration, a seed run. Rows
+that predate this convention read as system writes, which is what they were. An
+explicitly supplied `created_by` is never overwritten.
+
+The columns are deliberately **not indexed** — an audit trail, not a query path — and
+deliberately **not** in the API schemas. Migration `b9f41c7d2e58` adds the four columns
+to all 27 tables, backfills `updated_at` from `created_at` (and `created_at` from
+`job_sources.discovered_at` / `automation_runs.started_at` where the row already knew),
+and creates the function and the 27 triggers. It runs on SQLite too, with two documented
+differences: the audit columns are added there without the foreign key (SQLite cannot
+add a constraint without rewriting the table, and rewriting all 27 would put rule 3's
+partial unique indexes through a reflect-and-recreate round trip), and the SQLite
+trigger — an `AFTER UPDATE` that writes the row again, guarded by
+`WHEN NEW.updated_at IS OLD.updated_at` so it cannot re-fire — bumps the timestamp on
+any UPDATE statement rather than only on one that changed something.
+
 ## Entity relationship overview
 
 ```
@@ -130,7 +216,9 @@ skills (taxonomy)
 
 ## Tables
 
-All 27 carry `id` / `is_active` / `deleted_at`; only what is *extra* is listed.
+All 27 carry the seven standard columns — `id` / `created_at` / `updated_at` /
+`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 27 carry the
+`trg_<table>_updated_at` trigger; only what is *extra* is listed.
 
 | Table | Purpose | Notable columns / constraints |
 |---|---|---|
@@ -154,7 +242,7 @@ All 27 carry `id` / `is_active` / `deleted_at`; only what is *extra* is listed.
 | `email_integrations` | Gmail OAuth (read-only) | `encrypted_credentials` (Fernet), `scopes`, `oauth_state` |
 | `email_messages` | classified emails | unique `(user_id, provider_message_id)`; `classification`, `matched_by`, `is_simulated`, `status_applied` |
 | `interviews` | rounds + AI prep | `prep_material` JSON |
-| `automation_configs` | daily automation settings | limits, schedule, `auto_submit_enabled` (default off) |
+| `automation_configs` | daily automation settings | limits, schedule, `auto_submit_enabled` (default off), `source_modes` JSON (`{source: AUTO_APPLY \| DISCOVER_ONLY}`, default `{}` = adapter capability) |
 | `automation_runs` | pipeline executions | `steps` JSON, `stats` JSON, `status` |
 | `connected_accounts` | job-platform accounts | partial-unique `(user_id, source)`, `encrypted_credentials` |
 | `browser_sessions` | isolated Playwright storage state per (user, source) | partial-unique `(user_id, source)`, `encrypted_storage_state` |

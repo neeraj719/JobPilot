@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MASTER, SCHEMA_TRANSACTION, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MASTER, SCHEMA_TRANSACTION, Base, StandardColumnsMixin, UTCDateTime
 from app.models.enums import EmailClassification, EmailProvider, IntegrationStatus
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class EmailIntegration(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class EmailIntegration(StandardColumnsMixin, Base):
     """Gmail connection via OAuth. Only the *encrypted* OAuth token bundle is stored,
     never a password. Scopes are least-privilege (gmail.readonly)."""
 
@@ -37,10 +37,10 @@ class EmailIntegration(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     oauth_state: Mapped[str | None] = mapped_column(String(128))  # CSRF state for the in-flight OAuth flow
 
-    user: Mapped[User] = relationship(back_populates="email_integration")
+    user: Mapped[User] = relationship(back_populates="email_integration", foreign_keys=lambda: [EmailIntegration.user_id])
 
 
-class EmailMessage(UUIDMixin, LifecycleMixin, Base):
+class EmailMessage(StandardColumnsMixin, Base):
     __tablename__ = "email_messages"
     __table_args__ = (
         UniqueConstraint("user_id", "provider_message_id", name="uq_email_user_provider_msg"),
@@ -74,6 +74,5 @@ class EmailMessage(UUIDMixin, LifecycleMixin, Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # did this email move the application status
     raw_headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     application: Mapped[Application | None] = relationship(back_populates="emails")

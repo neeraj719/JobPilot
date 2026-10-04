@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MEDIA, SCHEMA_TRANSACTION, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MEDIA, SCHEMA_TRANSACTION, Base, StandardColumnsMixin, UTCDateTime
 from app.models.enums import (
     Actor,
     AnswerSource,
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Application(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Application(StandardColumnsMixin, Base):
     __tablename__ = "applications"
     __table_args__ = (
         UniqueConstraint("user_id", "job_id", name="uq_application_user_job"),
@@ -83,7 +83,7 @@ class Application(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     skipped_reason: Mapped[str | None] = mapped_column(String(500))
 
-    user: Mapped[User] = relationship(back_populates="applications")
+    user: Mapped[User] = relationship(back_populates="applications", foreign_keys=lambda: [Application.user_id])
     job: Mapped[Job] = relationship(back_populates="applications", lazy="joined")
     resume: Mapped[Resume | None] = relationship()
     answers: Mapped[list[ApplicationAnswer]] = relationship(back_populates="application", cascade="all, delete-orphan", order_by="ApplicationAnswer.order")
@@ -93,7 +93,7 @@ class Application(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     interviews: Mapped[list[Interview]] = relationship(back_populates="application", cascade="all, delete-orphan")
 
 
-class ApplicationAnswer(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class ApplicationAnswer(StandardColumnsMixin, Base):
     """One answer to one form question. ``status=NEEDS_USER_INPUT`` means the engine
     refused to guess (missing facts) and the user must fill it in."""
 
@@ -119,11 +119,14 @@ class ApplicationAnswer(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     application: Mapped[Application] = relationship(back_populates="answers")
 
 
-class ApplicationEvent(UUIDMixin, LifecycleMixin, Base):
+class ApplicationEvent(StandardColumnsMixin, Base):
     __tablename__ = "application_events"
     #: Timelines are always read per application, oldest first.
     __table_args__ = (
         Index("ix_application_events_application_created", "application_id", "created_at"),
+        # ``created_at`` now comes from the mixin, so its index is declared here rather
+        # than as ``index=True`` on a per-model column.
+        Index("ix_application_events_created_at", "created_at"),
         {"schema": SCHEMA_TRANSACTION},
     )
 
@@ -134,12 +137,11 @@ class ApplicationEvent(UUIDMixin, LifecycleMixin, Base):
     to_status: Mapped[ApplicationStatus | None] = mapped_column(Enum(ApplicationStatus, native_enum=False, length=30))
     message: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
 
     application: Mapped[Application] = relationship(back_populates="events")
 
 
-class ApplicationDocument(UUIDMixin, LifecycleMixin, Base):
+class ApplicationDocument(StandardColumnsMixin, Base):
     __tablename__ = "application_documents"
     __table_args__ = {"schema": SCHEMA_MEDIA}
 
@@ -149,6 +151,5 @@ class ApplicationDocument(UUIDMixin, LifecycleMixin, Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str | None] = mapped_column(String(1024))
     content: Mapped[str | None] = mapped_column(Text)  # for generated cover letters
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     application: Mapped[Application] = relationship(back_populates="documents")

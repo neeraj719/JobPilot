@@ -11,10 +11,8 @@ from app.models.base import (
     SCHEMA_MASTER,
     SCHEMA_TRANSACTION,
     Base,
-    LifecycleMixin,
-    TimestampMixin,
+    StandardColumnsMixin,
     UTCDateTime,
-    UUIDMixin,
     soft_delete_where,
 )
 from app.models.enums import AutomationRunStatus, AutomationRunTrigger, BrowserSessionStatus, IntegrationStatus, JobSourceType
@@ -23,7 +21,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class AutomationConfig(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class AutomationConfig(StandardColumnsMixin, Base):
     """Per-user daily automation settings with hard safety rails (spec §14)."""
 
     __tablename__ = "automation_configs"
@@ -55,10 +53,10 @@ class AutomationConfig(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
-    user: Mapped[User] = relationship(back_populates="automation_config")
+    user: Mapped[User] = relationship(back_populates="automation_config", foreign_keys=lambda: [AutomationConfig.user_id])
 
 
-class AutomationRun(UUIDMixin, LifecycleMixin, Base):
+class AutomationRun(StandardColumnsMixin, Base):
     """One execution of the daily pipeline (scheduled or manual)."""
 
     __tablename__ = "automation_runs"
@@ -81,7 +79,7 @@ class AutomationRun(UUIDMixin, LifecycleMixin, Base):
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
-class ConnectedAccount(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class ConnectedAccount(StandardColumnsMixin, Base):
     """A job platform account the user connected (spec §1.13). Credentials, if any,
     are stored Fernet-encrypted and never returned by the API."""
 
@@ -106,10 +104,10 @@ class ConnectedAccount(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
-    user: Mapped[User] = relationship(back_populates="connected_accounts")
+    user: Mapped[User] = relationship(back_populates="connected_accounts", foreign_keys=lambda: [ConnectedAccount.user_id])
 
 
-class BrowserSession(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class BrowserSession(StandardColumnsMixin, Base):
     """Isolated Playwright browser context state per (user, source). Storage state
     (cookies/localStorage) is encrypted at rest."""
 

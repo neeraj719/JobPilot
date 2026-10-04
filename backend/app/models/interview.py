@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_TRANSACTION, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_TRANSACTION, Base, StandardColumnsMixin, UTCDateTime
 from app.models.enums import InterviewStatus, InterviewType
 
 if TYPE_CHECKING:
     from app.models.application import Application
 
 
-class Interview(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Interview(StandardColumnsMixin, Base):
     __tablename__ = "interviews"
     #: "My upcoming interviews" is a (owner, scheduled_at) range scan.
     __table_args__ = (Index("ix_interviews_user_scheduled_at", "user_id", "scheduled_at"), {"schema": SCHEMA_TRANSACTION})

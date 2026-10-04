@@ -1,31 +1,37 @@
 """The database conventions, enforced as tests rather than as review comments.
 
-Four rules are checked here:
+Five rules are checked here:
 
-* every table carries a uuid ``id``, ``is_active`` and ``deleted_at``, and every link
-  between tables is a uuid foreign key;
+* every table carries the seven standard columns — a uuid ``id``, the database-owned
+  ``created_at``/``updated_at`` pair, the ``created_by``/``updated_by`` audit pair and
+  ``is_active``/``deleted_at`` — and every link between tables is a uuid foreign key;
 * deleting is soft, and the global ORM filter hides tombstones from ``select()``,
   ``Session.get`` and relationship loads alike — with ``include_deleted=True`` as the
   only way past it;
 * the keys a user can delete and re-create are partial unique indexes, so re-creating
   what you just deleted works;
 * roles live in ``master.roles`` and are granted through the ``master.user_roles``
-  junction, with ``User.role`` kept as a derived view for every existing call site.
+  junction, with ``User.role`` kept as a derived view for every existing call site;
+* the two timestamps belong to the **database**: a server default fills them, a trigger
+  bumps ``updated_at`` on any real UPDATE (including one the ORM never sees) and leaves
+  a no-op alone, and the acting user is stamped into ``created_by``/``updated_by``.
 """
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Uuid, inspect, select
+from sqlalchemy import DateTime, Uuid, inspect, select, text
 from sqlalchemy.orm import Session
 
+from app.core.actor import actor_context
 from app.core.database import soft_delete
 from app.core.security import create_access_token
 from app.models import Base
 from app.models.enums import CompanyPriority, JobSourceType, UserRole
-from app.models.profile import CompanyPreference
+from app.models.profile import CompanyPreference, UserProfile
 from app.models.resume import Resume
 from app.models.user import DEFAULT_ROLES, Role, User, UserRoleAssignment
 from app.modules.auth import service as auth_service
@@ -371,3 +377,218 @@ def test_resumes_and_sessions_soft_delete_keeps_the_row(db: Session, user: User)
     assert db.scalars(select(BrowserSession)).all() == []
     assert db.scalars(select(Resume)).all() == []
     assert len(db.scalars(select(Resume).execution_options(include_deleted=True)).all()) == 1
+
+
+# ------------------------------------------- the seven standard columns (rule 6)
+
+
+STANDARD_COLUMNS = ("id", "created_at", "updated_at", "created_by", "updated_by", "is_active", "deleted_at")
+
+
+def test_every_table_has_the_seven_standard_columns() -> None:
+    users_id = Base.metadata.tables["master.users"].c.id
+    for table in Base.metadata.sorted_tables:
+        for name in STANDARD_COLUMNS:
+            assert name in table.c, f"{table.fullname} has no {name}"
+
+        for name in ("created_at", "updated_at"):
+            column = table.c[name]
+            resolved = getattr(column.type, "impl", column.type)
+            assert isinstance(resolved, DateTime), f"{table.fullname}.{name} is not a timestamp"
+            assert resolved.timezone, f"{table.fullname}.{name} is not timezone-aware"
+            assert not column.nullable, f"{table.fullname}.{name} must be NOT NULL"
+
+        for name in ("created_by", "updated_by"):
+            column = table.c[name]
+            assert isinstance(column.type, Uuid), f"{table.fullname}.{name} is not a uuid"
+            assert column.nullable, f"{table.fullname}.{name} must be nullable - NULL means a system write"
+            assert {fk.column for fk in column.foreign_keys} == {users_id}, f"{table.fullname}.{name} -> master.users.id"
+            assert all(fk.ondelete == "SET NULL" for fk in column.foreign_keys), f"{table.fullname}.{name} ON DELETE"
+
+
+def test_the_two_timestamps_are_the_databases_to_fill() -> None:
+    """A server default on both, and no Python-side default or ``onupdate`` on either.
+
+    Two mechanisms would be one too many: the whole point of the convention is that a
+    write the ORM never sees still moves ``updated_at``.
+    """
+    for table in Base.metadata.sorted_tables:
+        for name in ("created_at", "updated_at"):
+            column = table.c[name]
+            assert column.server_default is not None, f"{table.fullname}.{name} has no server default"
+            assert column.default is None, f"{table.fullname}.{name} still has a Python-side default"
+            assert column.onupdate is None, f"{table.fullname}.{name} still has a Python-side onupdate"
+        assert table.c.updated_at.server_onupdate is not None, f"{table.fullname}.updated_at"
+
+
+def test_the_database_fills_both_timestamps(db: Session, user: User) -> None:
+    pref = CompanyPreference(user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1)
+    # Nothing exists until the INSERT runs: the value is the database to produce, not ours.
+    assert pref.created_at is None
+    assert pref.updated_at is None
+
+    db.add(pref)
+    db.flush()
+
+    assert pref.created_at is not None
+    assert pref.updated_at is not None
+    assert pref.created_at.tzinfo is not None  # UTCDateTime hands back aware UTC
+
+
+def test_an_explicit_timestamp_still_wins(db: Session, user: User) -> None:
+    """A server default only applies when the INSERT names no value - which is what lets
+    ``app/seed.py`` fabricate three weeks of history on past dates."""
+    backdated = datetime.now(timezone.utc) - timedelta(days=21)
+    pref = CompanyPreference(
+        user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1, created_at=backdated
+    )
+    db.add(pref)
+    db.flush()
+    assert pref.created_at == backdated
+
+
+# ------------------------------------------- the trigger
+
+
+def _updated_at_of(db: Session, pref_id: uuid.UUID):
+    return db.execute(
+        text('SELECT updated_at FROM "master"."company_preferences" WHERE id = :id'), {"id": pref_id}
+    ).scalar_one()
+
+
+def test_a_raw_update_the_orm_never_sees_bumps_updated_at(db: Session, user: User) -> None:
+    """The point of the trigger. No ORM involved: psql, a migration or a bulk UPDATE has
+    to move ``updated_at`` too, or "last modified" is only a hopeful label."""
+    pref = CompanyPreference(user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1)
+    db.add(pref)
+    db.commit()
+    before = _updated_at_of(db, pref.id)
+
+    db.execute(text('UPDATE "master"."company_preferences" SET notes = :n WHERE id = :id'), {"n": "x", "id": pref.id})
+    db.commit()
+
+    assert _updated_at_of(db, pref.id) > before
+
+
+def test_a_no_op_update_leaves_updated_at_alone(db: Session, user: User) -> None:
+    """The ``WHEN`` guard: a statement that changed nothing did not modify the row."""
+    pref = CompanyPreference(
+        user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1, notes="keep"
+    )
+    db.add(pref)
+    db.commit()
+    before = _updated_at_of(db, pref.id)
+
+    db.execute(text('UPDATE "master"."company_preferences" SET notes = notes WHERE id = :id'), {"id": pref.id})
+    db.commit()
+
+    assert _updated_at_of(db, pref.id) == before
+
+
+def test_the_function_and_every_trigger_are_live(db: Session) -> None:
+    from app.core.db_triggers import trigger_name
+
+    function = db.execute(
+        text(
+            "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'public' AND p.proname = 'set_updated_at'"
+        )
+    ).scalar()
+    triggers = set(db.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars().all())
+
+    assert function == 1, "public.set_updated_at() is missing"
+    expected = {trigger_name(table.name) for table in Base.metadata.sorted_tables}
+    assert len(expected) == 27
+    assert expected <= triggers
+
+
+# ------------------------------------------- created_by / updated_by
+
+
+def test_the_request_actor_is_stamped_through_the_api(client: TestClient, db: Session) -> None:
+    """Register, then change the profile: both audit columns name the acting user."""
+    payload = {"email": "stamped@example.com", "password": "StrongPass123", "full_name": "Stamped"}
+    registered = client.post("/api/v1/auth/register", json=payload)
+    assert registered.status_code in (200, 201), registered.text
+    token = registered.json()["access_token"]
+    user_id = uuid.UUID(registered.json()["user"]["id"])
+
+    # The account is its own author - nobody else was there to create it.
+    account = db.get(User, user_id)
+    assert account.created_by == user_id
+    assert account.updated_by == user_id
+
+    update = client.put(
+        "/api/v1/profile",
+        json={"headline": "Backend engineer"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert update.status_code == 200, update.text
+
+    db.expire_all()
+    profile = db.scalars(select(UserProfile).where(UserProfile.user_id == user_id)).one()
+    assert profile.created_by == user_id
+    assert profile.updated_by == user_id
+
+
+def test_a_write_with_no_actor_is_a_system_write(db: Session, user: User) -> None:
+    """Background work nobody asked for leaves both columns NULL, and that is the
+    answer: no user did this."""
+    pref = CompanyPreference(user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1)
+    db.add(pref)
+    db.flush()
+    assert pref.created_by is None
+    assert pref.updated_by is None
+
+
+def test_background_work_can_name_the_user_it_acts_for(db: Session, user: User) -> None:
+    with actor_context(user.id):
+        pref = CompanyPreference(user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1)
+        db.add(pref)
+        db.flush()
+    assert pref.created_by == user.id
+    assert pref.updated_by == user.id
+
+
+def test_an_explicit_created_by_is_never_overwritten(db: Session, user: User) -> None:
+    """The seeder fabricates history and owns the attribution of what it writes."""
+    other = auth_service.create_user(db, "author@example.com", "StrongPass123", "Author")
+    db.flush()
+
+    with actor_context(user.id):
+        pref = CompanyPreference(
+            user_id=user.id,
+            company_name="Acme",
+            normalized_name="acme",
+            priority=CompanyPriority.P1,
+            created_by=other.id,
+        )
+        db.add(pref)
+        db.flush()
+
+    assert pref.created_by == other.id  # kept
+    assert pref.updated_by == user.id  # only the column nobody set is filled in
+
+
+def test_updated_by_follows_the_next_writer(db: Session, user: User) -> None:
+    other = auth_service.create_user(db, "second@example.com", "StrongPass123", "Second")
+    db.flush()
+
+    with actor_context(user.id):
+        pref = CompanyPreference(user_id=user.id, company_name="Acme", normalized_name="acme", priority=CompanyPriority.P1)
+        db.add(pref)
+        db.flush()
+
+    with actor_context(other.id):
+        pref.notes = "changed"
+        db.flush()
+
+    assert pref.created_by == user.id  # unchanged
+    assert pref.updated_by == other.id
+
+
+def test_the_audit_columns_are_not_an_api_field(api: TestClient) -> None:
+    """A database-level trail, not a UI feature: nothing leaks them by accident."""
+    created = api.post(PREFERENCES, json={"company_name": "Acme Corp", "priority": "P1"}).json()
+    assert "created_by" not in created
+    assert "updated_by" not in created

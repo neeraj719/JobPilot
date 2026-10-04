@@ -10,8 +10,10 @@ from app.models.base import (
     SCHEMA_UNIFIED,
     SCHEMAS,
     SQLITE_SCHEMA_TRANSLATE_MAP,
+    AuditUserMixin,
     Base,
     LifecycleMixin,
+    StandardColumnsMixin,
 )
 from app.models.company import Company
 from app.models.email import EmailIntegration, EmailMessage
@@ -25,7 +27,9 @@ from app.models.user import DEFAULT_ROLES, RefreshToken, Role, User, UserRoleAss
 
 __all__ = [
     "Base",
+    "AuditUserMixin",
     "LifecycleMixin",
+    "StandardColumnsMixin",
     "SCHEMA_MASTER",
     "SCHEMA_UNIFIED",
     "SCHEMA_TRANSACTION",

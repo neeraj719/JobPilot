@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.core.database import SessionLocal, engine  # noqa: E402
+from app.core.db_triggers import create_updated_at_triggers, drop_updated_at_triggers, metadata_tables  # noqa: E402
 from app.models import DEFAULT_ROLES, SCHEMAS, Base  # noqa: E402
 
 _SAFE_URL = make_url(TEST_DATABASE_URL).render_as_string(hide_password=True)
@@ -76,12 +77,16 @@ def _seed_roles(conn) -> None:
     builds its schema from ``Base.metadata`` and wipes every table between tests, so the
     two rows have to be put back each time or the first ``create_user`` after a truncate
     would have no ``USER`` role to map to.
+
+    The timestamps are left out of the INSERT deliberately: ``created_at``/``updated_at``
+    are the database's to fill (``DEFAULT now()``), and naming them here would quietly
+    stop exercising that.
     """
     for name, description in DEFAULT_ROLES:
         conn.execute(
             text(
-                'INSERT INTO "master"."roles" (id, name, description, is_active, created_at, updated_at) '
-                "VALUES (gen_random_uuid(), :name, :description, true, now(), now())"
+                'INSERT INTO "master"."roles" (id, name, description, is_active) '
+                "VALUES (gen_random_uuid(), :name, :description, true)"
             ),
             {"name": name, "description": description},
         )
@@ -112,8 +117,16 @@ def _create_schema():
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        # ``updated_at`` is maintained by a trigger, and triggers are not part of
+        # SQLAlchemy metadata — ``create_all`` does not know about them. Without this the
+        # convention would hold in production and not here, and the test that proves a
+        # raw UPDATE bumps the timestamp would be proving nothing. Same helper the
+        # migration calls, so the two cannot drift.
+        create_updated_at_triggers(conn, metadata_tables(Base.metadata))
         _seed_roles(conn)
     yield
+    with engine.begin() as conn:
+        drop_updated_at_triggers(conn, metadata_tables(Base.metadata))
     Base.metadata.drop_all(bind=engine)
     with engine.begin() as conn:
         for schema in SCHEMAS:

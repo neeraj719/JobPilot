@@ -16,6 +16,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.actor import actor_context
 from app.core.database import session_scope
 from app.core.exceptions import ConflictError
 
@@ -75,20 +76,28 @@ def _execute(application_id: uuid.UUID, db: Session | None = None) -> Any:
         return ApplicationRunner(application_id, db=session).run()
 
 
-def _thread_target(application_id: uuid.UUID) -> None:
+def _thread_target(application_id: uuid.UUID, actor_id: uuid.UUID | None = None) -> None:
+    # A new thread starts with an empty context, so the acting user has to be published
+    # again inside it or every row the run writes would be filed as a system write.
     try:
-        _execute(application_id)
+        with actor_context(actor_id):
+            _execute(application_id)
     except Exception:  # noqa: BLE001 - a background thread must never raise into the void
         logger.exception("Application run %s crashed", application_id)
     finally:
         _release(application_id)
 
 
-def run_in_background(application_id: uuid.UUID) -> threading.Thread:
-    """Start the run in a daemon thread with its own DB session."""
+def run_in_background(application_id: uuid.UUID, actor_id: uuid.UUID | None = None) -> threading.Thread:
+    """Start the run in a daemon thread with its own DB session.
+
+    ``actor_id`` is the user the run acts for — the application's owner. It is carried
+    across the thread boundary by hand because a ``ContextVar`` is not inherited by a new
+    thread; without it the rows the run writes would have no ``created_by``.
+    """
     thread = threading.Thread(
         target=_thread_target,
-        args=(application_id,),
+        args=(application_id, actor_id),
         name=f"jobpilot-apply-{_key(application_id)[:8]}",
         daemon=True,
     )

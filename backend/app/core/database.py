@@ -20,6 +20,11 @@ from app.core.config import settings
 # ``SessionLocal``, a test's own ``Session(bind=...)``, a script's — is covered without
 # anyone having to remember to opt in. Re-exported below so callers have one import.
 from app.core.soft_delete import INCLUDE_DELETED, is_deleted, restore, soft_delete  # noqa: F401
+
+# Same story for the audit trail: importing ``app.core.actor`` is what attaches the
+# ``before_insert``/``before_update`` listeners that stamp ``created_by``/``updated_by``
+# onto every mapped class. Re-exported so callers have one import for both conventions.
+from app.core.actor import actor_context, get_actor, set_session_actor  # noqa: F401,E402
 from app.models.base import SQLITE_SCHEMA_TRANSLATE_MAP
 
 
@@ -100,6 +105,9 @@ def session_scope() -> Generator[Session, None, None]:
 __all__ = [
     "INCLUDE_DELETED",
     "SessionLocal",
+    "actor_context",
+    "get_actor",
+    "set_session_actor",
     "engine",
     "get_db",
     "is_deleted",

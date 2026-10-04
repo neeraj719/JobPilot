@@ -26,6 +26,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.actor import actor_context
 from app.core.audit import audit
 from app.core.database import session_scope
 from app.core.exceptions import ConflictError, ValidationFailed
@@ -875,9 +876,15 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
         with _step(ctx, STEP_SUBMIT) as record:
             submitted = 0
             skipped: list[str] = []
+            not_prepared: list[str] = []
             delay = float(ctx.config.delay_between_actions_seconds or 0)
             for index, application in enumerate(ctx.queued):
                 if not application.auto_submit or not _auto_submit_allowed(ctx, application.source):
+                    continue
+                if str(application.id) in deferred:
+                    # Never prepared or filled (no browser), so there is nothing to submit;
+                    # approving it would only drive the adapter into a guaranteed failure.
+                    not_prepared.append(str(application.id))
                     continue
                 if _needs_user_input(db, application, required_only=False):
                     skipped.append(str(application.id))
@@ -895,7 +902,13 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
                 record["message"] = "Auto-submit is disabled; applications wait for your approval"
             else:
                 record["message"] = f"{submitted} applications submitted automatically"
-            record["data"] = {"submitted": submitted, "skipped_needs_input": skipped}
+                if not_prepared:
+                    record["message"] += f"; {len(not_prepared)} still QUEUED (no browser)"
+            record["data"] = {
+                "submitted": submitted,
+                "skipped_needs_input": skipped,
+                "skipped_not_prepared": not_prepared,
+            }
 
     except _Cancelled:
         return _finish(ctx, cancelled=True)
@@ -1036,10 +1049,14 @@ def run_pipeline(
         if token is None:
             raise ConflictError("An automation run is already in progress for this account", code="automation_running")
     try:
-        if db is not None:
-            return _bootstrap(db, user_id, trigger, run_id, dry_run, sleep_fn)
-        with session_scope() as session:
-            return _bootstrap(session, user_id, trigger, run_id, dry_run, sleep_fn)
+        # The pipeline acts *for* this user, from a scheduler tick or a worker thread as
+        # often as from a request, so it publishes the actor itself: every row it writes
+        # is attributed to the user rather than filed as an anonymous system write.
+        with actor_context(user_id):
+            if db is not None:
+                return _bootstrap(db, user_id, trigger, run_id, dry_run, sleep_fn)
+            with session_scope() as session:
+                return _bootstrap(session, user_id, trigger, run_id, dry_run, sleep_fn)
     finally:
         if token is not None:
             locks.release_lock(user_id, token)

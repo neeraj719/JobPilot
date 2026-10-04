@@ -9,6 +9,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.actor import set_session_actor
 from app.core.database import get_db
 from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.core.security import decode_access_token
@@ -38,6 +39,11 @@ def get_current_user(
     if user is None or not user.is_active:
         raise UnauthorizedError("User not found or inactive")
     request.state.user_id = str(user.id)
+    # Everything this request writes through this session is attributed to this user:
+    # ``created_by`` / ``updated_by`` are stamped at flush time by ``app.core.actor``.
+    # The session rather than a ContextVar because a ContextVar set here would be
+    # discarded — Starlette runs sync dependencies in a copy of the request's context.
+    set_session_actor(db, user.id)
     return user
 
 

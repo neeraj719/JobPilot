@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.actor import ActorMiddleware
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
@@ -74,6 +75,10 @@ def create_app() -> FastAPI:
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RateLimitMiddleware)
+    # Wraps everything but CORS (Starlette nests in reverse order of registration), so
+    # the acting user is published before any handler runs and is still set while the
+    # response is produced. Plain ASGI on purpose — see app/core/actor.py.
+    app.add_middleware(ActorMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,

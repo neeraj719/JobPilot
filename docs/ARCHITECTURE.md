@@ -31,10 +31,17 @@ Layering rule (spec §21): **router → service → (AI | browser | adapters) �
 all business logic lives in `service.py` files; cross-module calls go through the functions listed
 in `docs/CONTRACTS.md`.
 
-Database rule: all 27 tables carry a uuid `id`, `is_active` and `deleted_at`; deletes are soft and
-hidden by one global ORM filter in `app/core/soft_delete.py` (escape hatch:
+Database rule: all 27 tables carry the same seven standard columns — a uuid `id`, `created_at`,
+`updated_at`, `created_by`, `updated_by`, `is_active`, `deleted_at` — from one mixin; deletes are
+soft and hidden by one global ORM filter in `app/core/soft_delete.py` (escape hatch:
 `execution_options(include_deleted=True)`), and roles live in `master.roles` + `master.user_roles`
 rather than in a column — see `docs/DATABASE.md` § Conventions.
+
+The two timestamps belong to the database, not to the ORM: a server default fills them and one
+`trg_<table>_updated_at` trigger per table bumps `updated_at` on any UPDATE that really changes the
+row, so a write the ORM never sees moves it too. `created_by`/`updated_by` are stamped from the
+acting user published by `app/core/actor.py` (the request's session, or `actor_context()` around a
+background entry point); `NULL` means a system write.
 
 ## 2. Backend module map
 

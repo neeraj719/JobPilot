@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_UNIFIED, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_UNIFIED, Base, StandardColumnsMixin, UTCDateTime
 from app.models.enums import ApplicationType, CompanyPriority, EmploymentType, JobSourceType, WorkMode
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Job(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Job(StandardColumnsMixin, Base):
     """A normalised job posting. The same posting seen on several platforms is ONE
     Job with several JobSource rows (see spec §17 duplicate detection)."""
 
@@ -55,7 +55,7 @@ class Job(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     applications: Mapped[list[Application]] = relationship(back_populates="job")
 
 
-class JobSource(UUIDMixin, LifecycleMixin, Base):
+class JobSource(StandardColumnsMixin, Base):
     """Where a Job was seen (LinkedIn, Naukri, company site...)."""
 
     __tablename__ = "job_sources"
@@ -77,7 +77,7 @@ class JobSource(UUIDMixin, LifecycleMixin, Base):
     job: Mapped[Job] = relationship(back_populates="sources")
 
 
-class JobMatch(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class JobMatch(StandardColumnsMixin, Base):
     """AI/heuristic match of a Job against a user's profile, resume and preferences."""
 
     __tablename__ = "job_matches"
@@ -111,5 +111,5 @@ class JobMatch(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     model_used: Mapped[str | None] = mapped_column(String(80))
 
     job: Mapped[Job] = relationship(back_populates="matches")
-    user: Mapped[User] = relationship()
+    user: Mapped[User] = relationship(foreign_keys=lambda: [JobMatch.user_id])
     resume: Mapped[Resume | None] = relationship()

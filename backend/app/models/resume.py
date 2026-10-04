@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MASTER, SCHEMA_MEDIA, Base, LifecycleMixin, TimestampMixin, UTCDateTime, UUIDMixin
+from app.models.base import SCHEMA_MASTER, SCHEMA_MEDIA, Base, StandardColumnsMixin, UTCDateTime
 from app.models.enums import ResumeParseStatus
 
 if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Resume(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Resume(StandardColumnsMixin, Base):
     __tablename__ = "resumes"
     __table_args__ = {"schema": SCHEMA_MEDIA}
 
@@ -40,11 +40,11 @@ class Resume(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     parsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
-    user: Mapped[User] = relationship(back_populates="resumes")
+    user: Mapped[User] = relationship(back_populates="resumes", foreign_keys=lambda: [Resume.user_id])
     versions: Mapped[list[ResumeVersion]] = relationship(back_populates="resume", cascade="all, delete-orphan", order_by="ResumeVersion.version_number")
 
 
-class ResumeVersion(UUIDMixin, LifecycleMixin, Base):
+class ResumeVersion(StandardColumnsMixin, Base):
     """Immutable history of a resume's file + parsed data."""
 
     __tablename__ = "resume_versions"
@@ -55,12 +55,11 @@ class ResumeVersion(UUIDMixin, LifecycleMixin, Base):
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     parsed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     note: Mapped[str | None] = mapped_column(String(500))
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     resume: Mapped[Resume] = relationship(back_populates="versions")
 
 
-class Skill(UUIDMixin, LifecycleMixin, Base):
+class Skill(StandardColumnsMixin, Base):
     """Lightweight skill taxonomy used for normalisation ("ReactJS" -> "React")."""
 
     __tablename__ = "skills"

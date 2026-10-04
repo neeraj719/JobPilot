@@ -10,10 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import (
     SCHEMA_MASTER,
     Base,
-    LifecycleMixin,
-    TimestampMixin,
+    StandardColumnsMixin,
     UTCDateTime,
-    UUIDMixin,
     soft_delete_where,
 )
 from app.models.enums import UserRole
@@ -37,7 +35,7 @@ DEFAULT_ROLES: tuple[tuple[str, str], ...] = (
 )
 
 
-class Role(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class Role(StandardColumnsMixin, Base):
     """A named role. The row is the authority; :class:`~app.models.enums.UserRole` stays
     as the *vocabulary* of the well-known names the code guards on (``USER``, ``ADMIN``).
 
@@ -59,7 +57,7 @@ class Role(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
         return f"<Role {self.name}>"
 
 
-class UserRoleAssignment(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class UserRoleAssignment(StandardColumnsMixin, Base):
     """The user↔role junction: one row per role a user holds. Nothing else lives here.
 
     The class is named ``UserRoleAssignment`` only because ``UserRole`` is already taken
@@ -89,7 +87,7 @@ class UserRoleAssignment(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
     role: Mapped[Role] = relationship(lazy="joined")
 
 
-class User(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
+class User(StandardColumnsMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
         # Partial unique: a soft-deleted account must not keep its address hostage, so
@@ -122,16 +120,36 @@ class User(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
         overlaps="role",
     )
 
-    profile: Mapped[UserProfile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    job_preference: Mapped[JobPreference | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    company_preferences: Mapped[list[CompanyPreference]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    resumes: Mapped[list[Resume]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    applications: Mapped[list[Application]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    automation_config: Mapped[AutomationConfig | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    email_integration: Mapped[EmailIntegration | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    connected_accounts: Mapped[list[ConnectedAccount]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    notifications: Mapped[list[Notification]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    refresh_tokens: Mapped[list[RefreshToken]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped[UserProfile | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan", foreign_keys="UserProfile.user_id"
+    )
+    job_preference: Mapped[JobPreference | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan", foreign_keys="JobPreference.user_id"
+    )
+    company_preferences: Mapped[list[CompanyPreference]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="CompanyPreference.user_id"
+    )
+    resumes: Mapped[list[Resume]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="Resume.user_id"
+    )
+    applications: Mapped[list[Application]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="Application.user_id"
+    )
+    automation_config: Mapped[AutomationConfig | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan", foreign_keys="AutomationConfig.user_id"
+    )
+    email_integration: Mapped[EmailIntegration | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan", foreign_keys="EmailIntegration.user_id"
+    )
+    connected_accounts: Mapped[list[ConnectedAccount]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="ConnectedAccount.user_id"
+    )
+    notifications: Mapped[list[Notification]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="Notification.user_id"
+    )
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="RefreshToken.user_id"
+    )
 
     @property
     def role_names(self) -> list[str]:
@@ -156,7 +174,7 @@ class User(UUIDMixin, TimestampMixin, LifecycleMixin, Base):
         return any(role.name == wanted for role in self.roles)
 
 
-class RefreshToken(UUIDMixin, LifecycleMixin, Base):
+class RefreshToken(StandardColumnsMixin, Base):
     """Opaque refresh tokens, stored hashed. Rotated on every refresh."""
 
     __tablename__ = "refresh_tokens"
@@ -168,6 +186,5 @@ class RefreshToken(UUIDMixin, LifecycleMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     replaced_by_hash: Mapped[str | None] = mapped_column(String(128))
     user_agent: Mapped[str | None] = mapped_column(String(512))
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
-    user: Mapped[User] = relationship(back_populates="refresh_tokens")
+    user: Mapped[User] = relationship(back_populates="refresh_tokens", foreign_keys=lambda: [RefreshToken.user_id])

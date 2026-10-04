@@ -8,6 +8,14 @@ pipeline execution goes through the per-user lock in :mod:`app.modules.automatio
 ``sync_gmail``                       every 30 minutes — pull new mail for connected accounts
 ``mark_no_response``                 nightly 02:00 UTC — APPLIED + 21 days + silence → NO_RESPONSE
 ``cleanup_expired_browser_sessions`` daily 03:00 UTC — expire stale Playwright storage state
+
+Who the rows say wrote them (``created_by`` / ``updated_by``, see :mod:`app.core.actor`)
+follows the same split. ``tick_scheduled_runs`` and ``sync_gmail`` act *for* a user and
+publish that user as the actor — the pipeline does it in ``run_pipeline`` and the ingest
+in ``integrations.service.sync_gmail`` — so their rows carry the owner. The two
+housekeeping jobs are the scheduler's own decisions, taken on nobody's behalf, so they
+write with no actor and the rows read as system writes (``NULL``). That is the honest
+answer to "who marked this application NO_RESPONSE": not the candidate.
 """
 from __future__ import annotations
 
