@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Open roles - Demo ATS{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Open roles</h1>
+  <p class="meta">{{ total }} fictional postings across {{ companies|length }} demo companies. Nothing here is a real
+    job: applications are stored locally so JobPilot can demonstrate its autofill and tracking flow.</p>
+</div>
+
+{% for company in companies %}
+<div class="card company-block">
+  <h2>{{ company.name }}{% if company.is_mirror %} <span class="pill">demo mirror</span>{% endif %}</h2>
+  <p class="meta">{{ company.domain }}</p>
+  {% for job in company.jobs %}
+  <div class="job-row">
+    <div>
+      <a href="/demo-ats/jobs/{{ job.slug }}">{{ job.title }}</a>
+      <div class="meta">{{ job.location }} &middot; {{ job.work_mode|title }} &middot; {{ job.experience_min }}-{{ job.experience_max }} yrs</div>
+    </div>
+    <div class="meta">{{ job.salary_min // 100000 }}-{{ job.salary_max // 100000 }} LPA</div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}

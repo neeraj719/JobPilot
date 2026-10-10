@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }} - {{ job.company }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="meta"><a href="/demo-ats/">All roles</a></p>
+  <h1>{{ job.title }}</h1>
+  <p class="meta">{{ job.company }} &middot; {{ job.location }} &middot; {{ job.work_mode|title }} &middot;
+    {{ job.employment_type|replace("_", " ")|title }}</p>
+  <p>
+    <span class="pill">{{ job.experience_min }}-{{ job.experience_max }} years</span>
+    <span class="pill">{{ job.salary_min // 100000 }}-{{ job.salary_max // 100000 }} LPA ({{ job.salary_currency }})</span>
+    <span class="pill">Posted {{ job.posted_hours_ago }}h ago</span>
+    {% if job.is_mirror %}<span class="pill">demo mirror - not a real employer site</span>{% endif %}
+  </p>
+  <p><a class="btn" href="/demo-ats/jobs/{{ job.slug }}/apply">Apply for this job</a></p>
+</div>
+
+<div class="card">
+  <h2>About the role</h2>
+  <div class="description">{{ job.description }}</div>
+
+  <h3>Required skills</h3>
+  <p>{% for skill in job.required_skills %}<span class="pill">{{ skill }}</span>{% endfor %}</p>
+
+  <h3>Nice to have</h3>
+  <p>{% for skill in job.preferred_skills %}<span class="pill">{{ skill }}</span>{% endfor %}</p>
+
+  <p><a class="btn" href="/demo-ats/jobs/{{ job.slug }}/apply">Apply for this job</a></p>
+</div>
+{% endblock %}

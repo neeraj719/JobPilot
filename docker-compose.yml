@@ -1,0 +1,137 @@
+name: jobpilot
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    # Come back by themselves after a Docker Desktop restart, a crash or a reboot.
+    # The named volume below already survives all of those; this just means you do not
+    # have to remember to run "docker compose up -d" again afterwards.
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jobpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobpilot}
+      POSTGRES_DB: ${POSTGRES_DB:-jobpilot}
+    ports:
+      # Published on 5433 because a natively installed PostgreSQL commonly already holds
+      # 5432 on a developer machine. Inside the compose network the services still reach
+      # this container as postgres:5432; only the host-side port differs.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      # PostgreSQL 18's image stores data in a major-version subdirectory, so the mount
+      # goes at /var/lib/postgresql, not .../data as it did up to 17. Mounting the old
+      # path makes an 18 container refuse to start. See docker-library/postgres#1259.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobpilot} -d ${POSTGRES_DB:-jobpilot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /data/uploads
+      # The headless browser runs inside this container, so it reaches the demo ATS via localhost.
+      DEMO_ATS_BASE_URL: http://localhost:8000
+      # Chromium's sandbox needs user namespaces the default container profile blocks.
+      BROWSER_DISABLE_SANDBOX: "true"
+      # Nginx (the frontend service) is the only hop in front of the API, so its
+      # forwarding headers can be trusted for per-client rate limiting.
+      # IMPORTANT for a real deployment: drop the published "8000:8000" port below so the
+      # API is reachable only through that proxy. While the port is published a client can
+      # bypass Nginx and set X-Real-IP itself, which is exactly what this setting trusts.
+      TRUST_PROXY_HEADERS: "true"
+      RUN_MIGRATIONS: "true"
+      RUN_SEED: ${SEED_DEMO_DATA:-true}
+      # Only used with LLM_PROVIDER=ollama: Ollama runs natively on the host (see the
+      # commented-out "ollama" service below), and "localhost" here is this container.
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-jobpilot}:${POSTGRES_PASSWORD:-jobpilot}@postgres:5432/${POSTGRES_DB:-jobpilot}
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /data/uploads
+      DEMO_ATS_BASE_URL: http://backend:8000
+      BROWSER_DISABLE_SANDBOX: "true"
+      RUN_MIGRATIONS: "false"
+      RUN_SEED: "false"
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+    command: ["python", "-m", "app.worker.main"]
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Local LLM (LLM_PROVIDER=ollama). Deliberately NOT enabled: on the development machine
+  # Ollama runs natively on the host (installed with winget, GPU via the host driver), and
+  # the backend/worker containers reach it at host.docker.internal:11434. Uncomment this
+  # block (and the "ollama" volume at the bottom) only to run Ollama in Docker instead; then
+  # set OLLAMA_DOCKER_BASE_URL=http://ollama:11434 and pull the model once with
+  #   docker compose exec ollama ollama pull qwen2.5:3b-instruct
+  # The GPU reservation needs the NVIDIA Container Toolkit (Docker Desktop + WSL2 on Windows).
+  # ollama:
+  #   image: ollama/ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api/v1
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:
+  # ollama:

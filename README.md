@@ -1,93 +1,151 @@
-# job-application
+# JobPilot AI
 
+> Discover relevant software-engineering jobs across platforms, match them to your resume with AI,
+> prepare and autofill applications with a human-in-the-loop approval step, and track every
+> response — from one dashboard.
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+**Status:** MVP / prototype. The complete vertical slice works end to end:
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/aiml.org/job-application.git
-git branch -M main
-git push -uf origin main
+Resume → Preferences → Job discovery → AI matching → Application queue → AI form answers
+       → Browser autofill (Playwright) → Human review → Submission → Email response → Dashboard
 ```
 
-## Integrate with your tools
+Real job boards (LinkedIn, Naukri, Indeed, Hirist, Wellfound, Internshala, Glassdoor, Foundit) ship as
+**mock adapters** behind a common `JobSourceAdapter` interface, plus a local **Demo ATS** career
+site that the real Playwright autofill drives. Adding a production adapter is a single class.
 
-* [Set up project integrations](https://gitlab.com/aiml.org/job-application/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Quick start (Docker)
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```bash
+cp .env.example .env          # defaults work out of the box (mock LLM, no external keys needed)
+docker compose up --build
+```
 
-## Test and Deploy
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:5173 |
+| API + Swagger | http://localhost:8000/docs |
+| Demo ATS career site | http://localhost:8000/demo-ats/ |
+| Postgres | localhost:5432 (`jobpilot` / `jobpilot`) |
 
-Use the built-in continuous integration in GitLab.
+Demo login (seeded automatically): **demo@jobpilot.ai** / **DemoPass123!**
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+The seed creates a complete profile (2 yrs, React/Node/TypeScript/PostgreSQL/Docker/AWS), a parsed
+resume, preferences (₹12 LPA+, Bangalore/Hyderabad/Pune/Delhi NCR/Remote, P1 = Google/Microsoft/Amazon),
+~130 discovered jobs across all sources, a queue, three weeks of application history, emails,
+interviews and audit logs — so the dashboard is alive on first login.
 
-***
+## Quick start (local, no Docker)
 
-# Editing this README
+```bash
+# backend
+cd backend
+python -m venv .venv && . .venv/Scripts/activate     # Windows; use .venv/bin/activate on macOS/Linux
+pip install -r requirements.txt
+python -m playwright install chromium               # for the autofill demo
+set DATABASE_URL=sqlite+pysqlite:///./dev.db         # or point at a local Postgres
+alembic upgrade head && python -m app.seed
+uvicorn app.main:app --reload --port 8000
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+# frontend (second terminal)
+cd frontend && npm install && npm run dev            # http://localhost:5173, proxies /api → :8000
+```
 
-## Suggestions for a good README
+Run the tests: `cd backend && pytest` (SQLite + mock LLM, no services required) and
+`cd frontend && npm run typecheck && npm run build`.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### Free local AI with Ollama (recommended)
 
-## Name
-Choose a self-explaining name for your project.
+The mock LLM is rule-based. For real model output at zero cost, run a local model with
+[Ollama](https://ollama.com); nothing is sent to a hosted API and no key is needed.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```bash
+winget install --id Ollama.Ollama -e    # Windows; macOS/Linux: see ollama.com/download
+ollama pull qwen2.5:3b-instruct          # ~1.9 GB, fits a 4 GB GPU with an 8k context
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Then set two lines in `.env` and restart the API:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+```bash
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen2.5:3b-instruct
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+`GET /api/v1/ai/status` reports `configured: true` once the server answers and the model is pulled.
+`qwen2.5:7b-instruct` (~4.7 GB) writes noticeably better text, but on a 4 GB GPU it splits between
+GPU and CPU and runs roughly 5-10x slower, so the 3b model is the default. Under Docker the API
+reaches the host's Ollama at `host.docker.internal:11434` (already set in `docker-compose.yml`).
+Optional: `OLLAMA_BASE_URL`, `OLLAMA_KEEP_ALIVE` (default `10m`), `OLLAMA_NUM_CTX` (default `8192`).
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## The demo scenario (spec §31)
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+1. Log in as the demo user → **Dashboard** shows jobs found / matched / high-match / queued and what needs attention.
+2. **Resume** → upload your own PDF/DOCX; AI extracts skills, experience, education into editable JSON.
+3. **Profile / Settings** → salary, locations, titles, P1/P2/P3 companies, daily limit, minimum match.
+4. **Jobs** → *Discover* pulls from every enabled source, merges duplicates, and shows match % with an explanation and missing skills.
+5. **Application Queue** → pick a Demo ATS job → *Apply*. The engine generates answers from your profile (never inventing facts), Playwright opens the form, detects fields (name, email, phone, resume, experience, salary, LinkedIn, GitHub…), autofills them, and **pauses** on the question it cannot answer (`REQUIRES_USER`).
+6. Answer it, review everything in the **Approval Center**, click **Approve & Submit** → status `APPLIED`.
+7. The Demo ATS sends "Thank you for applying…" → the email classifier marks it `APPLICATION_RECEIVED` → the application and dashboard update. (With Gmail connected the same pipeline runs on your real inbox, read-only.)
+8. **Automation** → enable the 09:00 daily run (limit 20/day, ≥75 % match) or press *Run now*.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## Architecture
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/DATABASE.md`](docs/DATABASE.md),
+[`docs/SECURITY.md`](docs/SECURITY.md), [`docs/API.md`](docs/API.md) and the module contract in
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md).
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```
+frontend/   React 18 + TypeScript + Vite + Tailwind + shadcn/ui + React Router + Zustand + TanStack Query + RHF + Zod
+backend/    FastAPI + Pydantic v2 + SQLAlchemy 2 + Alembic + PostgreSQL + Redis + APScheduler + Playwright
+  app/core/        config, db, security (JWT / bcrypt / Fernet), rate limiting, audit
+  app/models/      25 tables (see docs/DATABASE.md)
+  app/modules/     auth · profiles · companies · resumes · ai · adapters · jobs · matching ·
+                   applications · interviews · browser · emails · integrations · automation ·
+                   dashboard · notifications · audit
+  app/demo_ats/    local Greenhouse-style career site for the autofill demo
+  app/worker/      scheduler process (daily runs, Gmail sync, housekeeping)
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Configuration
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Everything is environment-driven — see [`.env.example`](.env.example). Highlights:
+
+| Variable | Purpose |
+|---|---|
+| `LLM_PROVIDER` | `mock` (default, deterministic, no key) · `ollama` (free local model, recommended) · `openai` · `anthropic` |
+| `LLM_MODEL` | model name; `qwen2.5:3b-instruct` when `LLM_PROVIDER=ollama` and unset |
+| `OLLAMA_BASE_URL`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_NUM_CTX` | local Ollama server, model residency, context size |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | only needed for the hosted providers |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | enable Gmail OAuth (read-only scope) |
+| `SECRET_KEY`, `ENCRYPTION_KEY` | JWT signing / Fernet encryption — change in production |
+| `DEFAULT_DAILY_APPLICATION_LIMIT`, `MAX_DAILY_APPLICATION_LIMIT` | automation safety rails |
+| `PLAYWRIGHT_HEADLESS` | set `false` to watch the browser fill the demo form |
+
+## Safety & compliance
+
+* No CAPTCHA / OTP / 2FA / anti-bot bypass — the run pauses and asks you.
+* Gmail: OAuth only, `gmail.readonly` scope, tokens encrypted at rest, never a password.
+* Auto-submit is off by default and can only be enabled per supported source; every run respects
+  daily/per-platform limits, delays and retry limits; every action is audit-logged.
+* AI answers are grounded in your profile; missing facts become `NEEDS_USER_INPUT` rather than guesses.
+
+## Adding a job platform
+
+```python
+# backend/app/modules/adapters/my_board.py
+class MyBoardAdapter(JobSourceAdapter):
+    source = JobSourceType.OTHER
+    display_name = "My Board"
+    def search_jobs(self, query: SearchQuery) -> list[DiscoveredJob]: ...
+    def start_application(self, ctx): ...   # navigate
+    def fill_application(self, ctx): ...    # reuse browser.detector / mapper / autofill
+    def submit_application(self, ctx): ...
+```
+Register it in `adapters/registry.py`; it appears in Settings → Connected Accounts automatically.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT (prototype).

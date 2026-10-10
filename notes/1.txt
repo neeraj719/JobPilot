@@ -1,0 +1,7 @@
+Backups and restore: see docs/DATABASE.md, section "Backups and restore".
+  make db-backup          (or: sh backend/scripts/db_backup.sh)          -> backups/jobpilot-YYYYMMDD-HHMMSS.dump, keeps newest 14
+  make db-restore-check   (or: sh backend/scripts/db_restore_check.sh)   -> restores newest dump into a scratch DB, checks it, drops it
+  (Git Bash has no make; use the sh commands.)
+
+Fallback, the original one-off command (no verification, no retention):
+docker compose exec -T postgres pg_dump -U jobpilot -d jobpilot --format=custom > backups/jobpilot-$(date +%Y%m%d).dump

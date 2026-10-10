@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Apply - {{ job.title }} - {{ job.company }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="meta"><a href="/demo-ats/jobs/{{ job.slug }}">Back to the job description</a></p>
+  <h1>Apply for {{ job.title }}</h1>
+  <p class="meta">{{ job.company }} &middot; {{ job.location }}</p>
+</div>
+
+<div class="card">
+  {% if errors %}
+  <div class="errors">
+    <strong>Please correct the following before submitting:</strong>
+    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/demo-ats/jobs/{{ job.slug }}/apply{% if captcha %}?captcha=1{% endif %}"
+        enctype="multipart/form-data" novalidate>
+
+    <div class="field">
+      <label for="first_name">First Name <span class="req">*</span></label>
+      <input type="text" id="first_name" name="first_name" autocomplete="given-name" value="{{ values.first_name }}" required>
+    </div>
+
+    <div class="field">
+      <label for="last_name">Last Name <span class="req">*</span></label>
+      <input type="text" id="last_name" name="last_name" autocomplete="family-name" value="{{ values.last_name }}" required>
+    </div>
+
+    <div class="field">
+      <label for="email">Email <span class="req">*</span></label>
+      <input type="email" id="email" name="email" autocomplete="email" value="{{ values.email }}" required>
+    </div>
+
+    <div class="field">
+      <label for="phone">Phone <span class="req">*</span></label>
+      <input type="tel" id="phone" name="phone" autocomplete="tel" placeholder="+91 98765 43210" value="{{ values.phone }}" required>
+    </div>
+
+    <div class="field">
+      <label for="location">Location (City) <span class="req">*</span></label>
+      <input type="text" id="location" name="location" placeholder="City you are based in" value="{{ values.location }}" required>
+    </div>
+
+    <div class="field">
+      <label for="linkedin">LinkedIn Profile</label>
+      <input type="url" id="linkedin" name="linkedin" placeholder="https://linkedin.com/in/..." value="{{ values.linkedin }}">
+    </div>
+
+    <div class="field">
+      <label for="github">GitHub URL</label>
+      <input type="url" id="github" name="github" placeholder="https://github.com/..." value="{{ values.github }}">
+    </div>
+
+    <div class="field">
+      <label for="portfolio">Portfolio (optional)</label>
+      <input type="url" id="portfolio" name="portfolio" placeholder="https://" value="{{ values.portfolio }}">
+    </div>
+
+    <div class="field">
+      <label for="resume">Resume/CV <span class="req">*</span></label>
+      <input type="file" id="resume" name="resume" accept=".pdf,.doc,.docx" required>
+      <div class="hint">PDF or Word, up to 10 MB.</div>
+    </div>
+
+    <div class="field">
+      <label for="total_experience">Total Years of Experience <span class="req">*</span></label>
+      <input type="number" id="total_experience" name="total_experience" min="0" max="50" step="0.5"
+             value="{{ values.total_experience }}" required>
+    </div>
+
+    <div class="field">
+      <label for="react_experience">Years of experience with React <span class="req">*</span></label>
+      <input type="number" id="react_experience" name="react_experience" min="0" max="50" step="0.5"
+             value="{{ values.react_experience }}" required>
+    </div>
+
+    <div class="field">
+      <label for="current_ctc">Current CTC (INR per annum)</label>
+      <input type="number" id="current_ctc" name="current_ctc" min="0" step="10000" value="{{ values.current_ctc }}">
+    </div>
+
+    <div class="field">
+      <label for="expected_ctc">Expected CTC (INR per annum) <span class="req">*</span></label>
+      <input type="number" id="expected_ctc" name="expected_ctc" min="0" step="10000" value="{{ values.expected_ctc }}" required>
+    </div>
+
+    <div class="field">
+      <label for="notice_period">Notice Period <span class="req">*</span></label>
+      <select id="notice_period" name="notice_period" required>
+        <option value="">Select...</option>
+        {% for option in notice_periods %}
+        <option value="{{ option }}"{% if values.notice_period == option %} selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <fieldset>
+        <legend>Are you legally authorized to work in India? <span class="req">*</span></legend>
+        <label class="choice" for="work_authorization_yes">
+          <input type="radio" id="work_authorization_yes" name="work_authorization" value="Yes"
+                 {% if values.work_authorization == "Yes" %}checked{% endif %} required> Yes
+        </label>
+        <label class="choice" for="work_authorization_no">
+          <input type="radio" id="work_authorization_no" name="work_authorization" value="No"
+                 {% if values.work_authorization == "No" %}checked{% endif %}> No
+        </label>
+      </fieldset>
+    </div>
+
+    <div class="field">
+      <label for="why_company">Why do you want to work at {{ job.company }}? <span class="req">*</span></label>
+      <textarea id="why_company" name="why_company" rows="5" required>{{ values.why_company }}</textarea>
+    </div>
+
+    {% for question in custom_questions %}
+    <div class="field">
+      <label for="{{ question.key }}">{{ question.label }}{% if question.required %} <span class="req">*</span>{% endif %}</label>
+      {% if question.type == "textarea" %}
+      <textarea id="{{ question.key }}" name="{{ question.key }}" rows="4"
+                {% if question.placeholder %}placeholder="{{ question.placeholder }}"{% endif %}
+                {% if question.required %}required{% endif %}>{{ values.get(question.key, "") }}</textarea>
+      {% elif question.type == "select" %}
+      <select id="{{ question.key }}" name="{{ question.key }}"{% if question.required %} required{% endif %}>
+        <option value="">Select...</option>
+        {% for option in question.options %}
+        <option value="{{ option }}"{% if values.get(question.key) == option %} selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input type="{{ question.type or 'text' }}" id="{{ question.key }}" name="{{ question.key }}"
+             {% if question.placeholder %}placeholder="{{ question.placeholder }}"{% endif %}
+             value="{{ values.get(question.key, '') }}"{% if question.required %} required{% endif %}>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if captcha %}
+    <div class="field">
+      <div class="g-recaptcha" data-sitekey="demo">Verify you are human (demo widget)</div>
+      <div class="hint">This static widget is disabled on purpose. Automated solving is never attempted -
+        JobPilot pauses here and asks you to finish the challenge yourself.</div>
+    </div>
+    {% endif %}
+
+    <div class="field checkbox-field">
+      <label for="consent">
+        <input type="checkbox" id="consent" name="consent" value="true" {% if values.consent %}checked{% endif %} required>
+        <span>I consent to {{ job.company }} storing the information in this application and contacting me about
+          this role. <span class="req">*</span></span>
+      </label>
+    </div>
+
+    <button type="submit">Submit Application</button>
+  </form>
+</div>
+{% endblock %}

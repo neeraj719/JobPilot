@@ -1,0 +1,18 @@
+# The image installs dependencies and builds from source itself.
+node_modules/
+dist/
+dist-ssr/
+.vite/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+npm-debug.log*
