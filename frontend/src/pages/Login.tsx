@@ -8,15 +8,28 @@ import { z } from 'zod'
 
 import { AuthLayout } from '@/components/layout/AuthLayout'
 import { Button } from '@/components/ui/button'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
+import { offerToSavePassword } from '@/lib/credentials'
+import { roleLabel } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth'
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
+  /** "Stay signed in on this device": only how long the session cookie lives. */
+  remember_me: z.boolean(),
 })
 
 type LoginValues = z.infer<typeof loginSchema>
@@ -32,13 +45,31 @@ export default function LoginPage() {
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '' },
+    defaultValues: { email: '', password: '', remember_me: false },
   })
 
   async function onSubmit(values: LoginValues) {
     try {
-      const user = await login(values.email, values.password)
-      toast.success(`Welcome back, ${user.full_name || user.email}`)
+      const outcome = await login(values.email, values.password, values.remember_me)
+      // The password was accepted: let the browser's password manager offer to save it.
+      // That is the only place it goes; our code keeps no copy after this call.
+      offerToSavePassword({ email: values.email, password: values.password, name: outcome.user.full_name })
+      form.resetField('password')
+      if (outcome.status === 'role_selection') {
+        // Several roles held: the session starts only once one is chosen.
+        navigate('/choose-role', { replace: true, state: { from: redirectTo } })
+        return
+      }
+      const { user } = outcome
+      if (outcome.autoSelected) {
+        // Picked silently from this device's remembered role; make switching one click away.
+        toast.success(`Signed in as ${roleLabel(outcome.autoSelected)}.`, {
+          description: `Welcome back, ${user.full_name || user.email}`,
+          action: { label: 'Switch', onClick: () => navigate('/settings?section=roles') },
+        })
+      } else {
+        toast.success(`Welcome back, ${user.full_name || user.email}`)
+      }
       navigate(redirectTo, { replace: true })
     } catch (error) {
       toast.error('Could not sign in', { description: errorMessage(error, 'Check your email and password.') })
@@ -101,6 +132,28 @@ export default function LoginPage() {
                   </div>
                 </FormControl>
                 <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="remember_me"
+            render={({ field }) => (
+              <FormItem className="flex items-start gap-2 space-y-0">
+                <FormControl>
+                  <Checkbox
+                    checked={field.value}
+                    onCheckedChange={(value) => field.onChange(value === true)}
+                    className="mt-0.5"
+                  />
+                </FormControl>
+                <div className="space-y-0.5">
+                  <FormLabel className="text-sm font-normal">Stay signed in on this device</FormLabel>
+                  <FormDescription className="text-xs">
+                    Keeps you signed in for 14 days. Only use on a device you own.
+                  </FormDescription>
+                </div>
               </FormItem>
             )}
           />

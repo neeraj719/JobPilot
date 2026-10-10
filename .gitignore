@@ -1,34 +1,79 @@
-# env / secrets
+# ---------------------------------------------------------------- secrets
+# Every real env file stays local. Only the documented templates are committed.
 .env
+.env.*
+*.env
 *.env.local
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+client_secret*.json
+token.json
+service-account*.json
 
-# python
+# ---------------------------------------------------------------- python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+.python-version
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 *.egg-info/
+.seedtmp/
 
-# uploads / runtime data
+# ---------------------------------------------------------------- runtime data
+# Uploaded resumes, generated documents and local databases contain personal data.
+uploads/
 backend/uploads/
 backend/smoke_uploads/
-backend/*.db
-backend/*.db-wal
-backend/*.db-shm
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 backend/playwright-screenshots/
+playwright-screenshots/
+test-results/
+playwright-report/
+playwright/.cache/
+demo_ats_submissions.jsonl
 
-# node
+# Database dumps (see docs/DATABASE.md, "Backups and restore")
+backups/
+*.dump
+*.dump.partial
+*.sql.gz
+
+# ---------------------------------------------------------------- node / frontend
 node_modules/
 frontend/dist/
+frontend/dist-ssr/
 frontend/.vite/
+frontend/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# editors / os
+# ---------------------------------------------------------------- editors / os
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
 *.log
-backups/
+.claude/settings.local.json

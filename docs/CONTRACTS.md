@@ -79,13 +79,29 @@ Core helpers: `backend/app/core/` (config, database, security, deps, exceptions,
 Endpoints:
 * `POST /register {email, password, full_name}` → `201 TokenResponse` (also creates empty `UserProfile`, `JobPreference`, `AutomationConfig`).
 * `POST /login {email, password}` → `TokenResponse`, sets `refresh_token` HttpOnly cookie (path `/api/v1/auth`).
-* `POST /refresh` (cookie) → `TokenResponse` (rotates refresh token; old one revoked).
+  When the account holds more than one role it returns `RoleSelectionRequired` instead (HTTP 200,
+  **no** cookie). `/register` behaves the same way (a new account holds one role, so it gets tokens).
+* `POST /select-role {selection_token, role, remember=false}` → `TokenResponse` acting as `role`, sets
+  the cookie, audits `auth.role_selected`. Rate-limited like login. `401 selection_token_expired |
+  invalid_selection_token | selection_token_used`, `403 role_not_held`.
+* `POST /switch-role {role}` (auth + refresh cookie) → `TokenResponse` with the new active role;
+  rotates the refresh token, audits `auth.role_switched`. Same role → no-op 200 (same access token, no
+  rotation). Role not held → `403 role_not_held`.
+* `POST /refresh` (cookie) → `TokenResponse` (rotates refresh token; old one revoked; **same active role**).
 * `POST /logout` → revokes refresh token, clears cookie.
 * `GET /me` → `UserRead`.
 * `PUT /me/password {current_password, new_password}`.
 
-`TokenResponse = {access_token: str, token_type: "bearer", expires_in: int, user: UserRead}`
-`UserRead = {id, email, full_name, role, is_active, is_verified, created_at, last_login_at}`
+`TokenResponse = {requires_role_selection: false, access_token: str, token_type: "bearer", expires_in: int, active_role: str, available_roles: list[str], user: UserRead}`
+`RoleSelectionRequired = {requires_role_selection: true, selection_token: str, available_roles: list[str], user: UserRead}` — login/register return the union, discriminated on `requires_role_selection`.
+`UserRead = {id, email, full_name, role, roles, active_role, is_active, is_verified, created_at, last_login_at}` — `role` is the most privileged role *held*, `roles` every role held, `active_role` the role this session acts as (`null` outside a session).
+
+Active role: the access token's `role` claim is the session's active role. `get_current_user` checks
+it is still held (else `401 role_revoked`) and exposes it as `request.state.active_role` and the
+non-persisted `user.active_role`; `require_roles` checks the active role, not membership. A token
+with no `role` claim (pre-change) acts as the highest role held. The active role is carried across
+refresh inside the opaque refresh token (`"<ROLE>.<random>"`, hashed as a whole); nothing is stored
+in the database.
 Password policy: ≥ 8 chars, at least one letter and one digit. Rate limit via `Depends(auth_rate_limit)`.
 
 Service functions others may use: `auth.service.create_user(db, email, password, full_name) -> User`.
@@ -95,11 +111,24 @@ Service functions others may use: `auth.service.create_user(db, email, password,
 * `GET /profile` → `ProfileRead` (every column of `UserProfile` except ids, plus `completeness: int` 0–100 and `missing_fields: list[str]`).
 * `PUT /profile ProfileUpdate` (all optional) → `ProfileRead`. Updating `full_name` auto-derives `first_name`/`last_name` if those are empty and vice versa.
 * `GET /preferences/job` → `JobPreferenceRead`; `PUT /preferences/job JobPreferenceUpdate`.
+* Standing answers — answers the user gives once and the answer engine reuses (`master.standing_answers`):
+  `GET /profiles/standing-answers` → `list[StandingAnswerRead]`; `PUT /profiles/standing-answers StandingAnswerUpsert`
+  (creates, or replaces the row with the same `question_key`) → `StandingAnswerRead`;
+  `DELETE /profiles/standing-answers/{id}` → 204 (soft delete). `StandingAnswerRead = {id, question_key, question_text,
+  field_type, answer, applies_to: "ALL" | JobSourceType[], expires_at, is_active, created_at, updated_at}`.
+  Demographic questions and file fields are refused (`422 standing_answer_not_allowed`). The employer's name in
+  `question_text` is stored as `{company}`.
 
 Service (used by matching, applications, browser):
 * `profiles.service.get_or_create_profile(db, user_id) -> UserProfile`
 * `profiles.service.get_or_create_job_preference(db, user_id) -> JobPreference`
 * `profiles.service.build_candidate_context(db, user_id, resume_id: UUID | None = None) -> CandidateContext`
+* `profiles.service.upsert_standing_answer(db, user_id, *, question_key, question_text, answer, field_type, applies_to, expires_at, is_active, company_name=None)`,
+  `active_standing_answers(db, user_id)`, `find_standing_answer(rows, *, question_key, question_text, source, company_name)` —
+  the last one holds the reuse rules: key match, active, not expired, `applies_to` covers the source; consent and legal
+  declarations (`custom:consent`, `work_authorization`, `requires_sponsorship`, `custom:*legal|declar|certif|agree|terms|privacy*`)
+  additionally need the live wording to match the stored one (normalised `difflib` ratio ≥ 0.9, employer name factored out);
+  demographic questions never use one.
 
 `CandidateContext` (pydantic, in `profiles/schemas.py`) — the **flattened view the answer engine and field mapper read from**:
 ```
@@ -113,6 +142,13 @@ flat: dict[str, Any]               # canonical keys → values (see §11 canonic
 ## 4. companies
 
 * `GET /` `?q=&priority=&page=` → page of `CompanyRead` (+ `priority: CompanyPriority | None` for the current user, `open_jobs: int`, `applications: int`).
+  `CompanyRead` also exposes `ats_type`, `ats_board_token`, `ats_board_url`.
+* `POST /` `{name, website?, board_url?, ats_type?}` → `201 CompanyRead` — add a company by name (`get_or_create_company`, so idempotent on the normalised name). A `board_url` is verified exactly like `PUT /{id}/board` *before* the row is written; `ats_type` may be omitted when the URL's host names the vendor.
+* `PUT /{id}/board` `{ats_type: GREENHOUSE|LEVER|ASHBY|SMARTRECRUITERS, board_url}` → `CompanyBoardResult {company: CompanyRead, board_job_count: int}`. The service parses the token out of the URL (or accepts a bare token), fetches the board once and stores `ats_type`, `ats_board_token`, `ats_board_url`. `422 invalid_board_url` / `422 board_not_found` (404, empty or malformed board) / `502 board_unreachable`.
+* `DELETE /{id}/board` → `CompanyRead` with the token and URL cleared.
+* `POST /` also takes `auto_detect: bool = true` and answers `CompanyDetectResult` = `CompanyRead` + `detection: BoardDetection | null` + `detection_saved: bool`. Without a `board_url`, detection runs (unless the company already has a board) and a found board is stored.
+* `POST /detect-board` `{name?, website?}` → `BoardDetection {ats_type, token, board_url, method: KNOWN|GUESS|SCAN|NONE, open_jobs, tried: list[str], board_company, careers_url, supported, requests}`; nothing is saved; `422 detect_input_required` when both are blank. `POST /{id}/detect-board` → `CompanyDetectResult` (re-runs detection with the company's name and website/domain, stores a found board, `200` with `method=NONE` otherwise). These three are rate limited to 10 per minute per user (`POST /` only when it detects or verifies a board) → `429 rate_limited`.
+* `GET /suggestions?limit=20` → `CompanySuggestions {items: [CompanySuggestion {name, domain, ats_type, token, board_url, tags, company_id, board_configured}], board_companies, show_quick_start}` — known-board companies not on the user's preference list, ordered by tag (FAANG, unicorn, product, startup, rest) then name; `show_quick_start` while fewer than 3 non-AVOID listed companies have a readable board. The UI's "Add to my list" upserts a `P2` preference (creating the company through `POST /` first when the registry has no board for it).
 * `GET /{id}` → `CompanyRead`.
 * `GET /preferences` → `list[CompanyPreferenceRead]` grouped in frontend by priority.
 * `PUT /preferences {items: [{company_name, priority, notes?}]}` → replaces the user's list (upsert by normalized name). Also `POST /preferences {company_name, priority}` (single upsert) and `DELETE /preferences/{id}`.
@@ -122,6 +158,8 @@ Service (used by jobs, matching, applications):
 * `companies.service.get_or_create_company(db, name, **attrs) -> Company`
 * `companies.service.get_priority(db, user_id, company: Company) -> CompanyPriority` (default `P2`; matches by normalized name or `company_id`).
 * `companies.service.blacklist_company(db, user_id, company_id) -> CompanyPreference` (sets AVOID; also skips open queued applications for that company).
+* `companies.service.verify_board(ats_type, board_url) -> (JobSourceType, token, display_url, open_job_count)` and `set_company_board(db, user_id, company_id, ats_type, board_url) -> CompanyBoardResult`. `get_or_create_company` never writes the board columns.
+* `companies.board_detect.detect_board(name, website) -> BoardDetection` (KNOWN → GUESS → SCAN → NONE, at most 8 HTTP requests, 10 s timeout, robots.txt honoured, public addresses only, at most one redirect per page, logins never followed); `known_boards()` reads `app/data/known_boards.json`. `companies.service.apply_detection(db, user_id, company, detection) -> bool` stores a readable board like `set_company_board` would; a Workday result only sets `ats_type=WORKDAY` + `careers_url` (no token: nothing can read it). `companies.service.order_board_companies(db, user_id, companies)` is the reading order `jobs.service.load_board_tokens` uses past `MAX_BOARDS_PER_RUN` (40).
 
 ## 5. notifications & audit
 
@@ -146,6 +184,7 @@ Typed AI tasks (`ai/tasks.py`) — used by other modules:
 * `generate_cover_letter(job: JobContext, candidate: CandidateContext) -> str` (≤ 250 words).
 * `classify_email(subject: str, sender: str, body: str) -> EmailClassificationResult` — `{classification: EmailClassification, confidence: float, reason: str, company_hint: str | None, job_title_hint: str | None}`.
 * `generate_interview_prep(job: JobContext, candidate: CandidateContext, interview_type: str) -> InterviewPrep` — `{technical[], behavioral[], company_specific[], job_specific[], resume_based[]}`.
+* `polish_resume_recommendations(resume_payload: dict, recommendations: list[Recommendation | dict]) -> PolishedRecommendations` — `{items: [{id, detail, suggested_text}]}`. Rewords rule-based resume advice only; never adds advice or facts. The task drops items whose `id` was not sent (or repeats), clips text to 60 words, and discards a reworded `detail` / `suggested_text` containing a number that is not in the resume payload (or, for `detail`, the original advice). Provider errors propagate — the caller (`resumes.recommendations.polish`) falls back to the deterministic text and reports `ai_polished=false`. The mock keeps the wording and drafts a summary / example bullet from resume facts with `[placeholders]` for outcomes.
 
 `JobContext` (pydantic in `ai/schemas.py`): `{id, title, company_name, company_description, location, work_mode, description, required_skills[], preferred_skills[], experience_min, experience_max, salary_min, salary_max, salary_currency, source}` with `JobContext.from_job(job: Job)`.
 
@@ -160,6 +199,12 @@ Endpoints: `GET /ai/status → {provider, model, configured: bool}`.
 
 Service: `resumes.service.get_default_resume(db, user_id) -> Resume | None`, `resumes.service.get_resume(db, user_id, resume_id) -> Resume`.
 
+Recommendations (Step 4, `resumes/recommendations.py`, no table, no migration):
+* `GET /{id}/recommendations?refresh=false` → `ResumeRecommendations` = `{resume_id, resume_version, generated_at, overall_score: int 0-100, target_summary {jobs_analysed, top_titles[{title,count}], top_skills[{skill,count,share}]}, recommendations: Recommendation[], score_projection {current_average, projected_average, delta, added_skills[], jobs_improved}, version_history: VersionScore[], ai_polished: bool, ai_provider: str | None, cached: bool}`; `GET /{id}/recommendations/history` → `VersionScore[]` = `[{version_number, created_at, note, overall_score, average_match_score, is_current}]`. Another user's resume → 404.
+* `Recommendation = {id (stable slug), category, priority HIGH|MEDIUM|LOW, title, detail, evidence[{label, job_id?, field?}], suggested_text?, estimated_score_gain (avg match points), action? add|learn|list, skills[]}`; categories `MISSING_SKILL, KEYWORD_GAP, WEAK_SUMMARY, EXPERIENCE_BULLETS, TITLE_ALIGNMENT, SECTION_MISSING, LENGTH_AND_FORMAT, STALE_CONTENT`. Rules, thresholds and health-score weights are documented at the top of the module.
+* Target jobs: the user's top 25 `JobMatch` rows by score (active jobs) plus every job with an application not in `DISCOVERED`/`SKIPPED`. Match scores for the projection and history are recomputed with `matching.scoring` (same inputs as `matching.service`), not read from `JobMatch`.
+* Service: `resumes.service.get_recommendations(db, user_id, resume_id, *, refresh=False)`, `resumes.service.get_recommendation_history(db, user_id, resume_id)`. In-process cache keyed by `(resume_id, resume.updated_at, fingerprint of target jobs + profile/preferences updated_at)`, TTL 10 minutes.
+
 ## 8. adapters (`app/modules/adapters`) — JobSourceAdapter
 
 ```python
@@ -173,8 +218,12 @@ class DiscoveredJob:            # normalised output of searchJobs()
     posted_at: datetime | None; apply_url: str | None; application_type: ApplicationType
     company_domain: str | None = None; company_logo_url: str | None = None; raw: dict = field(default_factory=dict)
 
+class BoardToken(NamedTuple):   # one configured public job board
+    company_id: UUID | None; token: str; company_name: str = ""; company_domain: str | None = None; source: JobSourceType | None = None
+
 @dataclass
 class SearchQuery: titles: list[str]; locations: list[str]; keywords: list[str]; posted_within_hours: int | None; limit: int = 50; work_modes: list[WorkMode] = ...
+                   board_tokens: list[BoardToken] = []   # filled by jobs.service.build_search_query; read only by the board adapters
 
 class JobSourceAdapter(ABC):
     source: JobSourceType; display_name: str; is_mock: bool; supports_auto_apply: bool; requires_account: bool; rate_limit_per_minute: int
@@ -192,8 +241,15 @@ class JobSourceAdapter(ABC):
 
 * `adapters/registry.py`: `get_adapter(source: JobSourceType) -> JobSourceAdapter`, `list_adapters() -> list[AdapterInfo]` (`{source, display_name, is_mock, supports_auto_apply, requires_account, terms_note}`).
 * Mock adapters (`adapters/mock/*.py`): NAUKRI, LINKEDIN, INDEED, HIRIST, WELLFOUND, INTERNSHALA, GLASSDOOR, FOUNDIT — each returns a realistic, deterministic catalogue (seeded, ~15–25 jobs each, Indian + remote market, INR salaries, several **intentional cross-platform duplicates** of the same posting, e.g. the same Google/Microsoft/Amazon roles appearing on LinkedIn + company careers + Naukri). Mock `fill_application/submit_application` simulate an EASY_APPLY flow with delays and return SUCCESS (or REQUIRES_USER for a small deterministic subset to demo pausing).
-* `DemoAtsAdapter` (source `DEMO_ATS`, `is_mock=False`): lists jobs from the demo ATS JSON endpoint and drives the **real Playwright** flow against `DEMO_ATS_BASE_URL/demo-ats/...` using the browser module. `GreenhouseAdapter`/`LeverAdapter` stubs may share the generic form-fill logic via `browser.autofill` and declare `requires_account=False`.
-* Real third-party sites are **not** scraped in the MVP. Each adapter has a `terms_note` string explaining what a production implementation must respect (official APIs, ToS, rate limits, user-owned session, no CAPTCHA bypass).
+* `DemoAtsAdapter` (source `DEMO_ATS`, `is_mock=False`): lists jobs from the demo ATS JSON endpoint and drives the **real Playwright** flow against `DEMO_ATS_BASE_URL/demo-ats/...` using the browser module.
+* **Public job board adapters** (`adapters/boards/`, sources `GREENHOUSE`, `LEVER`, `ASHBY`, `SMARTRECRUITERS`; `registry.BOARD_SOURCES`, all part of `DISCOVERY_SOURCES`): real discovery from each vendor's free, public, documented JSON API — Greenhouse `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true`, Lever `api.lever.co/v0/postings/{token}?mode=json`, Ashby `api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true`, SmartRecruiters `api.smartrecruiters.com/v1/companies/{token}/postings` (paginated, 10 pages max) + `/postings/{id}` for the description of postings that passed the filters. `is_mock=False`, `supports_auto_apply=True`, `uses_browser=True`, `requires_account=False`, `rate_limit_per_minute=30`.
+  * `search_jobs(query)` reads every board in `query.board_tokens` whose `source` is the adapter's own (or `None`); with none it logs at info and returns `[]` without a request. One failing board (404, malformed payload, network) is logged at warning and skipped. Postings are filtered client side with `mock.base_mock.filter_catalogue` (same title/keyword, location, `posted_within_hours`, work-mode and limit semantics as every adapter), per board, then interleaved round-robin across companies up to `query.limit`.
+  * Mapping to `DiscoveredJob`: `company_name`/`company_domain` from the configured company (not the vendor's spelling), `external_id = "{token}:{vendor id}"`, description HTML → text (`boards.common.html_to_text`; the raw HTML stays in `raw`), `required_skills` from `ai.skills.extract_skills(description)`, `work_mode` from the vendor flag (Lever/Ashby `workplaceType`, Ashby `isRemote`, SmartRecruiters `location.remote/hybrid`) else the location/title text (`None` when not stated), `employment_type` from the vendor label, `posted_at` in UTC, yearly salary only (Lever `salaryRange`, Ashby `Salary` compensation component), `application_type = ATS_FORM`.
+  * HTTP: `boards.http.fetch_json` — `httpx`, 15 s timeout, `User-Agent: JobPilot/<version> (+https://github.com/jobpilot-ai/jobpilot)`, per-process in-memory cache keyed by URL with a 30-minute TTL (128 entries max). Tests replace the transport with `boards.http.set_transport(httpx.MockTransport(...))`.
+  * `count_board_jobs(token) -> int` is what `PUT /companies/{id}/board` uses to verify a board.
+  * Apply: inherited `GenericAtsFormAdapter` flow with vendor `submit_selectors` (Greenhouse `#submit_app` / `button[type=submit]`, Lever `#btn-submit`, Ashby `button.ashby-application-form-submit-button`, SmartRecruiters `button[data-test='footer-submit']`). After the form opens the adapter waits (bounded, 8 s) for the network to go idle so late-injected CAPTCHA widgets (Greenhouse's invisible reCAPTCHA) are present when the detector runs. A page whose form never renders (bot-check interstitial) is handed to the detector instead of failing; a detected CAPTCHA returns `REQUIRES_USER` + `PauseReason.CAPTCHA` with the detected fields recorded in the snapshot (nothing filled, never solved); a page with neither a form nor a blocker fails.
+  * `adapters/greenhouse.py` and `adapters/lever.py` re-export the classes for the old import paths.
+* The mock platforms are **not** scraped. Each adapter has a `terms_note` string explaining what it does and what a production implementation must respect (official APIs, ToS, rate limits, user-owned session, no CAPTCHA bypass).
 
 ## 9. jobs
 
@@ -201,6 +257,7 @@ class JobSourceAdapter(ABC):
 * `GET /{id}` → `JobDetail` (`JobCard` + description, sources, match details, application).
 * `POST /{id}/analyze` → `JobMatchRead` (runs matching for the current user with default resume; `?resume_id=`).
 * `POST /discover {sources?: [JobSourceType], limit?: int}` → `DiscoverResult {jobs_found, jobs_new, duplicates_merged, sources: [{source, found, new, error?}]}` — runs adapters with the user's preferences as `SearchQuery`, ingests via `jobs.service.ingest_discovered(db, user_id, jobs) -> IngestResult`, then analyzes new jobs.
+* Discovery helpers (also used by `automation.pipeline`): `load_board_tokens(db, user_id) -> list[BoardToken]` (every company with a board, minus the user's AVOID companies — loaded once per run), `build_search_query(preference, limit=None, *, db=None, board_tokens=None) -> SearchQuery` (fills `board_tokens`; loads them itself when given `db` only), `resolve_discovery_sources(db, user_id, requested, *, board_tokens=None)`: explicit request → connected accounts → every mock adapter, plus `DEMO_ATS`, plus every board source that has at least one configured company. A board source with no configured company is dropped even when requested.
 * `POST /{id}/skip {reason?}` → marks/creates the application as `SKIPPED` for this user.
 * `POST /{id}/queue` → creates `Application` in `QUEUED` (delegates to `applications.service.queue_job`).
 * `GET /sources` → `list[AdapterInfo]` + per-source counts.
@@ -235,7 +292,8 @@ custom:<slug>                 # any free-text/custom question
 * `GET /{id}` → `ApplicationDetail` (`ApplicationRead` + `answers[]`, `events[]`, `documents[]`, `emails[]`, `interviews[]`, `job: JobDetail`, `review: ReviewSummary`).
 * `POST /{id}/start` → sets `IN_PROGRESS`, generates answers (`applications.answers.generate_answers(db, application, candidate)`), optionally cover letter, then hands to browser/adapters: `applications.service.start_application(db, application_id, user_id, run_in_background: bool = True) -> ApplicationRead`. Background execution uses a thread + `session_scope()`; progress via `automation_state`, `events` and audit logs.
 * `POST /{id}/answers/generate` → regenerates answers (keeps USER-provided ones).
-* `PUT /{id}/answers {answers: [{id, answer}]}` → user edits; status becomes ANSWERED, source USER.
+* `PUT /{id}/answers {answers: [{id, answer, save_as_standing?: bool}]}` → user edits; status becomes ANSWERED, source USER.
+  `save_as_standing: true` also upserts a standing answer for that question (refused for demographic questions).
 * `POST /{id}/approve` → requires **no** `NEEDS_USER_INPUT` answers for required fields; sets `approved_at`, then submits via the adapter (`submit_application`); on success `status=APPLIED`, `applied_at=now`, `automation_state=SUCCESS`, notification `APPLICATION_SUBMITTED`. Returns `ApplicationRead`.
 * `POST /{id}/submit` → alias of approve for MVP (kept for API symmetry).
 * `POST /{id}/resume-automation {answers?: [...]}` → after user resolved a pause (CAPTCHA done / question answered) continue (`AutomationState.RUNNING`).
@@ -254,6 +312,14 @@ Service functions used by other modules:
 * `applications.service.pause(db, application, reason: PauseReason, message: str, *, form_snapshot=None)` → `automation_state=REQUIRES_USER`, notification `INPUT_REQUIRED`, audit.
 * `applications.service.mark_failed(db, application, error: str)` → increments retry_count, `FAILED` or `RETRYING` per `retry_limit`.
 * `applications.service.mark_submitted(db, application, *, external_application_id=None, confirmation_message=None, via="AUTOMATION")`.
+* Answer lookup order (`applications.answers.answer_question`): answer the user typed on this application → **standing answer**
+  (source `USER`, rationale "Standing answer you saved") → profile / resume / preference fact → AI (free text, never
+  sensitive) → `NEEDS_USER_INPUT`.
+* `applications.service.record_form_questions(db, application, questions: list[FormQuestion]) -> list[ApplicationAnswer]` —
+  called by the runner between detecting and filling a form: creates rows for new questions, re-answers open ones, takes
+  the live `required` flag, relaxes standard-set rows the form does not ask, orders rows like the form.
+* `applications.answers.fillable_answers(rows)` — what is handed to the form filler: every answered row plus required
+  ones; an optional unanswered question is skipped by the filler and never pauses.
 * `applications.answers.generate_answers(db, application, candidate: CandidateContext, questions: list[FormQuestion] | None = None) -> list[ApplicationAnswer]` — when `questions` is None, use the standard question set for the job's application type (name/email/phone/linkedin/github/resume/experience/expected salary/notice period/why us/authorization). Sensitive keys (`work_authorization`, `requires_sponsorship`, `custom:*legal*`, `custom:*gender*|*ethnicity*|*disability*|*veteran*`) set `is_sensitive=True` and are **never auto-answered by AI** — profile value or `NEEDS_USER_INPUT`.
 * `applications.review.build_review(db, application) -> ReviewSummary {company, job_title, resume_name, salary_expectation, location, fields: [...], missing: [str], sensitive: [str], can_submit: bool, blockers: [str]}`.
 
@@ -266,7 +332,7 @@ Interviews (`modules/interviews`, same owner):
 * `browser/detector.py`: `detect_form(page) -> DetectedForm {url, fields: [DetectedField], submit_selector, blockers: [Blocker]}` where `DetectedField = {selector, label, name, id, placeholder, field_type: FieldType, required, options[], autocomplete, section}`; label resolution order: `<label for>`, `aria-label`, `aria-labelledby`, wrapping label, placeholder, preceding text, `name`. `Blocker = {kind: PauseReason, selector, message}` — detects CAPTCHA (iframe src recaptcha/hcaptcha/turnstile, `.g-recaptcha`, text "captcha"), OTP/2FA inputs (`autocomplete=one-time-code`, labels containing "OTP"/"verification code"), login walls (password field present + "sign in" text), account registration prompts.
 * `browser/mapper.py`: `FieldMapper.map(field: DetectedField) -> Mapping {canonical_key: str | None, confidence: float, reason: str, is_sensitive: bool}` — reusable rules (regex/keyword synonyms) table: e.g. "mobile|phone|contact number" → `phone`; "current ctc|current salary" → `current_salary`; "expected ctc|expected salary|salary expectation" → `expected_salary`; "notice period" → `notice_period_days`; "total experience|years of experience" → `years_of_experience`; "linkedin" → `linkedin_url`; "github" → `github_url`; "portfolio|website" → `portfolio_url`; "resume|cv|upload" (file) → `resume_file`; "cover letter" → `cover_letter`; "years .* (react|node|python…)" → `skill_years:<skill>`; "authori[sz]ed to work|work permit|visa" → `work_authorization` (sensitive); "sponsorship" → `requires_sponsorship` (sensitive); gender/race/veteran/disability → `custom:demographic_*` (sensitive → REQUIRES_USER). Unknown → `custom:<slug(label)>`.
 * `browser/autofill.py`: `fill_form(page, detected: DetectedForm, answers: list[ApplicationAnswer]) -> FillResult {filled: [...], skipped: [...], needs_user: [...]}` — supports text/textarea/select/radio/checkbox/file (`set_input_files` with resume path). Respects `settings.BROWSER_ACTION_DELAY_MS` between actions. Takes a screenshot to `UPLOAD_DIR/screenshots/<application_id>/<step>.png` after fill.
-* `browser/runner.py`: `ApplicationRunner.run(application_id) ` orchestrates: open context → `adapter.start_application` → `detect_form` → blockers? → `pause(...)` and stop → map fields → merge with pre-generated answers (generate answers for newly discovered questions via `generate_answers(..., questions=...)`) → `fill_form` → build `form_snapshot` → if any NEEDS_USER_INPUT for required → `pause(UNKNOWN_QUESTION)`; else `automation_state=PAUSED`, `pause_reason=USER_REVIEW`, notification "ready for review". Submission only happens from `applications.service.approve()` (human-in-the-loop), or automatically if `application.auto_submit and config.auto_submit_enabled and source in config.auto_submit_sources`. Any exception → `mark_failed` (+ screenshot + audit `application.failed`). Retries temporary network errors up to `retry_limit` (state RETRYING).
+* `browser/runner.py`: `ApplicationRunner.run(application_id) ` orchestrates: open context → `adapter.start_application` → `detect_form` → map fields → record every question as an answer row and answer the open ones (`applications.service.record_form_questions`: typed answer → standing answer → profile → AI) → blockers? → `pause(...)` with the mapped fields in the snapshot and nothing typed → otherwise `adapter.fill_application` with the detected form passed through `ApplyContext.detected_form` (the adapter reuses it rather than detecting twice) and only the fillable answers → `fill_form` → build `form_snapshot` → if any NEEDS_USER_INPUT for required → `pause(UNKNOWN_QUESTION)`; else `automation_state=PAUSED`, `pause_reason=USER_REVIEW`, notification "ready for review". Submission only happens from `applications.service.approve()` (human-in-the-loop), or automatically if `application.auto_submit and config.auto_submit_enabled and source in config.auto_submit_sources`. Any exception → `mark_failed` (+ screenshot + audit `application.failed`). Retries temporary network errors up to `retry_limit` (state RETRYING).
 * `browser/router.py`: `GET /browser/sessions` (list own sessions w/o state), `DELETE /browser/sessions/{id}`, `GET /browser/screenshots/{application_id}/{name}` (auth, own applications only).
 * **No CAPTCHA/OTP/2FA solving, no stealth plugins, no bot-detection evasion.** Detection → pause → user.
 
@@ -469,3 +535,13 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
   scheduler housekeeping jobs (`mark_no_response`, `cleanup_expired_browser_sessions`) deliberately
   write with no actor because they act on nobody's behalf; and on SQLite the two audit columns are
   added without their foreign key, since adding a constraint there means rewriting the table.
+
+* resume recommendations (Step 4): additive only. `resumes/recommendations.py` (rules + cache),
+  two `GET` endpoints under `/resumes/{id}`, `ai.tasks.polish_resume_recommendations` with its
+  prompt, schemas and mock handler. Decisions beyond the brief: `MISSING_SKILL` also covers a
+  skill the resume text or the profile mentions but the skills section lacks (`action="list"`),
+  since matching reads the skills list; a skill not in the taxonomy has no family and is always
+  `learn`. `KEYWORD_GAP` drops words inside 4-word phrases shared by half the posts (template /
+  EEO boilerplate). Word counts and keyword presence use `Resume.text_content` for the current
+  parsed data only. Company priority for the projection comes from the stored `JobMatch` (then
+  `Application.priority`) instead of reloading `Company` rows.

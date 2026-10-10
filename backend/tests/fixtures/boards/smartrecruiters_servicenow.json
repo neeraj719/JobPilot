@@ -1,0 +1,343 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "744000153333219",
+      "name": "Sr Software Engineer",
+      "uuid": "b0d8ef99-923a-4865-83e7-4dda1c710feb",
+      "jobAdId": "87abe2ab-b10e-4f55-a46f-e4640390c4c6",
+      "defaultJobAd": true,
+      "refNumber": "JB0075717",
+      "company": {
+        "identifier": "ServiceNow",
+        "name": "ServiceNow"
+      },
+      "releasedDate": "2026-10-03T16:02:30.623Z",
+      "location": {
+        "city": "Santa Clara",
+        "region": "CALIFORNIA",
+        "country": "us",
+        "address": "Building A,B,C 2225 Lawson Lane",
+        "postalCode": "95054",
+        "remote": false,
+        "hybrid": false,
+        "fullLocation": "Santa Clara, CALIFORNIA, United States"
+      },
+      "industry": {
+        "id": "it_and_services",
+        "label": "Information Technology And Services"
+      },
+      "department": {
+        "id": "2294038",
+        "label": "Engineering, Infrastructure and Operations"
+      },
+      "function": {
+        "id": "engineering",
+        "label": "Engineering"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "not_applicable",
+        "label": "Not Applicable"
+      },
+      "customField": [
+        {
+          "fieldId": "60345fa28b4ba8595bef1863",
+          "fieldLabel": "Recruiting Team",
+          "valueId": "early-in-career",
+          "valueLabel": "Global Emerging Talent"
+        },
+        {
+          "fieldId": "60345d5c5165a31b17288279",
+          "fieldLabel": "Region",
+          "valueId": "722a833b93e4437798309f43c0d25990",
+          "valueLabel": "AMS - North America and Canada"
+        },
+        {
+          "fieldId": "6034601b43915a29a4b3389b",
+          "fieldLabel": "Job Location",
+          "valueId": "L_SJC005",
+          "valueLabel": "2225 Lawson Lane, Santa Clara, California, 95054, United States of America(L_SJC005)"
+        },
+        {
+          "fieldId": "60345e1a0b24a127cbdfa148",
+          "fieldLabel": "Employee Type",
+          "valueId": "0082f6cbe6154da19322cbab1f6aa5af",
+          "valueLabel": "Regular"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2b",
+          "fieldLabel": "Department",
+          "valueId": "2294038",
+          "valueLabel": "Engineering, Infrastructure and Operations"
+        },
+        {
+          "fieldId": "COUNTRY",
+          "fieldLabel": "Country/Region",
+          "valueId": "us",
+          "valueLabel": "United States"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2a",
+          "fieldLabel": "Brands",
+          "valueId": "default",
+          "valueLabel": "ServiceNow"
+        },
+        {
+          "fieldId": "603462175165a31b1728827d",
+          "fieldLabel": "Cost Center",
+          "valueId": "CC6312",
+          "valueLabel": "6312 PAXE - UXF Workspaces"
+        },
+        {
+          "fieldId": "618ed92b8f5e5f110e5bfb95",
+          "fieldLabel": "Work Persona",
+          "valueId": "bf7551c6-9b06-4e7c-8217-3baf43edd060",
+          "valueLabel": "Flexible"
+        },
+        {
+          "fieldId": "690cc0e8c682c3dbadaa7d73",
+          "fieldLabel": "Job Posting Type",
+          "valueId": "professional",
+          "valueLabel": "Professional"
+        }
+      ],
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ServiceNow/postings/744000153333219",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    },
+    {
+      "id": "744000153266480",
+      "name": "Sr Mobile Software Engineer (Native Android and Backend)",
+      "uuid": "2b74cdf3-b27c-4518-8dda-c2827b26727c",
+      "jobAdId": "335ace56-d611-406e-824d-66e137925539",
+      "defaultJobAd": true,
+      "refNumber": "JB0075819",
+      "company": {
+        "identifier": "ServiceNow",
+        "name": "ServiceNow"
+      },
+      "releasedDate": "2026-10-02T20:33:26.076Z",
+      "location": {
+        "city": "San Diego",
+        "region": "CALIFORNIA",
+        "country": "us",
+        "address": "4810 Eastgate Mall",
+        "postalCode": "92121",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "San Diego, CALIFORNIA, United States"
+      },
+      "industry": {
+        "id": "it_and_services",
+        "label": "Information Technology And Services"
+      },
+      "department": {
+        "id": "3205510",
+        "label": "Digital Technology"
+      },
+      "function": {
+        "id": "engineering",
+        "label": "Engineering"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "not_applicable",
+        "label": "Not Applicable"
+      },
+      "customField": [
+        {
+          "fieldId": "60345fa28b4ba8595bef1863",
+          "fieldLabel": "Recruiting Team",
+          "valueId": "professional",
+          "valueLabel": "Professional"
+        },
+        {
+          "fieldId": "60345d5c5165a31b17288279",
+          "fieldLabel": "Region",
+          "valueId": "722a833b93e4437798309f43c0d25990",
+          "valueLabel": "AMS - North America and Canada"
+        },
+        {
+          "fieldId": "6034601b43915a29a4b3389b",
+          "fieldLabel": "Job Location",
+          "valueId": "L_SAN003",
+          "valueLabel": "4810 Eastgate Mall, San Diego, California, 92121, United States of America(L_SAN003)"
+        },
+        {
+          "fieldId": "60345e1a0b24a127cbdfa148",
+          "fieldLabel": "Employee Type",
+          "valueId": "0082f6cbe6154da19322cbab1f6aa5af",
+          "valueLabel": "Regular"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2b",
+          "fieldLabel": "Department",
+          "valueId": "3205510",
+          "valueLabel": "Digital Technology"
+        },
+        {
+          "fieldId": "COUNTRY",
+          "fieldLabel": "Country/Region",
+          "valueId": "us",
+          "valueLabel": "United States"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2a",
+          "fieldLabel": "Brands",
+          "valueId": "default",
+          "valueLabel": "ServiceNow"
+        },
+        {
+          "fieldId": "603462175165a31b1728827d",
+          "fieldLabel": "Cost Center",
+          "valueId": "CC6380",
+          "valueLabel": "6380 PAXE - Mobile"
+        },
+        {
+          "fieldId": "618ed92b8f5e5f110e5bfb95",
+          "fieldLabel": "Work Persona",
+          "valueId": "e5efb1ea-f0e1-4bc5-94b6-d5072787c528",
+          "valueLabel": "Required in Office"
+        },
+        {
+          "fieldId": "690cc0e8c682c3dbadaa7d73",
+          "fieldLabel": "Job Posting Type",
+          "valueId": "professional",
+          "valueLabel": "Professional"
+        }
+      ],
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ServiceNow/postings/744000153266480",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    },
+    {
+      "id": "744000153267939",
+      "name": "Director, CRM Sales Manufacturing",
+      "uuid": "f54c1df5-ef28-4149-b0aa-f9bf8c71c269",
+      "jobAdId": "1d1849a7-49c4-42bc-ac32-28fa772054e7",
+      "defaultJobAd": false,
+      "refNumber": "JB0075538",
+      "company": {
+        "identifier": "ServiceNow",
+        "name": "ServiceNow"
+      },
+      "releasedDate": "2026-10-02T20:26:31.775Z",
+      "location": {
+        "city": "Minneapolis",
+        "region": "Minnesota",
+        "country": "us",
+        "address": "50 Hudson Yards 50 Hudson Yards 74th Floor",
+        "postalCode": "55402",
+        "remote": false,
+        "hybrid": true,
+        "fullLocation": "Minneapolis, Minnesota, United States"
+      },
+      "industry": {
+        "id": "it_and_services",
+        "label": "Information Technology And Services"
+      },
+      "department": {
+        "id": "2294208",
+        "label": "Sales"
+      },
+      "function": {
+        "id": "sales",
+        "label": "Sales"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "not_applicable",
+        "label": "Not Applicable"
+      },
+      "customField": [
+        {
+          "fieldId": "60345fa28b4ba8595bef1863",
+          "fieldLabel": "Recruiting Team",
+          "valueId": "professional",
+          "valueLabel": "Professional"
+        },
+        {
+          "fieldId": "60345d5c5165a31b17288279",
+          "fieldLabel": "Region",
+          "valueId": "722a833b93e4437798309f43c0d25990",
+          "valueLabel": "AMS - North America and Canada"
+        },
+        {
+          "fieldId": "6034601b43915a29a4b3389b",
+          "fieldLabel": "Job Location",
+          "valueId": "L_NYC001",
+          "valueLabel": "50 Hudson Yards, New York, New York, 10001, United States of America(L_NYC001)"
+        },
+        {
+          "fieldId": "60345e1a0b24a127cbdfa148",
+          "fieldLabel": "Employee Type",
+          "valueId": "0082f6cbe6154da19322cbab1f6aa5af",
+          "valueLabel": "Regular"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2b",
+          "fieldLabel": "Department",
+          "valueId": "2294208",
+          "valueLabel": "Sales"
+        },
+        {
+          "fieldId": "COUNTRY",
+          "fieldLabel": "Country/Region",
+          "valueId": "us",
+          "valueLabel": "United States"
+        },
+        {
+          "fieldId": "5f63a78f1dae5c5c4e54ba2a",
+          "fieldLabel": "Brands",
+          "valueId": "default",
+          "valueLabel": "ServiceNow"
+        },
+        {
+          "fieldId": "603462175165a31b1728827d",
+          "fieldLabel": "Cost Center",
+          "valueId": "CC3807",
+          "valueLabel": "3807 CRM & Industry - Solution Sales MGRs"
+        },
+        {
+          "fieldId": "618ed92b8f5e5f110e5bfb95",
+          "fieldLabel": "Work Persona",
+          "valueId": "5530c877-6b63-4bf5-bde8-215ef35bf172",
+          "valueLabel": "Flexible or Remote"
+        },
+        {
+          "fieldId": "690cc0e8c682c3dbadaa7d73",
+          "fieldLabel": "Job Posting Type",
+          "valueId": "professional",
+          "valueLabel": "Professional"
+        }
+      ],
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ServiceNow/postings/744000153267939",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    }
+  ]
+}

@@ -342,6 +342,8 @@ export const SOURCE_LABELS: Record<JobSourceType, string> = {
   COMPANY_CAREERS: 'Company careers',
   GREENHOUSE: 'Greenhouse',
   LEVER: 'Lever',
+  ASHBY: 'Ashby',
+  SMARTRECRUITERS: 'SmartRecruiters',
   WORKDAY: 'Workday',
   DEMO_ATS: 'Demo ATS',
   OTHER: 'Other',

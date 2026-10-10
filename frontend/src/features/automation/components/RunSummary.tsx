@@ -25,6 +25,7 @@ const STAT_TILES: StatDefinition[] = [
   { key: 'jobs_matched', label: 'Matched' },
   { key: 'high_match', label: 'High match', tone: 'success' },
   { key: 'queued', label: 'Queued' },
+  { key: 'discover_only', label: 'Discover only' },
   { key: 'prepared', label: 'Prepared' },
   { key: 'submitted', label: 'Submitted', tone: 'success' },
   { key: 'requires_user', label: 'Needs you', tone: 'warning' },
@@ -49,7 +50,7 @@ export function RunSummary({ run, loading = false }: RunSummaryProps) {
   if (loading) {
     return (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {Array.from({ length: 12 }, (_, index) => (
+        {Array.from({ length: STAT_TILES.length }, (_, index) => (
           <Skeleton key={index} className="h-[72px] w-full rounded-lg" />
         ))}
       </div>

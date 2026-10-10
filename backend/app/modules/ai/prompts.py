@@ -62,6 +62,13 @@ TASK_SYSTEM: dict[str, str] = {
         BASE_SYSTEM + " You produce interview preparation questions grouped by category. Questions must be "
         "grounded in the job's requirements and the candidate's real experience."
     ),
+    "polish_resume_recommendations": (
+        BASE_SYSTEM + " You reword resume-improvement advice that was already computed from data. You do not "
+        "add new advice. Use only facts present in the resume payload: do not add employers, job titles, "
+        "dates, degrees, skills the candidate has not listed, or metrics/numbers that are not there. Where a "
+        "suggestion needs a number the resume does not contain, write a bracketed placeholder such as [X%]. "
+        "Keep each detail and each suggested_text under 60 words."
+    ),
 }
 
 TASK_INSTRUCTIONS: dict[str, str] = {
@@ -95,6 +102,19 @@ TASK_INSTRUCTIONS: dict[str, str] = {
     "generate_interview_prep": (
         "Produce 4-8 questions per category for an interview of type INPUT.interview_type. resume_based "
         "questions must reference the candidate's actual projects or employers."
+    ),
+    "polish_resume_recommendations": (
+        "INPUT.recommendations is a list of resume recommendations computed by rules; INPUT.resume holds the "
+        "candidate's resume facts.\n"
+        "For each recommendation return {\"id\", \"detail\", \"suggested_text\"}:\n"
+        "- id: copied verbatim from INPUT.recommendations; never invent ids.\n"
+        "- detail: a clearer, friendlier rewording of the given detail (same meaning, under 60 words).\n"
+        "- suggested_text: optional example text the candidate could paste, e.g. a rewritten summary or ONE "
+        "example bullet, under 60 words; null when it would require facts that are not in INPUT.resume.\n"
+        "- Use only facts present in INPUT.resume. Do not add employers, dates, degrees or metrics that are not "
+        "there; use placeholders like [X%] or [N users] instead of numbers.\n"
+        "- Never suggest claiming a skill the candidate has not listed; for action \"learn\" describe learning it.\n"
+        "Return {\"items\": [...]}."
     ),
 }
 

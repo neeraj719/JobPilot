@@ -70,7 +70,15 @@ class GenericAtsFormAdapter(JobSourceAdapter):
         "button:has-text('Submit')",
     )
     confirmation_text: str = CONFIRMATION_TEXT
+    #: Other wordings a vendor's thank-you page uses; any of them confirms the submission.
+    extra_confirmation_texts: tuple[str, ...] = ()
     application_id_pattern: re.Pattern[str] = APPLICATION_ID_RE
+    #: CSS selector that proves the application form has rendered. ``"form"`` suits server
+    #: rendered forms; single-page vendors (Ashby) override it.
+    form_ready_selector: str = "form"
+    #: When a blocker (CAPTCHA, OTP, ...) pauses the run, still record the fields the form
+    #: asks for in the snapshot - nothing is typed, but the reviewer sees the questions.
+    snapshot_fields_on_blocker: bool = False
 
     # -- discovery ---------------------------------------------------------
 
@@ -104,7 +112,7 @@ class GenericAtsFormAdapter(JobSourceAdapter):
             )
         try:
             page.goto(apply_url, timeout=settings.BROWSER_TIMEOUT_MS, wait_until="domcontentloaded")
-            page.wait_for_selector("form", timeout=settings.BROWSER_TIMEOUT_MS)
+            page.wait_for_selector(self.form_ready_selector, timeout=settings.BROWSER_TIMEOUT_MS)
         except Exception as exc:  # pragma: no cover - needs a live browser
             logger.warning("%s could not open %s: %s", self.display_name, apply_url, exc)
             return ApplyStepResult(state=AutomationState.FAILED, message=f"Could not open the application form: {exc}")
@@ -127,10 +135,14 @@ class GenericAtsFormAdapter(JobSourceAdapter):
             logger.warning("Browser module unavailable: %s", exc)
             return ApplyStepResult(state=AutomationState.FAILED, message="Browser automation module is not available")
 
-        try:
-            detected = detect_form(page)
-        except Exception as exc:  # pragma: no cover - needs a live browser
-            return ApplyStepResult(state=AutomationState.FAILED, message=f"Could not read the application form: {exc}")
+        # The runner detects the form before filling (to record and answer its questions)
+        # and hands it over, so the page is not read twice.
+        detected = getattr(ctx, "detected_form", None)
+        if detected is None:
+            try:
+                detected = detect_form(page)
+            except Exception as exc:  # pragma: no cover - needs a live browser
+                return ApplyStepResult(state=AutomationState.FAILED, message=f"Could not read the application form: {exc}")
 
         blockers = list(getattr(detected, "blockers", None) or [])
         if blockers:
@@ -138,11 +150,12 @@ class GenericAtsFormAdapter(JobSourceAdapter):
             reason = getattr(first, "kind", None) or PauseReason.OTHER
             message = getattr(first, "message", None) or f"{self.display_name} needs you to continue manually"
             logger.info("%s paused on a blocker: %s", self.display_name, reason)
+            mapped_on_pause = self._map_fields(detected) if self.snapshot_fields_on_blocker else []
             return ApplyStepResult(
                 state=AutomationState.REQUIRES_USER,
                 message=message,
                 pause_reason=reason if isinstance(reason, PauseReason) else PauseReason.OTHER,
-                form_snapshot=self._snapshot(detected, [], blockers),
+                form_snapshot=self._snapshot(detected, mapped_on_pause, blockers),
             )
 
         answers = list(ctx.answers or [])
@@ -220,7 +233,10 @@ class GenericAtsFormAdapter(JobSourceAdapter):
 
         match = self.application_id_pattern.search(content or "")
         external_id = match.group(1) if match else None
-        confirmed = self.confirmation_text.lower() in (content or "").lower()
+        lowered = (content or "").lower()
+        confirmed = any(
+            text.lower() in lowered for text in (self.confirmation_text, *self.extra_confirmation_texts) if text
+        )
         if not confirmed and external_id is None:
             return ApplyStepResult(
                 state=AutomationState.FAILED,

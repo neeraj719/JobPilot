@@ -3,7 +3,13 @@
 The runner is the only place that drives an adapter end to end::
 
     load application -> pick adapter -> (browser session) -> start_application
+        -> detect the form -> record its questions -> generate answers
         -> fill_application -> interpret the ApplyStepResult
+
+Answers come *before* the fill: every question the page asks is recorded as an answer
+row and answered (typed earlier, standing answer, profile fact, permitted AI) while the
+page is open, so the adapter fills a form whose answers already exist. Only a required
+question nobody could answer pauses the run; an optional one never does.
 
 and it always ends in one of four states:
 
@@ -20,6 +26,7 @@ application and audited instead of killing the worker thread.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from typing import Any
@@ -36,6 +43,7 @@ from app.models.enums import (
     AnswerStatus,
     ApplicationEventType,
     AutomationState,
+    FieldType,
     JobSourceType,
     PauseReason,
 )
@@ -76,6 +84,75 @@ def snapshot_summary(snapshot: dict[str, Any] | None) -> tuple[list[str], list[s
             filled.append(str(row.get("key") or row.get("selector") or "unnamed"))
     # keep the order but drop duplicates
     return list(dict.fromkeys(detected)), list(dict.fromkeys(filled))
+
+
+def _question_text(field: Any, key: str) -> str:
+    """What the form asks, as the user would read it (the "required" asterisk dropped)."""
+    text = getattr(field, "label", None) or getattr(field, "placeholder", None) or getattr(field, "name", None) or key
+    text = re.sub(r"\s+", " ", str(text)).strip()
+    return re.sub(r"\s*\*\s*$", "", text) or key
+
+
+def map_form_fields(detected: Any) -> list[tuple[Any, Any]]:
+    """``(field, Mapping)`` for every field of a detected form, via the shared field mapper."""
+    from app.modules.browser.mapper import FieldMapper
+
+    mapper = FieldMapper()
+    return [(field, mapper.map(field)) for field in getattr(detected, "fields", None) or []]
+
+
+def form_questions(mapped: list[tuple[Any, Any]]) -> list[Any]:
+    """The ``FormQuestion`` list a detected form asks, in page order."""
+    from app.modules.applications.questions import FormQuestion
+
+    questions: list[Any] = []
+    for field, mapping in mapped:
+        key = getattr(mapping, "canonical_key", None)
+        if not key:
+            continue  # a control with no label, name or placeholder cannot be keyed or answered
+        field_type = getattr(field, "field_type", None) or FieldType.TEXT
+        questions.append(
+            FormQuestion(
+                key=key,
+                text=_question_text(field, key),
+                field_type=field_type if isinstance(field_type, FieldType) else FieldType(str(field_type)),
+                options=[getattr(o, "label", None) or getattr(o, "value", "") for o in getattr(field, "options", None) or []],
+                required=bool(getattr(field, "required", False)),
+                selector=getattr(field, "selector", None),
+                is_sensitive=bool(getattr(mapping, "is_sensitive", False)),
+            )
+        )
+    return questions
+
+
+def form_snapshot(detected: Any, mapped: list[tuple[Any, Any]]) -> dict[str, Any]:
+    """The snapshot of a form nothing was typed into (same shape the ATS adapters write)."""
+    blockers = list(getattr(detected, "blockers", None) or [])
+    return {
+        "url": getattr(detected, "url", None),
+        "submit_selector": getattr(detected, "submit_selector", None),
+        "fields": [
+            {
+                "key": getattr(mapping, "canonical_key", None),
+                "label": getattr(field, "label", None),
+                "selector": getattr(field, "selector", None),
+                "field_type": str(getattr(field, "field_type", "") or ""),
+                "mapped_to": getattr(mapping, "canonical_key", None),
+                "required": bool(getattr(field, "required", False)),
+            }
+            for field, mapping in mapped
+        ],
+        "blockers": [
+            {
+                "kind": str(getattr(b, "kind", "") or ""),
+                "selector": getattr(b, "selector", None),
+                "message": getattr(b, "message", None),
+            }
+            for b in blockers
+        ],
+        "missing": [],
+        "filled": [],
+    }
 
 
 class ApplicationRunner:
@@ -217,8 +294,67 @@ class ApplicationRunner:
         )
         db.flush()
 
+        if ctx.page is not None:
+            stopped = self._prepare_form(db, application, ctx)
+            if stopped is not None:
+                self._interpret(db, application, stopped, adapter, ctx, handle, config, step="detect")
+                return
+
         filled = adapter.fill_application(ctx)
         self._interpret(db, application, filled, adapter, ctx, handle, config, step="fill")
+
+    def _prepare_form(self, db: Session, application: Application, ctx: Any) -> Any | None:
+        """Detect the form, record its questions and answer them - all before anything is typed.
+
+        Returns ``None`` when the adapter may go on and fill, or the ``ApplyStepResult`` to
+        stop with: a blocker (CAPTCHA, OTP, login, registration) pauses with every mapped
+        field in the snapshot and nothing typed; an unreadable page fails the step.
+        """
+        from app.modules.adapters.base import ApplyStepResult
+        from app.modules.applications import service as applications_service
+        from app.modules.applications.answers import fillable_answers
+        from app.modules.browser.detector import detect_form
+
+        try:
+            detected = detect_form(ctx.page)
+        except Exception as exc:  # noqa: BLE001 - reported like the adapter's own detection failure
+            logger.warning("Could not read the application form for %s: %s", application.id, exc)
+            return ApplyStepResult(state=AutomationState.FAILED, message=f"Could not read the application form: {exc}")
+
+        mapped = map_form_fields(detected)
+        questions = form_questions(mapped)
+        ctx.detected_form = detected  # the adapter reuses it instead of reading the page again
+        applications_service.record_form_questions(db, application, questions)
+        ctx.answers = fillable_answers(application.answers or [])
+        applications_service.record_event(
+            db,
+            application,
+            ApplicationEventType.AUTOMATION,
+            f"Read {len(questions)} questions on the application form",
+            actor=Actor.AUTOMATION,
+            meta={
+                "step": "detect_form",
+                "questions": len(questions),
+                "unanswered_required": sum(
+                    1 for row in application.answers or [] if row.required and row.status == AnswerStatus.NEEDS_USER_INPUT
+                ),
+                "blockers": [str(getattr(b, "kind", "") or "") for b in getattr(detected, "blockers", None) or []],
+            },
+        )
+        db.flush()
+
+        blockers = list(getattr(detected, "blockers", None) or [])
+        if blockers:
+            first = blockers[0]
+            reason = getattr(first, "kind", None)
+            logger.info("Application %s paused on a blocker before filling: %s", application.id, reason)
+            return ApplyStepResult(
+                state=AutomationState.REQUIRES_USER,
+                message=getattr(first, "message", None) or "The application form needs you to continue manually",
+                pause_reason=reason if isinstance(reason, PauseReason) else PauseReason.OTHER,
+                form_snapshot=form_snapshot(detected, mapped),
+            )
+        return None
 
     def _interpret(
         self,
@@ -354,7 +490,21 @@ class ApplicationRunner:
         return True
 
     def _submit(self, db: Session, application: Application, adapter: Any, ctx: Any, handle: Any) -> None:
+        from app.models.base import utcnow
         from app.modules.applications import service as applications_service
+
+        # Auto-submit is the user's standing approval for this source: record it as one, so
+        # an unattended submission carries an approval time like a reviewed one does.
+        application.approved_at = application.approved_at or utcnow()
+        application.review_required = False
+        applications_service.record_event(
+            db,
+            application,
+            ApplicationEventType.APPROVED,
+            f"Approved automatically: auto-submit is on for {application.source.value if application.source else 'this source'}",
+            actor=Actor.AUTOMATION,
+        )
+        db.flush()
 
         result = adapter.submit_application(ctx)
         if handle is not None:
@@ -384,4 +534,13 @@ def run_application(application_id: uuid.UUID | str, db: Session | None = None) 
     return ApplicationRunner(application_id, db=db).run()
 
 
-__all__ = ["ApplicationRunner", "RETRY_BACKOFF_SECONDS", "run_application", "snapshot_summary", "temporary_errors"]
+__all__ = [
+    "ApplicationRunner",
+    "RETRY_BACKOFF_SECONDS",
+    "form_questions",
+    "form_snapshot",
+    "map_form_fields",
+    "run_application",
+    "snapshot_summary",
+    "temporary_errors",
+]

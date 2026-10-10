@@ -68,8 +68,8 @@ def test_get_enabled_adapters_defaults_and_filters():
     default = {a.source for a in get_enabled_adapters(None)}
     assert JobSourceType.DEMO_ATS in default
     assert set(MOCK_SOURCES) <= default
-    # ATS stubs have no discovery, so they are not part of the default sweep
-    assert JobSourceType.GREENHOUSE not in default
+    # the public job board adapters discover real jobs (for the configured companies)
+    assert {JobSourceType.GREENHOUSE, JobSourceType.LEVER, JobSourceType.ASHBY, JobSourceType.SMARTRECRUITERS} <= default
 
     picked = get_enabled_adapters([JobSourceType.LINKEDIN, "NAUKRI", "NOT_A_SOURCE", JobSourceType.LINKEDIN])
     assert [a.source for a in picked] == [JobSourceType.LINKEDIN, JobSourceType.NAUKRI]
@@ -370,9 +370,9 @@ def test_browser_adapters_require_a_page():
             assert result.message == "browser page required"
 
 
-def test_ats_stubs_have_no_discovery_but_support_applying():
+def test_board_adapters_find_nothing_without_a_board_and_support_applying():
     for adapter in (GreenhouseAdapter(), LeverAdapter()):
-        assert adapter.search_jobs(ALL_QUERY) == []
+        assert adapter.search_jobs(ALL_QUERY) == []  # no board configured -> no request, no jobs
         info = adapter.info()
         assert info.is_mock is False
         assert info.supports_auto_apply is True

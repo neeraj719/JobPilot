@@ -7,6 +7,7 @@ from functools import lru_cache
 from app.core.exceptions import NotFoundError
 from app.models.enums import JobSourceType
 from app.modules.adapters.base import AdapterInfo, JobSourceAdapter
+from app.modules.adapters.boards import BOARD_SOURCES, AshbyAdapter, SmartRecruitersAdapter
 from app.modules.adapters.demo_ats import DemoAtsAdapter
 from app.modules.adapters.greenhouse import GreenhouseAdapter
 from app.modules.adapters.lever import LeverAdapter
@@ -38,13 +39,19 @@ ADAPTERS: dict[JobSourceType, type[JobSourceAdapter]] = {
     JobSourceType.DEMO_ATS: DemoAtsAdapter,
     JobSourceType.GREENHOUSE: GreenhouseAdapter,
     JobSourceType.LEVER: LeverAdapter,
+    JobSourceType.ASHBY: AshbyAdapter,
+    JobSourceType.SMARTRECRUITERS: SmartRecruitersAdapter,
 }
 
 #: Sources backed by a deterministic mock catalogue (no network access).
 MOCK_SOURCES: tuple[JobSourceType, ...] = tuple(source for source, cls in ADAPTERS.items() if cls.is_mock)
 
-#: Sources that can actually discover jobs (the ATS stubs return an empty list).
-DISCOVERY_SOURCES: tuple[JobSourceType, ...] = MOCK_SOURCES + (JobSourceType.DEMO_ATS,)
+#: Real public job boards (Greenhouse, Lever, Ashby, SmartRecruiters). They read the boards of
+#: the companies configured in ``companies.ats_board_token`` and return ``[]`` without one.
+BOARD_SOURCES: tuple[JobSourceType, ...] = tuple(source for source in BOARD_SOURCES if source in ADAPTERS)
+
+#: Sources that can actually discover jobs.
+DISCOVERY_SOURCES: tuple[JobSourceType, ...] = MOCK_SOURCES + (JobSourceType.DEMO_ATS,) + BOARD_SOURCES
 
 
 def _coerce(source: JobSourceType | str) -> JobSourceType:

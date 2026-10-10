@@ -34,6 +34,7 @@ from app.models.application import Application, ApplicationAnswer
 from app.models.automation import AutomationConfig, AutomationRun
 from app.models.base import utcnow
 from app.models.enums import (
+    SUBMITTED_STATUSES,
     Actor,
     AnswerStatus,
     ApplicationStatus,
@@ -362,13 +363,16 @@ def _auto_submit_allowed(ctx: _Ctx, source: JobSourceType | None) -> bool:
 def _step_search(ctx: _Ctx) -> tuple[list[Any], Any]:
     """Resolve the adapters and build the search query from the user's preferences."""
     from app.modules.adapters.registry import get_enabled_adapters
-    from app.modules.jobs.service import build_search_query, resolve_discovery_sources
+    from app.modules.jobs.service import build_search_query, load_board_tokens, resolve_discovery_sources
 
     preference = _job_preference(ctx.db, ctx.user_id)
     requested = [JobSourceType(str(s).upper()) for s in (ctx.config.enabled_sources or [])]
-    sources = resolve_discovery_sources(ctx.db, ctx.user_id, requested or None)
-    adapters = get_enabled_adapters(sources)
-    query = build_search_query(preference)
+    boards = load_board_tokens(ctx.db, ctx.user_id)  # once per run
+    sources = resolve_discovery_sources(ctx.db, ctx.user_id, requested or None, board_tokens=boards)
+    # An explicit source list that resolved to nothing (only unconfigured boards) searches
+    # nothing; it must not widen to every source.
+    adapters = get_enabled_adapters(sources) if sources else []
+    query = build_search_query(preference, board_tokens=boards)
     if ctx.config.only_posted_within_hours:
         query.posted_within_hours = int(ctx.config.only_posted_within_hours)
     return adapters, query
@@ -786,6 +790,8 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
         browser_ready = _browser_available()
         deferred: list[str] = []
         browser_apps: list[Application] = []
+        #: Submitted by the runner while it was being prepared (auto-submit on for its source).
+        submitted_by_runner: set[str] = set()
         with _step(ctx, STEP_ANSWERS) as record:
             prepared = 0
             failed = 0
@@ -808,6 +814,8 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
                 outcome = _prepare_application(ctx, application)
                 if outcome == "prepared":
                     prepared += 1
+                    if application.status in SUBMITTED_STATUSES:
+                        submitted_by_runner.add(str(application.id))
                 elif outcome == "failed":
                     failed += 1
                     ctx.bump("failed")
@@ -881,6 +889,13 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
             for index, application in enumerate(ctx.queued):
                 if not application.auto_submit or not _auto_submit_allowed(ctx, application.source):
                     continue
+                if str(application.id) in submitted_by_runner:
+                    # The runner filled it with every answer in place and, auto-submit being
+                    # on for this source, already sent it. Approving again would refuse it.
+                    submitted += 1
+                    continue
+                if application.status in SUBMITTED_STATUSES:
+                    continue  # submitted before this run; nothing to do and nothing to report
                 if str(application.id) in deferred:
                     # Never prepared or filled (no browser), so there is nothing to submit;
                     # approving it would only drive the adapter into a guaranteed failure.
@@ -904,11 +919,9 @@ def _execute(ctx: _Ctx) -> AutomationRun:  # noqa: C901 - the pipeline is intent
                 record["message"] = f"{submitted} applications submitted automatically"
                 if not_prepared:
                     record["message"] += f"; {len(not_prepared)} still QUEUED (no browser)"
-            record["data"] = {
-                "submitted": submitted,
-                "skipped_needs_input": skipped,
-                "skipped_not_prepared": not_prepared,
-            }
+            record["data"] = {"submitted": submitted, "skipped_needs_input": skipped}
+            if not_prepared:
+                record["data"]["skipped_not_prepared"] = not_prepared
 
     except _Cancelled:
         return _finish(ctx, cancelled=True)

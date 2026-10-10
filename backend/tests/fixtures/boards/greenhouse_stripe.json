@@ -1,0 +1,265 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=8172503",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "education": "education_required",
+      "internal_job_id": 3537060,
+      "location": {
+        "name": "Remote from the US"
+      },
+      "metadata": null,
+      "id": 8172503,
+      "updated_at": "2026-09-25T16:45:00-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "Abuse Research Engineer",
+      "company_name": "Stripe",
+      "first_published": "2026-09-09T10:52:09-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;Who we are&lt;/h2&gt;\n&lt;h3&gt;About Stripe&lt;/h3&gt;\n&lt;p&gt;&lt;span style=&quot;font-weight: 400;&quot;&gt;Stripe is a financial infrastructure platform for businesses. Millions of companies—from the world’s largest enterprises to the most ambitious startups—use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone’s reach while doing the most important work of your career.&lt;/span&gt;&lt;/p&gt;\n&lt;h3&gt;About the team&lt;/h3&gt;\n&lt;p&gt;Abuse Research Group (ARG) handles proactive threat hunting and adversary behavior analysis across Stripe products. Rather than reacting to alerts, the team maps end-to-end fraud and abuse paths, validates novel attack vectors, and identifies product conditions that enable fraud. Using agentic automated testing and simulation tools, ARG translates research into actionable threat advisories, strategic control recommendations, and regression scenarios to systematically eliminate vulnerabilities.&lt;/p&gt;\n&lt;h2&gt;What you’ll do&lt;/h2&gt;\n&lt;p&gt;As an Abuse Research Engineer in the Abuse Research Group, you will play a critical role in safeguarding Stripe’s financial ecosystem by proactively hunting for advanced threats, dissecting complex fraud vectors, and extracting actionable adversary intelligence. &amp;nbsp;Rather than relying solely on reactive alerts, you will develop and execute hypothesis-driven threat hunting operations across internal telemetry and external sources to uncover fraudulent tools, tactics, and techniques (TTPs) before they impact Stripe’s platform. Central to this work is FT3 (Fraud Taxonomy 3.0), Stripe’s multi-layered taxonomy that decomposes monolithic fraud into structured kill chains. &amp;nbsp;Collaborating cross-functionally with Fraud Ops, Strategy, Risk, Onboarding, and Security, you will integrate threat intelligence, build agentic simulation workflows, and systematically eliminate product vulnerabilities.&lt;/p&gt;\n&lt;h3&gt;Responsibilities&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Proactive Threat Hunting &amp;amp; Kill Chain Analysis: Formulate hypotheses and conduct iterative threat hunting operations across Stripe systems and external data.&lt;/li&gt;\n&lt;li&gt;FT3 Taxonomy: Apply and enrich the FT3 framework across empirical datasets and incidents, standardizing threat intelligence across kill chain phases and targeted API endpoints. &amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Threat Intelligence &amp;amp; Signal Expansion: Partner with teams like Fraud Intelligence to integrate, curate, and automate threat feeds into engineering workflows. &amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Cross-Functional Advisories &amp;amp; Strategic Controls: Translate raw research and retrospective findings into actionable threat advisories and control recommendations (policy, technical systems, support workflows, and detection mechanisms) for stakeholders across Fraud, Risk, Onboarding, and Security. &amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Agentic Testing &amp;amp; Adversary Simulation: Utilize agentic automated testing frameworks to simulate adversary TTPs, validate whether deployed controls interrupt empirical kill chains, and generate regression scenarios to exercise controls. &amp;nbsp;&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;&lt;strong&gt;Who you are&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;&lt;span style=&quot;font-weight: 400;&quot;&gt;We’re looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement.&lt;/span&gt;&lt;/p&gt;\n&lt;h3&gt;Minimum requirements&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;5+ years of experience conducting threat intelligence, threat hunting, or technical incident response within cyber security, product abuse, or trust domains.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;5+ years of experience analyzing large, complex datasets using data analytics tools to identify anomalies, map behavioral trends, and solve complex fraud problems.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;B.S. or M.S. in Computer Science, Cybersecurity, or a related technical field, or equivalent practical experience.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Expert proficiency in Python and SQL, with demonstrated experience using code and scripting to automate workflows, build investigative tools, or query big data pipelines.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Hands-on experience in log analysis (e.g., application logs, API route telemetry, network security events), digital forensics, and cyber investigation methodologies.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Strong communication skills with a proven ability to translate complex technical research into clear, actionable recommendations and advisories for cross-functional partners.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;&lt;strong&gt;Preferred qualifications&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Deep technical understanding of threat actor motivations, infrastructure, and TTPs specific to financial fraud (e.g., ATO, Card Testing, Credential Stuffing).&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Familiarity with standardized taxonomies such as FT3 or MITRE ATT&amp;amp;CK.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Proficiency with engineering, data processing, and analysis platforms such as Databricks, Trino, PySpark, Pandas, or Scikit-Learn.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Proven background utilizing Threat Intelligence Platforms (TIPs), tactical threat feeds, OSINT, and breach intelligence.&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Demonstrated capability building or leveraging agentic LLM tools, automated testing systems, or control validation frameworks to model adversary behavior at scale.&amp;nbsp;&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Participation in industry conferences, webinars, or threat-sharing groups, alongside relevant professional certifications (e.g., GCTI, GCFA, OSCP).&lt;/li&gt;\n&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 81946,
+          "name": "8611 Security Analytics",
+          "child_ids": [],
+          "parent_id": 78876
+        }
+      ],
+      "offices": [
+        {
+          "id": 65234,
+          "name": "US",
+          "location": null,
+          "child_ids": [
+            89623,
+            249942,
+            249943,
+            230657,
+            61413,
+            80440,
+            344486,
+            83778,
+            61414,
+            83767,
+            83768,
+            83776,
+            83769,
+            83770,
+            83771,
+            83772,
+            83773,
+            83774,
+            89624,
+            83789,
+            83775,
+            83777,
+            83779,
+            83780,
+            83820,
+            83781,
+            83782,
+            83783,
+            83784,
+            83785,
+            83786,
+            83787,
+            83821,
+            83788,
+            83790,
+            83791,
+            83792,
+            83793,
+            83794,
+            83854,
+            83861,
+            83795,
+            83796,
+            83797,
+            83831,
+            83798,
+            83799,
+            83856,
+            83800,
+            83801,
+            83819,
+            83802,
+            83850,
+            83803,
+            83804,
+            83805,
+            83806,
+            83807,
+            83808,
+            83809,
+            83810,
+            83811,
+            83812,
+            83813,
+            83815,
+            83817,
+            83822,
+            83824,
+            83846,
+            83825,
+            83829,
+            83830,
+            65238,
+            83834,
+            83849,
+            83859,
+            83835,
+            83836,
+            83837,
+            83839,
+            83840,
+            83841,
+            83842,
+            83843,
+            83844,
+            83847,
+            83848,
+            83851,
+            83852,
+            83853,
+            83855,
+            83857,
+            83858,
+            83860,
+            83862,
+            83814,
+            83818,
+            83823,
+            83826,
+            83827,
+            83828,
+            83832,
+            83833,
+            83816,
+            85342,
+            83838,
+            83845,
+            223073,
+            265365,
+            16654
+          ],
+          "parent_id": 673
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/8172503/ai_opt_out"
+    },
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=7118945",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "education": "education_required",
+      "internal_job_id": 3206562,
+      "location": {
+        "name": "Bengaluru"
+      },
+      "metadata": null,
+      "id": 7118945,
+      "updated_at": "2026-09-25T16:44:33-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "Accounts Receivable Manager",
+      "company_name": "Stripe",
+      "first_published": "2025-07-31T06:46:15-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;&lt;strong&gt;Who we are&lt;/strong&gt;&lt;/h2&gt;\n&lt;h3&gt;&lt;strong&gt;About Stripe&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;Stripe is a financial infrastructure platform for businesses. Millions of companies—from the world&#39;s largest enterprises to the most ambitious startups—use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone&#39;s reach while doing the most important work of your career.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;About the team&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;Our Finance teams don&#39;t just provide and process data, but own strategy, use technology to drive solutions, influence their business partners, and create company value. The Billing and Collections team operates in a fast-paced environment and collaborates with cross-functional and international teams.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;What you&#39;ll do&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;In this leadership role, you&#39;ll be responsible for supporting the entire billing and collections process, ensuring accurate and timely invoicing, managing outstanding receivables, implementing strategies to optimize cash flow, and resolving complex billing disputes, while collaborating with sales, customer success, and finance teams to maintain positive customer relationships and financial health within the company.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Responsibilities&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Build, develop, and lead a team to support global billing and collections deliverables&lt;/li&gt;\n&lt;li&gt;Participate in building scalable processes to support global growth&lt;/li&gt;\n&lt;li&gt;Execute internal control documentation and sign-off procedures&lt;/li&gt;\n&lt;li&gt;Enhance and maintain existing policies and procedural documentation&lt;/li&gt;\n&lt;li&gt;Drive end-to-end improvement of input processes to enable scale and productivity&lt;/li&gt;\n&lt;li&gt;Develop, manage, and improve process metrics utilizing automation, lean practices, and process optimization to scale&lt;/li&gt;\n&lt;li&gt;Escalate collection issues to relevant stakeholders when necessary&lt;/li&gt;\n&lt;li&gt;Nurture deep, trusted partnerships with leaders across Stripe, showcasing the value of the Billing and Collections function and how it aligns with broader business goals&lt;/li&gt;\n&lt;li&gt;Create global best practice documentation and facilitate sharing across the globe&lt;/li&gt;\n&lt;li&gt;Create a culture consistent with Stripe Operating and Leadership Principles and a work environment that brings out the best in people&lt;/li&gt;\n&lt;li&gt;Provide robust feedback on process health and performance, identifying and remediating errors and delivering scale over time&lt;/li&gt;\n&lt;li&gt;Partner with global process owners and functional leaders to demonstrate strong performance across multiple workflows and set a high bar for consistent improvement over time&lt;/li&gt;\n&lt;li&gt;Lead cross-functional projects and reporting that drive performance improvement, visibility, and automation throughout financial services&lt;/li&gt;\n&lt;li&gt;Drive strong operational delivery and process improvement helping to mitigate risk while balancing operational efficiency and user impact&lt;/li&gt;\n&lt;li&gt;Identify gaps in current systems, policies, and strategies, and recommend enhancements and process improvements to mitigate risks&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;&lt;strong&gt;Who you are&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;We&#39;re looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Minimum requirements&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Demonstrated knowledge of key business financial metrics, providing metrics inputs to various reporting venues, and communicating key performance indicators to stakeholders in support of business objectives&lt;/li&gt;\n&lt;li&gt;Advanced finance operations experience leading large operational processes&lt;/li&gt;\n&lt;li&gt;Ability to set goals and financial plans, and effectively influence leaders across Stripe&lt;/li&gt;\n&lt;li&gt;15+ years of experience, including 3+ years of managing operational teams dealing with high-volume and complex workflows&lt;/li&gt;\n&lt;li&gt;Led teams in a multi-location environment with exposure to multicultural and dynamic business settings&lt;/li&gt;\n&lt;li&gt;A. or B.S. degree in Accounting or Finance with fluency in US GAAP&lt;/li&gt;\n&lt;li&gt;Excellent communication and organizational skills, both written and verbal&lt;/li&gt;\n&lt;li&gt;Excellent problem-solving skills and demonstrated ability to work independently, analyze problems and data sets, and make complex investigation decisions&lt;/li&gt;\n&lt;li&gt;Strong knowledge of Google Workspace tools, Salesforce, and Microsoft Office products, and experience working with and analyzing contracts and large data sets&lt;/li&gt;\n&lt;li&gt;Independently analyze and evaluate information from various data sources to determine a course of action for a matched case&lt;/li&gt;\n&lt;li&gt;Demonstrated experience partnering with cross-functional stakeholders&lt;/li&gt;\n&lt;li&gt;Demonstrated history of taking on various types of challenging projects and producing results&lt;/li&gt;\n&lt;li&gt;Solution-oriented mindset with enthusiasm for establishing best practices&lt;/li&gt;\n&lt;li&gt;Self-disciplined, diligent, proactive, and detail-oriented&lt;/li&gt;\n&lt;li&gt;Experience working cross-functionally with multiple teams to deliver high-impact initiatives&lt;/li&gt;\n&lt;li&gt;Experience in delivering weekly and monthly business metrics and reporting&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;&lt;strong&gt;Preferred qualifications&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Strong understanding of finance processes including AR and SOX controls&lt;/li&gt;\n&lt;li&gt;Strong operational background including experience with new process launch and service delivery in a high-growth technology company&lt;/li&gt;\n&lt;li&gt;Experience with written and verbal communications for both technical and non-technical audiences at the senior leadership level&lt;/li&gt;\n&lt;li&gt;Proficient in obtaining, organizing, and analyzing data to challenge conventional wisdom, make fact-based decisions, drive root cause analysis, and evaluate outcomes&lt;/li&gt;\n&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 241710,
+          "name": "4204 SDC - MonOps",
+          "child_ids": [],
+          "parent_id": 78708
+        }
+      ],
+      "offices": [
+        {
+          "id": 87000,
+          "name": "India Locations",
+          "location": null,
+          "child_ids": [
+            84345,
+            80454,
+            80444
+          ],
+          "parent_id": 4260
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/7118945/ai_opt_out"
+    },
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=8241260",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3490595,
+      "location": {
+        "name": "Seattle, San Francisco"
+      },
+      "metadata": null,
+      "id": 8241260,
+      "updated_at": "2026-10-01T23:54:21-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "High School Internship, Software Engineering (Summer 2027)",
+      "company_name": "Stripe",
+      "first_published": "2026-09-30T11:38:09-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;&lt;strong&gt;This role is intended for current high school students graduating in 2027 or later.&lt;/strong&gt;&lt;/h2&gt;\n&lt;h2&gt;&amp;nbsp;&lt;/h2&gt;\n&lt;h2&gt;&lt;strong&gt;Who we are&amp;nbsp;&lt;/strong&gt;&lt;/h2&gt;\n&lt;h3&gt;&lt;strong&gt;About Stripe&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;Stripe is a technology company focused on improving the conditions for economic growth and prosperity. We build programmable financial infrastructure, rethinking from first principles how financial services should work, to make it easier and cheaper for any business to start and scale. More than 10 million &lt;a href=&quot;https://stripe.com/customers&quot;&gt;businesses&lt;/a&gt; build on Stripe, spanning the economic frontier, from solo founders to established enterprises, united by a practical focus on growth. The most ambitious companies in the world use Stripe as core infrastructure to grow faster. They process trillions of dollars a year on Stripe, equivalent to around 1.6% of global GDP. While economic growth makes everyone better off, open markets also enable greater variety. When any business can easily serve a global customer base, the quality and diversity of products in the world increase, and craft and creativity are unleashed into the smallest niches.&lt;/p&gt;\n&lt;p&gt;Our own growth is wholly contingent on the success of the businesses building on Stripe. We therefore invest back into our technology at an unusual rate. We make&amp;nbsp;&lt;a href=&quot;https://stripe.com/roadmap&quot;&gt;upgrades to our products&lt;/a&gt; every single day to deliver compounding gains to our customers. We maintain some of the most &lt;a href=&quot;https://status.stripe.com/&quot;&gt;reliable APIs&lt;/a&gt; on the internet. We build entirely new &lt;a href=&quot;https://tempo.xyz/&quot;&gt;pieces&lt;/a&gt; of &lt;a href=&quot;https://mpp.dev/&quot;&gt;financial infrastructure&lt;/a&gt; to enable new ideas. And our significant advances in &lt;a href=&quot;https://stripe.com/radar&quot;&gt;risk and fraud&lt;/a&gt; infrastructure over many years are making the internet economy safer and more accessible.&lt;/p&gt;\n&lt;p&gt;Though people at Stripe do not tend to take themselves seriously, Stripe is a fairly serious place: our customers are depending on us for their livelihoods. We admire ambition, intensity, curiosity, humility, and rigor. The most effective people become knowledgeable about many domains besides their own. Any company is an applied exercise in understanding some aspect of society or the market. In working with so many, especially the new and innovative ones, we think that Stripe is one of the very best places to learn about how the world works.&lt;/p&gt;\n&lt;h2&gt;What you’ll do&lt;/h2&gt;\n&lt;p&gt;This is a small, selective internship for exceptional high school students and recent graduates whose technical work already stands out well beyond what we typically see at this stage. We are not looking for potential or credentials alone. We are looking for students who can show, through what they have built, researched, or contributed, that they are ready to do substantive engineering work with a Stripe team.&lt;br&gt;You will spend 12 consecutive weeks between May and August working in person from Stripe’s San Francisco or Seattle office on a scoped engineering project. You will own a problem end to end with support from your manager and teammates, contribute to Stripe’s codebase, and learn how engineers build reliable systems used by millions of businesses. Recent Stripe intern projects include expanding Payments Foundation Model capabilities to improve generalized anomaly detection, building more approachable fraud controls, creating safer payouts, and developing user-facing solutions that prevent costly pricing mistakes and make merchant checkout setup easier.&lt;/p&gt;\n&lt;p&gt;You will work alongside Stripe’s collegiate interns and full-time employees. That means participating in the same team environment, learning how engineers at different stages approach technical decisions, and building relationships across the broader Stripe community.&lt;/p&gt;\n&lt;p&gt;This is not a trainee or classroom-based program. You will receive support from your manager and teammates, but you will be expected to contribute to your team’s work, learn quickly, communicate clearly, ask strong questions, and produce work that holds up under technical review.&lt;/p&gt;\n&lt;p&gt;As with Stripe’s collegiate internships, strong performance may lead to consideration for future opportunities at Stripe, including full-time employment for interns who meet the relevant eligibility and hiring requirements. Future opportunities are not guaranteed and will depend on individual performance and Stripe’s hiring needs.&lt;/p&gt;\n&lt;h3&gt;Responsibilities&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Participate fully in the team you join, including team discussions, decisions, and the technical design process.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Write, test, and document software intended for production use by Stripe teams and users.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Give and receive technical feedback through code reviews and design discussions.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Collaborate with engineers and cross-functional partners to seek and incorporate feedback.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Learn unfamiliar systems through independent research and close work with your manager, mentor, teammates, and subject matter experts.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Communicate the status of your work clearly, including progress, risks, open questions, and where you need help.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Use current AI development tools thoughtfully while applying rigorous judgment to review, refine, test, and validate outputs.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;What We Look For&lt;/h2&gt;\n&lt;p&gt;We don&#39;t have a test score threshold. We look for people who have already started acting like the engineers and operators we most admire.&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;&lt;strong&gt;Ambitious builder: Y&lt;/strong&gt;ou are energized by building solutions without a clear precedent and working through difficult technical problems. You can point to technical work that shows unusual initiative, depth, or originality for someone at your stage.&lt;/li&gt;\n&lt;li&gt;&lt;strong&gt;Rigorous thinker:&amp;nbsp;&lt;/strong&gt;You care about whether your work is correct, not just whether it runs. You test your assumptions, examine edge cases, and can explain the choices you made.&lt;/li&gt;\n&lt;li&gt;&lt;strong&gt;Adaptable problem solver:&amp;nbsp;&lt;/strong&gt;You learn quickly, respond well to feedback, and keep making progress when the path is unclear.&lt;/li&gt;\n&lt;li&gt;&lt;strong&gt;Collaborative teammate:&amp;nbsp;&lt;/strong&gt;You communicate clearly, treat others with kindness, and know when to work independently and when to ask for help.&lt;strong&gt;&lt;br&gt;&lt;/strong&gt;&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;Minimum requirements&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Currently enrolled in high school, or graduating from high school before the internship begins.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Available to work full-time and in person from Stripe’s San Francisco or Seattle office for 12 consecutive weeks during a mutually agreed period between May and August 2027. We cannot accommodate remote participation, a shorter internship, or breaks within the 12-week period.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Experience programming through independent projects, research, coursework, competitions, open source contributions, a startup, or another setting. We work mostly in Ruby, Java, JavaScript, Go, and Scala. We believe new programming languages can be learned when the fundamentals are strong.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Evidence of exceptional technical achievement for your stage. This could include a product or system you built, a substantial open source contribution, original research, meaningful work at a startup, advanced competition performance, or another body of work that demonstrates comparable depth and ownership.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Ability to explain your individual contribution to the work you submit, including the problem, technical decisions, tradeoffs, testing, feedback, and what you would improve.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Experience working with others on a technical project and incorporating feedback from peers, mentors, teachers, users, or collaborators.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Ability to learn unfamiliar systems through independent research and work with a mentor or subject matter expert.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Clear written and verbal communication.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Ability to meet the employment eligibility, minimum age, and documentation requirements for the role’s location by the internship start date. Final contract language is subject to Legal review.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;Preferred qualifications&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;One or more areas of deeper technical knowledge, such as frontend, backend, infrastructure, data, machine learning, security, or developer tools, balanced with strong general programming fundamentals.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Experience writing high-quality pull requests, tests, technical documentation, or design notes.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Familiarity navigating an unfamiliar codebase or contributing to a multi-person project.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;A record of sustained technical work over time, not only one-time awards or credentials.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Curiosity about how businesses operate and how software can improve the conditions for economic growth.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;What to submit&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;A resume or short summary of your technical experience.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;In that summary please include one or two examples of your strongest work, such as a repository, live product, technical paper, research abstract, competition submission, or project write-up. Private work may be described without sharing confidential material.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;For each example, a short explanation of the problem, what you personally contributed, the hardest technical decision, how you tested the work, and what you learned.&lt;/li&gt;\n&lt;li style=&quot;font-weight: 400;&quot;&gt;Optional: High school transcript, standardized test scores.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&amp;nbsp;&lt;/p&gt;\n&lt;p&gt;&lt;em&gt;Please note that this is an hourly position with a pay rate of $60 per hour.&lt;/em&gt;&lt;/p&gt;",
+      "departments": [
+        {
+          "id": 84360,
+          "name": "5112 General University",
+          "child_ids": [],
+          "parent_id": 84359
+        }
+      ],
+      "offices": [
+        {
+          "id": 65238,
+          "name": "US-SF-HQ",
+          "location": "San Francisco, California, United States",
+          "child_ids": [],
+          "parent_id": 65234
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/8241260/ai_opt_out"
+    }
+  ],
+  "meta": {
+    "total": 3
+  }
+}

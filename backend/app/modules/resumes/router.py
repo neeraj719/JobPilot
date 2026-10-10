@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,14 @@ from app.core.exceptions import NotFoundError
 from app.models.enums import Actor
 from app.models.user import User
 from app.modules.resumes import service, storage
-from app.modules.resumes.schemas import ParsedResume, ResumeRead, ResumeUpdate, ResumeVersionRead
+from app.modules.resumes.schemas import (
+    ParsedResume,
+    ResumeRead,
+    ResumeRecommendations,
+    ResumeUpdate,
+    ResumeVersionRead,
+    VersionScore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +123,34 @@ def list_versions(
     user: User = Depends(get_current_user),
 ) -> list[ResumeVersionRead]:
     return [service.version_to_read(v) for v in service.list_versions(db, user.id, resume_id)]
+
+
+@router.get(
+    "/{resume_id}/recommendations",
+    response_model=ResumeRecommendations,
+    summary="Resume improvement recommendations",
+)
+def get_recommendations(
+    resume_id: uuid.UUID,
+    refresh: bool = Query(default=False, description="Bypass the 10-minute cache"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResumeRecommendations:
+    """Prioritised advice computed from the parsed resume and the user's target jobs."""
+    return service.get_recommendations(db, user.id, resume_id, refresh=refresh)
+
+
+@router.get(
+    "/{resume_id}/recommendations/history",
+    response_model=list[VersionScore],
+    summary="Resume health and match score per version",
+)
+def get_recommendation_history(
+    resume_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[VersionScore]:
+    return service.get_recommendation_history(db, user.id, resume_id)
 
 
 @router.get("/{resume_id}/download", summary="Download the original file")

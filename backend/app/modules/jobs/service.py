@@ -31,8 +31,8 @@ from app.models.enums import (
 )
 from app.models.job import Job, JobMatch, JobSource
 from app.models.profile import CompanyPreference, JobPreference
-from app.modules.adapters.base import DiscoveredJob, SearchQuery
-from app.modules.adapters.registry import MOCK_SOURCES, get_enabled_adapters
+from app.modules.adapters.base import BoardToken, DiscoveredJob, SearchQuery
+from app.modules.adapters.registry import BOARD_SOURCES, MOCK_SOURCES, get_enabled_adapters
 from app.modules.jobs import dedupe
 from app.modules.jobs.normalize import normalize_company_name, normalize_location, normalize_title
 from app.modules.jobs.schemas import (
@@ -63,6 +63,8 @@ APPLY_SOURCE_RANK: dict[JobSourceType, int] = {
     JobSourceType.DEMO_ATS: 0,
     JobSourceType.GREENHOUSE: 1,
     JobSourceType.LEVER: 1,
+    JobSourceType.ASHBY: 1,
+    JobSourceType.SMARTRECRUITERS: 1,
     JobSourceType.WORKDAY: 1,
     JobSourceType.COMPANY_CAREERS: 2,
     JobSourceType.LINKEDIN: 3,
@@ -90,6 +92,8 @@ __all__ = [
     "get_company_priority",
     "get_company_priority_map",
     "build_search_query",
+    "load_board_tokens",
+    "resolve_discovery_sources",
     "APPLY_SOURCE_RANK",
 ]
 
@@ -701,8 +705,77 @@ def get_job_details(
 # --------------------------------------------------------------------------- discovery
 
 
-def build_search_query(preference: JobPreference, limit: int | None = None) -> SearchQuery:
-    """Turn the user's :class:`JobPreference` into an adapter :class:`SearchQuery`."""
+#: Most public job boards one discovery run reads. The registry ships with ~190 known
+#: boards; reading all of them for every user on every run would be slow and impolite, so
+#: past this many the user's own list (P1, P2, P3) goes first, then the rest by tag
+#: (FAANG, unicorn, product, startup) and name - ``companies.service.order_board_companies``.
+MAX_BOARDS_PER_RUN = 40
+
+
+def load_board_tokens(db: Session, user_id: uuid.UUID) -> list[BoardToken]:
+    """The companies with a public job board the board adapters should read for ``user_id``.
+
+    The board configuration lives on the shared company registry
+    (``companies.ats_type`` + ``ats_board_token``); companies the user put on the AVOID
+    list are left out, so a blacklisted employer's board is never even fetched. When more
+    than :data:`MAX_BOARDS_PER_RUN` remain, the user's own list is read first and the rest
+    is cut off. Callers load this once per discovery run and pass it to both
+    :func:`resolve_discovery_sources` and :func:`build_search_query`.
+    """
+    board_types = [source.value for source in BOARD_SOURCES]
+    companies = db.scalars(
+        select(Company)
+        .where(
+            Company.ats_type.in_(board_types),
+            Company.ats_board_token.is_not(None),
+            Company.ats_board_token != "",
+            Company.is_active.is_(True),
+        )
+        .order_by(func.lower(Company.name).asc(), Company.id.asc())
+    ).all()
+    if not companies:
+        return []
+    priorities = get_company_priority_map(db, user_id, companies)
+    eligible: list[Company] = []
+    for company in companies:
+        if priorities.get(company.id) == CompanyPriority.AVOID:
+            logger.info("Skipping the %s board of %s: the company is on the avoid list", company.ats_type, company.name)
+            continue
+        eligible.append(company)
+    if len(eligible) > MAX_BOARDS_PER_RUN:
+        from app.modules.companies.service import order_board_companies
+
+        logger.info("%d boards configured; this run reads the first %d for the user", len(eligible), MAX_BOARDS_PER_RUN)
+        eligible = order_board_companies(db, user_id, eligible)[:MAX_BOARDS_PER_RUN]
+    tokens: list[BoardToken] = []
+    for company in eligible:
+        tokens.append(
+            BoardToken(
+                company_id=company.id,
+                token=company.ats_board_token,
+                company_name=company.name,
+                company_domain=company.domain,
+                source=JobSourceType(company.ats_type),
+            )
+        )
+    return tokens
+
+
+def build_search_query(
+    preference: JobPreference,
+    limit: int | None = None,
+    *,
+    db: Session | None = None,
+    board_tokens: list[BoardToken] | None = None,
+) -> SearchQuery:
+    """Turn the user's :class:`JobPreference` into an adapter :class:`SearchQuery`.
+
+    ``board_tokens`` fills ``SearchQuery.board_tokens`` for the board adapters. When it is
+    not given but ``db`` is, the boards are loaded here with :func:`load_board_tokens`;
+    with neither, the query carries no boards and the board adapters return nothing.
+    """
+    if board_tokens is None and db is not None and preference.user_id is not None:
+        board_tokens = load_board_tokens(db, preference.user_id)
     return SearchQuery(
         titles=[str(t) for t in (preference.desired_titles or []) if t],
         locations=[str(location) for location in (preference.preferred_locations or []) if location],
@@ -712,6 +785,7 @@ def build_search_query(preference: JobPreference, limit: int | None = None) -> S
         # Every adapter honours ``work_modes``; not forwarding it meant a "remote only"
         # candidate still got onsite postings from every source.
         work_modes=[m for m in (_coerce_work_mode(v) for v in (preference.work_modes or [])) if m is not None],
+        board_tokens=list(board_tokens or []),
     )
 
 
@@ -724,10 +798,34 @@ def _coerce_work_mode(value: Any) -> WorkMode | None:
         return None
 
 
-def resolve_discovery_sources(db: Session, user_id: uuid.UUID, requested: list[JobSourceType] | None) -> list[JobSourceType]:
-    """Explicit request → the user's connected accounts → every mock adapter. Demo ATS always."""
+def resolve_discovery_sources(
+    db: Session,
+    user_id: uuid.UUID,
+    requested: list[JobSourceType] | None,
+    *,
+    board_tokens: list[BoardToken] | None = None,
+) -> list[JobSourceType]:
+    """Explicit request → the user's connected accounts → every mock adapter. Demo ATS always.
+
+    A public job board source (Greenhouse, Lever, Ashby, SmartRecruiters) is searched only
+    when at least one company is configured with a board on it - requested or not. Without
+    an explicit request every configured board source is added: they need no account.
+    ``board_tokens`` is the run's :func:`load_board_tokens` result (loaded here if omitted).
+    """
+    if board_tokens is None:
+        board_tokens = load_board_tokens(db, user_id)
+    configured = {token.source for token in board_tokens if token.source is not None}
+
     if requested:
-        return list(dict.fromkeys(requested))
+        sources = list(dict.fromkeys(requested))
+        dropped = [s for s in sources if s in BOARD_SOURCES and s not in configured]
+        if dropped:
+            logger.info(
+                "Not searching %s: no company has a board configured there",
+                ", ".join(s.value for s in dropped),
+            )
+        return [s for s in sources if s not in dropped]
+
     connected = list(
         db.scalars(
             select(ConnectedAccount.source).where(ConnectedAccount.user_id == user_id)
@@ -736,6 +834,7 @@ def resolve_discovery_sources(db: Session, user_id: uuid.UUID, requested: list[J
     base = connected or list(MOCK_SOURCES)
     if JobSourceType.DEMO_ATS not in base:
         base.append(JobSourceType.DEMO_ATS)
+    base.extend(source for source in BOARD_SOURCES if source in configured)
     return list(dict.fromkeys(base))
 
 
@@ -743,9 +842,12 @@ def discover_jobs(db: Session, user_id: uuid.UUID, request: DiscoverRequest | No
     """Run the enabled adapters, ingest what they return and analyze the new jobs."""
     request = request or DiscoverRequest()
     preference = get_job_preference(db, user_id)
-    query = build_search_query(preference, request.limit)
-    sources = resolve_discovery_sources(db, user_id, request.sources)
-    adapters = get_enabled_adapters(sources)
+    boards = load_board_tokens(db, user_id)  # once per run, shared by both calls below
+    query = build_search_query(preference, request.limit, board_tokens=boards)
+    sources = resolve_discovery_sources(db, user_id, request.sources, board_tokens=boards)
+    # ``[]`` here means "everything requested was a board nobody configured" - search nothing,
+    # never fall back to get_enabled_adapters' "no list = every source" default.
+    adapters = get_enabled_adapters(sources) if sources else []
 
     result = DiscoverResult()
     discovered: list[DiscoveredJob] = []

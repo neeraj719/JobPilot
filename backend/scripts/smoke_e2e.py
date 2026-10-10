@@ -142,6 +142,11 @@ class Smoke:
 
 def login(smoke: Smoke, email: str, password: str) -> str:
     body = smoke.post("/auth/login", json={"email": email, "password": password}).json()
+    if body.get("requires_role_selection"):
+        # An account holding several roles picks one first; the smoke run acts as USER.
+        body = smoke.post(
+            "/auth/select-role", json={"selection_token": body["selection_token"], "role": "USER"}
+        ).json()
     token = body["access_token"]
     smoke.client.headers.update({"Authorization": f"Bearer {token}"})
     return f"{email} authenticated"

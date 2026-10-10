@@ -188,6 +188,8 @@ class CoverLetterRead(BaseModel):
 class AnswerUpdate(BaseModel):
     id: uuid.UUID
     answer: str | None = None
+    #: Also keep this answer as a standing answer, reused on every later application.
+    save_as_standing: bool = False
 
 
 class AnswersUpdateRequest(BaseModel):

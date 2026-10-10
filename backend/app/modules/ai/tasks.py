@@ -14,7 +14,9 @@ a plain ``dict`` with a ``flat`` key is accepted too.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -29,6 +31,8 @@ from app.modules.ai.schemas import (
     JobContext,
     MatchExplanation,
     ParsedResume,
+    PolishedRecommendation,
+    PolishedRecommendations,
 )
 
 logger = logging.getLogger(__name__)
@@ -293,6 +297,89 @@ def generate_interview_prep(job: Any, candidate: Any, interview_type: str) -> In
     return _run_validated("generate_interview_prep", payload, InterviewPrep)
 
 
+# --------------------------------------------------------------------------- resume advice
+
+#: Upper bound the prompt asks for; longer text is clipped, never trusted as is.
+MAX_POLISH_WORDS = 60
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+#: Fields of a recommendation the model gets to see (no internal score maths).
+_POLISH_FIELDS: tuple[str, ...] = ("id", "category", "priority", "title", "detail", "action", "skills", "evidence")
+
+
+def _clip_words(text: str | None, max_words: int = MAX_POLISH_WORDS) -> str | None:
+    if text is None:
+        return None
+    cleaned = re.sub(r"\s+", " ", str(text)).strip()
+    if not cleaned:
+        return None
+    words = cleaned.split(" ")
+    if len(words) <= max_words:
+        return cleaned
+    return " ".join(words[:max_words]).rstrip(",;: ") + "…"
+
+
+def _numbers(text: Any) -> set[str]:
+    """Every number in ``text``, normalised so ``2.0`` and ``2`` compare equal."""
+    found: set[str] = set()
+    for raw in _NUMBER_RE.findall(text if isinstance(text, str) else json.dumps(text, default=str)):
+        value = raw.replace(",", "")
+        if re.fullmatch(r"\d+\.0+", value):
+            value = value.split(".")[0]
+        found.add(value)
+    return found
+
+
+def polish_resume_recommendations(
+    resume_payload: dict[str, Any],
+    recommendations: list[Any],
+) -> PolishedRecommendations:
+    """Reword deterministic resume recommendations; never adds advice or facts.
+
+    The response is filtered before anyone sees it:
+
+    * items whose ``id`` was not sent (or repeats one) are dropped;
+    * ``detail`` / ``suggested_text`` are clipped to ``MAX_POLISH_WORDS`` words;
+    * a number that appears in neither the resume payload nor the original
+      recommendation is treated as an invented metric — the reworded ``detail`` is
+      discarded (the original wording stays) and the ``suggested_text`` is dropped.
+
+    Provider errors propagate; the caller (``resumes.recommendations``) owns the
+    fallback to the deterministic text.
+    """
+    sent: list[dict[str, Any]] = []
+    for rec in recommendations or []:
+        data = _model_dump(rec)
+        if isinstance(data, dict) and data.get("id"):
+            sent.append({key: _model_dump(data.get(key)) for key in _POLISH_FIELDS})
+    if not sent:
+        return PolishedRecommendations()
+
+    payload = {"resume": _model_dump(resume_payload) or {}, "recommendations": sent}
+    result = _run_validated("polish_resume_recommendations", payload, PolishedRecommendations)
+
+    by_id = {rec["id"]: rec for rec in sent}
+    resume_numbers = _numbers(payload["resume"])
+    kept: list[PolishedRecommendation] = []
+    seen: set[str] = set()
+    for item in result.items:
+        original = by_id.get(item.id)
+        if original is None or item.id in seen:
+            logger.info("polish_resume_recommendations: dropping unknown or repeated id %r", item.id)
+            continue
+        seen.add(item.id)
+        allowed = resume_numbers | _numbers(original.get("detail") or "") | _numbers(original.get("title") or "")
+        detail = _clip_words(item.detail)
+        if detail and not _numbers(detail) <= allowed:
+            logger.info("polish_resume_recommendations: %s detail introduced numbers; keeping the original", item.id)
+            detail = None
+        suggested = _clip_words(item.suggested_text)
+        if suggested and not _numbers(suggested) <= resume_numbers:
+            logger.info("polish_resume_recommendations: %s suggestion introduced numbers; dropped", item.id)
+            suggested = None
+        kept.append(PolishedRecommendation(id=item.id, detail=detail, suggested_text=suggested))
+    return PolishedRecommendations(items=kept)
+
+
 __all__ = [
     "candidate_payload",
     "classify_email",
@@ -302,4 +389,5 @@ __all__ = [
     "generate_interview_prep",
     "job_payload",
     "parse_resume",
+    "polish_resume_recommendations",
 ]

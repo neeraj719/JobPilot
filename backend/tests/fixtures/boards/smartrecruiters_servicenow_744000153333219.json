@@ -1,0 +1,140 @@
+{
+  "id": "744000153333219",
+  "name": "Sr Software Engineer",
+  "uuid": "b0d8ef99-923a-4865-83e7-4dda1c710feb",
+  "jobId": "9359708b-05dc-4dfc-899e-69ce93f4900b",
+  "jobAdId": "87abe2ab-b10e-4f55-a46f-e4640390c4c6",
+  "defaultJobAd": true,
+  "refNumber": "JB0075717",
+  "company": {
+    "name": "ServiceNow",
+    "identifier": "ServiceNow"
+  },
+  "location": {
+    "city": "Santa Clara",
+    "region": "CALIFORNIA",
+    "country": "us",
+    "address": "Building A,B,C 2225 Lawson Lane",
+    "postalCode": "95054",
+    "remote": false,
+    "hybrid": false,
+    "fullLocation": "Santa Clara, CALIFORNIA, United States"
+  },
+  "customField": [
+    {
+      "fieldId": "60345fa28b4ba8595bef1863",
+      "fieldLabel": "Recruiting Team",
+      "valueId": "early-in-career",
+      "valueLabel": "Global Emerging Talent"
+    },
+    {
+      "fieldId": "60345e1a0b24a127cbdfa148",
+      "fieldLabel": "Employee Type",
+      "valueId": "0082f6cbe6154da19322cbab1f6aa5af",
+      "valueLabel": "Regular"
+    },
+    {
+      "fieldId": "5f63a78f1dae5c5c4e54ba2b",
+      "fieldLabel": "Department",
+      "valueId": "2294038",
+      "valueLabel": "Engineering, Infrastructure and Operations"
+    },
+    {
+      "fieldId": "COUNTRY",
+      "fieldLabel": "Country/Region",
+      "valueId": "us",
+      "valueLabel": "United States"
+    },
+    {
+      "fieldId": "5f63a78f1dae5c5c4e54ba2a",
+      "fieldLabel": "Brands",
+      "valueId": "default",
+      "valueLabel": "ServiceNow"
+    },
+    {
+      "fieldId": "60345d5c5165a31b17288279",
+      "fieldLabel": "Region",
+      "valueId": "722a833b93e4437798309f43c0d25990",
+      "valueLabel": "AMS - North America and Canada"
+    },
+    {
+      "fieldId": "603462175165a31b1728827d",
+      "fieldLabel": "Cost Center",
+      "valueId": "CC6312",
+      "valueLabel": "6312 PAXE - UXF Workspaces"
+    },
+    {
+      "fieldId": "6034601b43915a29a4b3389b",
+      "fieldLabel": "Job Location",
+      "valueId": "L_SJC005",
+      "valueLabel": "2225 Lawson Lane, Santa Clara, California, 95054, United States of America(L_SJC005)"
+    },
+    {
+      "fieldId": "618ed92b8f5e5f110e5bfb95",
+      "fieldLabel": "Work Persona",
+      "valueId": "bf7551c6-9b06-4e7c-8217-3baf43edd060",
+      "valueLabel": "Flexible"
+    },
+    {
+      "fieldId": "690cc0e8c682c3dbadaa7d73",
+      "fieldLabel": "Job Posting Type",
+      "valueId": "professional",
+      "valueLabel": "Professional"
+    }
+  ],
+  "releasedDate": "2026-10-03T16:02:30.623Z",
+  "creator": {
+    "name": "",
+    "avatarUrl": ""
+  },
+  "postingUrl": "https://jobs.smartrecruiters.com/ServiceNow/744000153333219-sr-software-engineer",
+  "applyUrl": "https://jobs.smartrecruiters.com/ServiceNow/744000153333219-sr-software-engineer?oga=true",
+  "referralUrl": "https://jobs.smartrecruiters.com/external-referrals/company/ServiceNow/publication/b0d8ef99-923a-4865-83e7-4dda1c710feb?dcr_ci=ServiceNow",
+  "jobAd": {
+    "sections": {
+      "companyDescription": {
+        "title": "Company Description",
+        "text": "<p>It all started when engineer Fred Luddy wrote code that automated a tedious task for his coworker, Phyllis. She cried tears of joy. That moment inspired Fred to build a company that could do that for everyone—freeing people from busywork so they could focus on meaningful work. Today, ServiceNow is the AI control tower for business reinvention. Our ServiceNow AI platform brings together any AI, any data, and any workflow— helping 85% of the Fortune 500® work smarter, faster, and better. We're building an AI-native culture where technology and talent are unstoppable together. And we're just getting started.</p><p>Join us to put AI to work for people.</p><p>&#xa0;</p>"
+      },
+      "jobDescription": {
+        "title": "Job Description",
+        "text": "<p>What you get to do in this role:&#xa0;</p><p>As a&#xa0;Sr.&#xa0;Full Stack Software&#xa0;Engineer&#xa0;you will have the opportunity to play a key role in Web&#xa0;Interfaces Engineering group.&#xa0;We’re&#xa0;looking for team-oriented&#xa0;problem solvers, possesses&#xa0;excellent communication skills, and skilled in all levels of web architecture.&#xa0;You've&#xa0;developed multiple tiered web applications in the past and are intimately familiar with modern web technologies.&#xa0;</p><p>Developing across the full stack of Web technologies&#xa0;–&#xa0;Persistence, Services, Platform, Performances, and with a focus on great experiences</p><p>Working in a Scrum-based Agile development process that is light on documentation and meetings and heavy on coding</p><p>Designing and implementing software that is simple, intuitive and easy to use with platform development mindset to solve real world problems</p><p>Translating business requirements and mock-ups into fully functional features by working closely with product owners and creative designers &#xa0;</p>"
+      },
+      "qualifications": {
+        "title": "Qualifications",
+        "text": "<p>In order to&#xa0;be successful in this role, we need someone who has:&#xa0;</p><p>Solid understanding of data structures, algorithms, object-oriented design,&#xa0;design&#xa0;patterns&#xa0;and Cloud/Web technologies&#xa0;</p><p>Experience in leveraging or critically thinking about how to integrate AI into work processes, decision-making, or problem-solving. This may include using AI-powered tools, automating workflows, analyzing AI-driven insights, or exploring AI's potential impact on the function or industry.</p><p>3+ years’ experience with JavaScript frameworks (e.g. NodeJS, ReactJS, Redux)</p><p>Expertise in writing Java code and JavaScript but strong candidates with experience in other OO languages will be considered</p><p>3+ years’ experience with Java based web applications and cloud-based applications</p><p>Experience in coding, object-oriented and modularized software.</p><p>Expertise with HTML technologies including HTML5, CSS3 and AJAX / Web Services</p><p>Experience collaborating with cross functional teams of engineering/PM/Design with varying skill sets</p><p>Superior communication skills with the ability to work directly with business owner</p><p>Demonstrated aptitude for learning new technologies quickly</p><p>BS/MS Degree in Computer Science or related field&#xa0;</p><p> &#xa0;</p><p>Desired skills&#xa0;</p><p>Expertise in JavaScript, ES6, Angular.js, React, HTML5, CSS3, Java 8 and GraphQL&#xa0;</p><p>Experience with relational databases: Oracle, MySQL MS&#xa0;SQLServer&#xa0;</p><p>Experience in developing&#xa0;cloud-based&#xa0;applications&#xa0;</p><p>Familiarity with Unix shell and Functional programming&#xa0;</p><p>Expertise&#xa0;in unit and integration test automation&#xa0;</p><p>&#xa0;</p><p>For positions in this location, we offer a base pay of <strong>$143,200 - $243,400</strong>, plus equity (when applicable), variable/incentive compensation and benefits. Sales positions generally offer a competitive On Target Earnings (OTE) incentive compensation structure. Please note that the base pay shown is a guideline, and individual total compensation will vary based on factors such as qualifications, skill level, competencies, and work location. We also offer health plans, including flexible spending accounts, a 401(k) Plan with company match, ESPP, matching donations, a flexible time away plan and family leave programs. Compensation is based on the geographic location in which the role is located and is subject to change based on work location.</p>"
+      },
+      "additionalInformation": {
+        "title": "Additional Information",
+        "text": "<p><strong>Work Personas</strong></p><p>We approach our distributed world of work with flexibility and trust. Work personas (flexible, remote, or required in office) are categories that are assigned to ServiceNow employees depending on the nature of their work and their assigned work location. <a href=\"https://careers.servicenow.com/life-at-servicenow#workpersonas\" rel=\"noopener noreferrer\"><u>Learn more here</u></a>. To determine eligibility for a work persona, ServiceNow may confirm the distance between your primary residence and the closest ServiceNow office using a third-party service.</p><p><strong>Equal Opportunity Employer</strong></p><p>ServiceNow is an equal opportunity employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, national origin, age, disability, gender identity,&#xa0; veteran status, or any other category protected by law. In addition, all qualified applicants with arrest or conviction records will be considered for employment in accordance with legal requirements. &#xa0;</p><p><strong>Accommodations</strong></p><p>We strive to create an accessible and inclusive experience for all candidates. If you require a reasonable accommodation to complete any part of the application process, or are unable to use this online application and need an alternative method to apply, please contact <a href=\"mailto:globaltalentss@servicenow.com\" rel=\"noopener noreferrer\">globaltalentss@servicenow.com </a>for assistance.&#xa0;</p><p><strong>Export Control Regulations</strong></p><p>For positions requiring access to controlled technology subject to export control regulations, including the U.S. Export Administration Regulations (EAR), ServiceNow may be required to obtain export control approval from government authorities for certain individuals. All employment is contingent upon ServiceNow obtaining any export license or other approval that may be required by relevant export control authorities.&#xa0;</p><p>From Fortune. ©2026 Fortune Media IP Limited. All rights reserved. Used under license.</p>"
+      }
+    }
+  },
+  "active": true,
+  "visibility": "PUBLIC",
+  "industry": {
+    "id": "it_and_services",
+    "label": "Information Technology And Services"
+  },
+  "function": {
+    "id": "engineering",
+    "label": "Engineering"
+  },
+  "department": {
+    "id": 2294038,
+    "label": "Engineering, Infrastructure and Operations"
+  },
+  "experienceLevel": {
+    "id": "not_applicable",
+    "label": "Not Applicable"
+  },
+  "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+  },
+  "language": {
+    "code": "en",
+    "label": "English",
+    "labelNative": "English (US)"
+  }
+}

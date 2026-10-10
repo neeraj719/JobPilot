@@ -1,4 +1,4 @@
-import { Settings } from 'lucide-react'
+import { Plus, Settings } from 'lucide-react'
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -7,8 +7,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { AddCompanyDialog } from '@/features/companies/components/AddCompanyDialog'
 import { CompanyDirectory } from '@/features/companies/components/CompanyDirectory'
 import { PriorityBoard } from '@/features/companies/components/PriorityBoard'
+import { QuickStartPanel } from '@/features/companies/components/QuickStartPanel'
 
 type CompaniesTab = 'priorities' | 'directory'
 
@@ -22,6 +24,7 @@ export default function CompaniesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
   const activeTab: CompaniesTab = isTab(tabParam) ? tabParam : 'priorities'
+  const [addOpen, setAddOpen] = React.useState(false)
 
   const setTab = React.useCallback(
     (tab: string) => {
@@ -38,14 +41,27 @@ export default function CompaniesPage() {
         title="Companies"
         description="Decide which employers your queue should reach first — and which ones it should never touch."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/settings">
-              <Settings aria-hidden />
-              Settings
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/settings">
+                <Settings aria-hidden />
+                Settings
+              </Link>
+            </Button>
+            <Button
+              onClick={() => {
+                setTab('directory')
+                setAddOpen(true)
+              }}
+            >
+              <Plus aria-hidden />
+              Add company
+            </Button>
+          </>
         }
       />
+
+      <QuickStartPanel />
 
       <Tabs value={activeTab} onValueChange={setTab}>
         <TabsList>
@@ -60,6 +76,8 @@ export default function CompaniesPage() {
           <CompanyDirectory />
         </TabsContent>
       </Tabs>
+
+      <AddCompanyDialog open={addOpen} onOpenChange={setAddOpen} />
     </PageContainer>
   )
 }

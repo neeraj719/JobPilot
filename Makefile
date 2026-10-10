@@ -1,4 +1,4 @@
-.PHONY: up down logs build backend frontend test test-backend test-frontend seed migrate lint
+.PHONY: up down logs build backend frontend test test-backend test-frontend seed migrate lint db-backup db-restore-check
 
 up:
 	docker compose up --build -d
@@ -35,3 +35,12 @@ test-backend:
 
 test-frontend:
 	cd frontend && npm run typecheck && npm run build
+
+# --- database backups (run pg_dump/pg_restore inside the postgres container) ---
+# See docs/DATABASE.md, "Backups and restore". BACKUP_KEEP=N overrides the retention (14).
+db-backup:
+	sh backend/scripts/db_backup.sh
+
+# Restore the newest dump into a scratch DB, check tables + alembic_version, drop it.
+db-restore-check:
+	sh backend/scripts/db_restore_check.sh

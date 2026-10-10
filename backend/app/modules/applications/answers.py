@@ -2,13 +2,18 @@
 
 Rules, in order, for every question:
 
-1. an answer the **user** typed is never overwritten;
-2. a fact stored on the profile / preferences / resume wins (source
+1. an answer the **user** typed on this application is never overwritten;
+2. a **standing answer** the user saved for this question (``master.standing_answers``)
+   is reused, recorded as source ``USER`` with the rationale "Standing answer you saved".
+   Consent and legal declarations only reuse one whose wording matches the live question
+   (see :func:`app.modules.profiles.service.find_standing_answer`); demographic questions
+   never do;
+3. a fact stored on the profile / preferences / resume wins (source
    ``PROFILE`` / ``PREFERENCE`` / ``RESUME``, confidence 1.0);
-3. **sensitive** questions (work authorization, sponsorship, demographics, legal
+4. **sensitive** questions (work authorization, sponsorship, demographics, legal
    declarations) stop here - if the profile has no fact they become
    ``NEEDS_USER_INPUT``; the LLM is never asked;
-4. anything else goes to :func:`app.modules.ai.tasks.generate_answer`, which may only
+5. anything else goes to :func:`app.modules.ai.tasks.generate_answer`, which may only
    *compose* free text from supplied context. When it cannot, the answer is
    ``NEEDS_USER_INPUT``.
 
@@ -178,9 +183,64 @@ def _answer_from_ai(question: FormQuestion, candidate: Any, job: Any) -> dict[st
     }
 
 
-def answer_question(question: FormQuestion, candidate: Any, job: Any) -> dict[str, Any]:
-    """Resolve one question into the column values of an :class:`ApplicationAnswer`."""
-    resolved = _answer_from_profile(question, candidate, job)
+#: Rationale recorded on an answer that came from a standing answer.
+STANDING_ANSWER_RATIONALE = "Standing answer you saved"
+#: How close (0-100) a standing answer must be to one of a select's options to be used.
+STANDING_OPTION_THRESHOLD = 90
+
+
+def _answer_from_standing(
+    question: FormQuestion,
+    standing: Sequence[Any] | None,
+    job: Any,
+    source: Any,
+) -> dict[str, Any] | None:
+    """The user's saved answer to this question, when one may stand in for it."""
+    if not standing:
+        return None
+    from app.modules.profiles.service import find_standing_answer  # lazy: keeps imports one-way
+
+    company = getattr(getattr(job, "company", None), "name", None)
+    row = find_standing_answer(
+        list(standing),
+        question_key=question.key,
+        question_text=question.text,
+        source=source,
+        company_name=company,
+    )
+    if row is None:
+        return None
+    text = (row.answer or "").strip()
+    if question.options and question.field_type in (FieldType.SELECT, FieldType.RADIO):
+        # The saved value must be one of this form's choices; only a near-exact match counts
+        # (the profile path's looser fuzzy match would turn "120 days" into "30 days").
+        text = match_option(text, question.options, threshold=STANDING_OPTION_THRESHOLD) or ""
+    if not text:
+        return None
+    return {
+        "answer": text,
+        "answer_source": AnswerSource.USER,
+        "confidence": 1.0,
+        "rationale": STANDING_ANSWER_RATIONALE,
+    }
+
+
+def answer_question(
+    question: FormQuestion,
+    candidate: Any,
+    job: Any,
+    *,
+    standing: Sequence[Any] | None = None,
+    source: Any = None,
+) -> dict[str, Any]:
+    """Resolve one question into the column values of an :class:`ApplicationAnswer`.
+
+    ``standing`` is the user's active standing answers and ``source`` the job source the
+    application goes through (standing answers can be limited to some sources).
+    """
+    resolved = _answer_from_standing(question, standing, job, source)
+    if resolved is None:
+        resolved = _answer_from_profile(question, candidate, job)
     if resolved is None and not question.is_sensitive:
         resolved = _answer_from_ai(question, candidate, job)
     if resolved is None:
@@ -236,7 +296,8 @@ def generate_answers(
         existing.setdefault(row.question_key, row)
 
     produced: list[ApplicationAnswer] = []
-    counts = {"answered": 0, "needs_user_input": 0, "kept": 0, "ai_generated": 0}
+    counts = {"answered": 0, "needs_user_input": 0, "kept": 0, "ai_generated": 0, "standing": 0}
+    standing = _standing_answers(db, application)
 
     for order, question in enumerate(question_list):
         row = existing.get(question.key)
@@ -248,7 +309,7 @@ def generate_answers(
             produced.append(row)
             continue
 
-        resolved = answer_question(question, candidate, job)
+        resolved = answer_question(question, candidate, job, standing=standing, source=application.source)
         if row is None:
             row = ApplicationAnswer(application_id=application.id, question_key=question.key)
             db.add(row)
@@ -259,6 +320,8 @@ def generate_answers(
             counts["answered"] += 1
             if row.answer_source == AnswerSource.AI_GENERATED:
                 counts["ai_generated"] += 1
+            if row.rationale == STANDING_ANSWER_RATIONALE:
+                counts["standing"] += 1
         else:
             counts["needs_user_input"] += 1
         produced.append(row)
@@ -301,8 +364,26 @@ def generate_answers(
     return produced
 
 
+def _standing_answers(db: Session, application: Application) -> list[Any]:
+    """The user's active standing answers (empty when there are none or they cannot be read)."""
+    user_id = getattr(application, "user_id", None)
+    if user_id is None:
+        return []
+    from app.modules.profiles.service import active_standing_answers  # lazy: keeps imports one-way
+
+    return active_standing_answers(db, user_id)
+
+
+def _field(update: Any, name: str) -> Any:
+    return update.get(name) if isinstance(update, dict) else getattr(update, name, None)
+
+
 def save_user_answers(db: Session, application: Application, updates: Iterable[Any]) -> list[ApplicationAnswer]:
-    """Persist user-typed answers (``{id, answer}`` items). Source becomes ``USER``.
+    """Persist user-typed answers (``{id, answer, save_as_standing?}`` items). Source becomes ``USER``.
+
+    ``save_as_standing`` also stores the answer as a standing answer, so the next
+    application that asks the same question is answered without pausing. Demographic
+    questions are refused (they are always answered per application).
 
     File answers are refused: their value is a **server-side path** that the browser
     step hands to ``set_input_files``. Letting the client type one would turn this
@@ -311,12 +392,14 @@ def save_user_answers(db: Session, application: Application, updates: Iterable[A
     own resume row instead.
     """
     from app.core.exceptions import NotFoundError, ValidationFailed
+    from app.modules.profiles.service import is_demographic_question, upsert_standing_answer
 
     by_id = {str(row.id): row for row in (application.answers or [])}
     changed: list[ApplicationAnswer] = []
-    for update in updates or []:
-        answer_id = str(getattr(update, "id", None) or (update.get("id") if isinstance(update, dict) else ""))
-        text = getattr(update, "answer", None) if not isinstance(update, dict) else update.get("answer")
+    to_remember: list[ApplicationAnswer] = []
+    items = list(updates or [])
+    for update in items:  # validate everything first: a refused item must not half-apply the batch
+        answer_id = str(_field(update, "id") or "")
         row = by_id.get(answer_id)
         if row is None:
             raise NotFoundError(f"Answer {answer_id} does not belong to this application")
@@ -327,15 +410,52 @@ def save_user_answers(db: Session, application: Application, updates: Iterable[A
                 code="file_answer_not_editable",
                 details={"answer_id": answer_id, "question_key": row.question_key},
             )
+        if _field(update, "save_as_standing") and is_demographic_question(row.question_key, row.question_text):
+            raise ValidationFailed(
+                "Demographic questions are always answered by you, on each application",
+                code="standing_answer_not_allowed",
+                details={"answer_id": answer_id, "question_key": row.question_key},
+            )
+    for update in items:
+        row = by_id[str(_field(update, "id"))]
+        text = _field(update, "answer")
         row.answer = (str(text) if text is not None else "").strip() or None
         row.answer_source = AnswerSource.USER
         row.status = AnswerStatus.ANSWERED if row.answer else AnswerStatus.NEEDS_USER_INPUT
         row.confidence = 1.0 if row.answer else 0.0
         row.rationale = "Provided by you"
         changed.append(row)
+        if _field(update, "save_as_standing") and row.answer:
+            to_remember.append(row)
     db.flush()
-    logger.info("Saved %d user answers on application %s", len(changed), application.id)
+    company = getattr(getattr(getattr(application, "job", None), "company", None), "name", None)
+    for row in to_remember:
+        upsert_standing_answer(
+            db,
+            application.user_id,
+            question_key=row.question_key,
+            question_text=row.question_text,
+            answer=row.answer or "",
+            field_type=row.field_type,
+            company_name=company,
+        )
+    logger.info(
+        "Saved %d user answers on application %s (%d remembered as standing answers)",
+        len(changed),
+        application.id,
+        len(to_remember),
+    )
     return changed
+
+
+def fillable_answers(rows: Iterable[ApplicationAnswer]) -> list[ApplicationAnswer]:
+    """The answers handed to the form filler.
+
+    An optional question nobody answered is left out, so the filler skips it instead of
+    reporting it as "needs the user" - an optional gap never pauses an application (the
+    same rule :func:`missing_required` applies to approval).
+    """
+    return [row for row in rows or [] if row.required or row.status == AnswerStatus.ANSWERED]
 
 
 def missing_required(application: Application) -> list[ApplicationAnswer]:
@@ -353,7 +473,9 @@ def _job_label(job: Any) -> str:
 
 
 __all__ = [
+    "STANDING_ANSWER_RATIONALE",
     "answer_question",
+    "fillable_answers",
     "generate_answers",
     "lookup_fact",
     "missing_required",

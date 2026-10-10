@@ -15,6 +15,7 @@ import { JobPreferencesSection } from '@/features/profile/components/JobPreferen
 import { PersonalSection } from '@/features/profile/components/PersonalSection'
 import { ProfessionalSection } from '@/features/profile/components/ProfessionalSection'
 import { ProfileCompleteness } from '@/features/profile/components/ProfileCompleteness'
+import { StandingAnswersCard } from '@/features/profile/components/StandingAnswersCard'
 import { useResumes } from '@/features/resume/api'
 import type { ProfileTab } from '@/features/profile/schema'
 import type { ParsedResume } from '@/types/api'
@@ -130,6 +131,8 @@ export default function ProfilePage() {
               <JobPreferencesSection preferences={preferencesQuery.data} profile={profileQuery.data} />
             </TabsContent>
           </Tabs>
+
+          <StandingAnswersCard />
         </>
       )}
     </PageContainer>

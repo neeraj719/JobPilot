@@ -869,7 +869,8 @@ def _apply_context(db: Session, application: Application, page: Any = None) -> A
         application=application,
         job=application.job,
         candidate=build_candidate(db, application),
-        answers=list(application.answers or []),
+        # An optional question nobody answered is skipped by the filler, never a pause.
+        answers=answers_engine.fillable_answers(application.answers or []),
         page=page,
         db=db,
         settings=settings,
@@ -1011,6 +1012,63 @@ def record_snapshot_questions(db: Session, application: Application, snapshot: d
         return []
     candidate = build_candidate(db, application)
     return answers_engine.generate_answers(db, application, candidate, questions=questions)
+
+
+def record_form_questions(db: Session, application: Application, questions: Sequence[FormQuestion]) -> list[ApplicationAnswer]:
+    """Make every question a live form asks an answer row, and answer the open ones.
+
+    The runner calls this between detecting the form and filling it, so the filler
+    already has an answer for every question the profile, a standing answer or the AI
+    can resolve (``browser/runner.py``):
+
+    * a question with no row yet gets one;
+    * a row still ``NEEDS_USER_INPUT`` (and not typed by the user) is answered again -
+      a standing answer or a profile fact may exist by now;
+    * answered rows are left alone, apart from picking up the live ``required`` flag and
+      the field selector;
+    * a row from the standard question set that this form does not ask, and that nobody
+      could answer, stops being required - it can no longer hold the application up;
+    * rows are re-ordered to follow the form.
+
+    Returns every answer row the application has, in form order.
+    """
+    asked: dict[str, FormQuestion] = {}
+    for question in questions:
+        if question.key in asked:
+            # one question rendered as several controls: required if any of them is
+            asked[question.key].required = asked[question.key].required or question.required
+            continue
+        asked[question.key] = question
+
+    existing = {row.question_key: row for row in (application.answers or [])}
+    to_answer: list[FormQuestion] = []
+    for key, question in asked.items():
+        row = existing.get(key)
+        if row is None or (
+            row.status != AnswerStatus.ANSWERED and row.answer_source not in answers_engine.PROTECTED_SOURCES
+        ):
+            to_answer.append(question)
+            continue
+        row.required = bool(question.required)
+        if question.selector and not row.field_selector:
+            row.field_selector = question.selector
+
+    for key, row in existing.items():
+        if key not in asked and row.required and row.status == AnswerStatus.NEEDS_USER_INPUT:
+            row.required = False
+
+    if to_answer:
+        answers_engine.generate_answers(db, application, build_candidate(db, application), questions=to_answer)
+
+    position = {key: index for index, key in enumerate(asked)}
+    rows = sorted(
+        application.answers or [],
+        key=lambda row: (0, position[row.question_key]) if row.question_key in position else (1, row.order or 0),
+    )
+    for index, row in enumerate(rows):
+        row.order = index
+    db.flush()
+    return rows
 
 
 def questions_from_snapshot(snapshot: dict[str, Any] | None, application: Application) -> list[FormQuestion]:

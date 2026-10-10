@@ -98,11 +98,18 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 10
 
     # --- AI ---
-    LLM_PROVIDER: Literal["mock", "openai", "anthropic"] = "mock"
+    LLM_PROVIDER: Literal["mock", "openai", "anthropic", "ollama"] = "mock"
+    #: Unset means the provider's own default (``qwen2.5:3b-instruct`` for ollama).
     LLM_MODEL: str | None = None
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
+    #: The ollama provider waits at least 120 s unless this is set explicitly.
     LLM_TIMEOUT_SECONDS: int = 60
+    # Local model server (``LLM_PROVIDER=ollama``): free, no API key, nothing leaves the machine.
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    #: How long Ollama keeps the model in memory after a request ("10m", "0" unloads at once).
+    OLLAMA_KEEP_ALIVE: str = "10m"
+    OLLAMA_NUM_CTX: int = 8192
 
     # --- Gmail OAuth (least privilege: gmail.readonly only) ---
     GOOGLE_CLIENT_ID: str | None = None

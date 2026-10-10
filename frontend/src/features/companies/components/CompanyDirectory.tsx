@@ -1,8 +1,10 @@
-import { Building2, Search } from 'lucide-react'
+import { Building2, Pencil, Plus, Search, Wand2 } from 'lucide-react'
 import * as React from 'react'
 
 import { DataTable, type DataTableColumn } from '@/components/common/DataTable'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Pagination } from '@/components/ui/pagination'
@@ -10,9 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui/toaster'
 import { useDebounce } from '@/hooks/useDebounce'
 import { errorMessage } from '@/lib/api'
-import { PRIORITY_LABELS, formatNumber, initials } from '@/lib/utils'
-import { useCompanies, useUpsertCompanyPreference } from '@/features/companies/api'
-import { COMPANY_PRIORITIES, type CompanyPriority, type CompanyRead } from '@/types/api'
+import { PRIORITY_LABELS, SOURCE_LABELS, formatNumber, initials } from '@/lib/utils'
+import { useCompanies, useDetectCompanyBoard, useUpsertCompanyPreference } from '@/features/companies/api'
+import { CompanyBoardDialog } from '@/features/companies/components/CompanyBoardDialog'
+import { COMPANY_PRIORITIES, type CompanyPriority, type CompanyRead, type JobSourceType } from '@/types/api'
 
 const PAGE_SIZE = 20
 const NO_PRIORITY = '__none__'
@@ -35,6 +38,31 @@ export function CompanyDirectory() {
   })
   const upsert = useUpsertCompanyPreference()
   const [savingId, setSavingId] = React.useState<string | null>(null)
+  const [boardCompany, setBoardCompany] = React.useState<CompanyRead | null>(null)
+  const detect = useDetectCompanyBoard()
+  const [detectingId, setDetectingId] = React.useState<string | null>(null)
+
+  const detectBoard = async (company: CompanyRead) => {
+    setDetectingId(company.id)
+    try {
+      const result = await detect.mutateAsync(company.id)
+      const detection = result.detection
+      if (result.ats_board_token && detection?.supported) {
+        const jobs = detection.open_jobs !== null ? ` — ${formatNumber(detection.open_jobs)} open jobs` : ''
+        toast.success(`${company.name}: found its ${SOURCE_LABELS[result.ats_type as JobSourceType] ?? result.ats_type} board${jobs}`)
+      } else if (detection?.ats_type === 'WORKDAY') {
+        toast.info(`${company.name} hires through Workday, which JobPilot cannot read yet`)
+      } else {
+        toast.info(`No public job board found for ${company.name}`, {
+          description: 'Add its board URL by hand with the + button.',
+        })
+      }
+    } catch (error) {
+      toast.error('Could not look up the board', { description: errorMessage(error) })
+    } finally {
+      setDetectingId(null)
+    }
+  }
 
   const setCompanyPriority = async (company: CompanyRead, next: CompanyPriority) => {
     setSavingId(company.id)
@@ -70,6 +98,45 @@ export function CompanyDirectory() {
       header: 'Industry',
       hideBelowMd: true,
       cell: (company) => <span className="text-sm text-muted-foreground">{company.industry ?? '—'}</span>,
+    },
+    {
+      id: 'board',
+      header: 'Career board',
+      cell: (company) => (
+        <div className="flex items-center gap-2">
+          {company.ats_board_token ? (
+            <Badge variant="secondary" title={company.ats_board_url ?? company.ats_board_token}>
+              {SOURCE_LABELS[company.ats_type as JobSourceType] ?? company.ats_type} · {company.ats_board_token}
+            </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {company.ats_type === 'WORKDAY' ? 'Workday (not readable)' : 'Not set'}
+            </span>
+          )}
+          {!company.ats_board_token ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              loading={detectingId === company.id}
+              disabled={detectingId !== null && detectingId !== company.id}
+              onClick={() => void detectBoard(company)}
+              aria-label={`Detect the career board of ${company.name}`}
+            >
+              {detectingId === company.id ? null : <Wand2 aria-hidden />}
+              Detect
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setBoardCompany(company)}
+            aria-label={company.ats_board_token ? `Edit the career board of ${company.name}` : `Add a career board for ${company.name}`}
+          >
+            {company.ats_board_token ? <Pencil aria-hidden /> : <Plus aria-hidden />}
+          </Button>
+        </div>
+      ),
     },
     {
       id: 'open_jobs',
@@ -177,6 +244,14 @@ export function CompanyDirectory() {
         total={total}
         onPageChange={setPage}
         disabled={companiesQuery.isFetching}
+      />
+
+      <CompanyBoardDialog
+        company={boardCompany}
+        open={boardCompany !== null}
+        onOpenChange={(open) => {
+          if (!open) setBoardCompany(null)
+        }}
       />
     </div>
   )

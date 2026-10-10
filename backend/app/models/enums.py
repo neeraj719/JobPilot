@@ -56,6 +56,8 @@ class JobSourceType(StrEnum):
     COMPANY_CAREERS = "COMPANY_CAREERS"
     GREENHOUSE = "GREENHOUSE"
     LEVER = "LEVER"
+    ASHBY = "ASHBY"
+    SMARTRECRUITERS = "SMARTRECRUITERS"
     WORKDAY = "WORKDAY"
     DEMO_ATS = "DEMO_ATS"  # local mock ATS served by this backend for the Playwright demo
     OTHER = "OTHER"

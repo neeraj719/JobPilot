@@ -13,6 +13,7 @@ import DashboardPage from '@/pages/Dashboard'
 import EmailsPage from '@/pages/Emails'
 import InterviewsPage from '@/pages/Interviews'
 import JobsPage from '@/pages/Jobs'
+import ChooseRolePage from '@/pages/ChooseRole'
 import LoginPage from '@/pages/Login'
 import NotFoundPage from '@/pages/NotFound'
 import ProfilePage from '@/pages/Profile'
@@ -34,9 +35,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation()
   const accessToken = useAuthStore((state) => state.accessToken)
   const isBootstrapped = useAuthStore((state) => state.isBootstrapped)
+  const pendingRoleSelection = useAuthStore((state) => state.pendingRoleSelection)
 
   if (!isBootstrapped) return <FullPageSpinner />
-  if (!accessToken) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
+  const from = location.pathname + location.search
+  // Password accepted but no role chosen yet: finish that before anything else.
+  if (!accessToken && pendingRoleSelection) return <Navigate to="/choose-role" replace state={{ from }} />
+  if (!accessToken) return <Navigate to="/login" replace state={{ from }} />
+  return <>{children}</>
+}
+
+/** /choose-role is only meaningful while a role selection is pending. */
+function RoleSelectionRoute({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  const accessToken = useAuthStore((state) => state.accessToken)
+  const isBootstrapped = useAuthStore((state) => state.isBootstrapped)
+  const pendingRoleSelection = useAuthStore((state) => state.pendingRoleSelection)
+
+  if (!isBootstrapped) return <FullPageSpinner />
+  if (accessToken) return <Navigate to={(location.state as { from?: string } | null)?.from ?? '/dashboard'} replace />
+  if (!pendingRoleSelection) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
@@ -59,6 +77,14 @@ export function AppRoutes() {
           <PublicOnlyRoute>
             <LoginPage />
           </PublicOnlyRoute>
+        }
+      />
+      <Route
+        path="/choose-role"
+        element={
+          <RoleSelectionRoute>
+            <ChooseRolePage />
+          </RoleSelectionRoute>
         }
       />
       <Route

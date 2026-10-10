@@ -7,18 +7,20 @@ means "ask the user" rather than "let the AI invent something".
 """
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import JSON as SAJSON, select
 from sqlalchemy.orm import Session
 
-from app.models.profile import JobPreference, UserProfile
+from app.models.enums import FieldType, JobSourceType
+from app.models.profile import APPLIES_TO_ALL, JobPreference, StandingAnswer, UserProfile
 from app.models.user import User
 from app.modules.ai.skills import normalize_skill, normalize_skills
 from app.modules.profiles.schemas import (
@@ -538,3 +540,223 @@ def candidate_context_to_prompt_dict(ctx: CandidateContext, *, max_chars: int = 
             break
         payload = build(*step)
     return payload
+
+
+# --------------------------------------------------------------------------- standing answers
+#
+# Answers the user gave once and the answer engine reuses (``applications/answers.py``
+# reads them right after anything typed on the application itself). The rules that
+# decide whether a stored answer may stand in for a live question live here, next to
+# the storage, so the API, the capture from the Approval Center and the engine agree.
+
+#: Stands for the employer's name inside a stored ``question_text``.
+COMPANY_PLACEHOLDER = "{company}"
+
+#: Consent and legal declarations reuse a standing answer only when the live wording is
+#: at least this similar (normalised ``difflib`` ratio) to the wording the user answered.
+WORDING_MATCH_THRESHOLD = 0.9
+
+_DEMOGRAPHIC_KEY_RE = re.compile(
+    r"demographic|gender|(?:^|_)sex(?:_|$)|ethnic|race|disabilit|veteran|orientation|religion|caste|marital|pronoun",
+    re.IGNORECASE,
+)
+_DEMOGRAPHIC_TEXT_RE = re.compile(
+    r"\b(gender|sex|race|ethnic\w*|disabilit\w*|veteran|sexual orientation|religion|caste|marital status|pronouns?)\b",
+    re.IGNORECASE,
+)
+#: Keys that are a declaration by the candidate: the exact wording matters.
+_DECLARATION_KEYS = frozenset({"custom:consent", "work_authorization", "requires_sponsorship"})
+_DECLARATION_SLUG_RE = re.compile(r"consent|legal|declar|certif|agree|terms|privacy|acknowledg|attest|criminal", re.IGNORECASE)
+
+
+def is_demographic_question(question_key: str | None, question_text: str | None = None) -> bool:
+    """Gender, ethnicity, disability, veteran status...: never answered from a standing answer."""
+    key = (question_key or "").strip()
+    if key.startswith("custom:") and _DEMOGRAPHIC_KEY_RE.search(key.split(":", 1)[1]):
+        return True
+    return bool(question_text and _DEMOGRAPHIC_TEXT_RE.search(question_text))
+
+
+def requires_wording_match(question_key: str | None) -> bool:
+    """Consent and legal declarations: reused only when the wording matches what was answered."""
+    key = (question_key or "").strip()
+    if key in _DECLARATION_KEYS:
+        return True
+    return key.startswith("custom:") and bool(_DECLARATION_SLUG_RE.search(key.split(":", 1)[1]))
+
+
+def template_question_text(text: str | None, company_name: str | None) -> str:
+    """Replace the employer's name with ``{company}`` so the wording matches at the next one."""
+    value = re.sub(r"\s+", " ", (text or "").strip())
+    value = re.sub(r"\s*\*\s*$", "", value)  # the "required" asterisk is not wording
+    name = (company_name or "").strip()
+    if len(name) >= 2:
+        value = re.sub(re.escape(name), COMPANY_PLACEHOLDER, value, flags=re.IGNORECASE)
+    return value
+
+
+def normalize_question_text(text: str | None) -> str:
+    """Lower case, punctuation and the required-asterisk dropped, whitespace collapsed."""
+    value = (text or "").lower().replace(COMPANY_PLACEHOLDER, " companyplaceholder ")
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def wording_similarity(stored_text: str | None, live_text: str | None, company_name: str | None = None) -> float:
+    """``0..1`` similarity of a stored wording and the live one, employer name factored out."""
+    left = normalize_question_text(template_question_text(stored_text, company_name))
+    right = normalize_question_text(template_question_text(live_text, company_name))
+    if not left or not right:
+        return 0.0
+    return difflib.SequenceMatcher(None, left, right).ratio()
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def standing_answer_applies(row: StandingAnswer, source: JobSourceType | str | None, *, now: datetime | None = None) -> bool:
+    """Active, not expired, and meant for this job source."""
+    if not row.is_active or row.deleted_at is not None:
+        return False
+    expires = _aware(row.expires_at)
+    if expires is not None and expires <= (now or datetime.now(timezone.utc)):
+        return False
+    scope = row.applies_to
+    if scope in (None, APPLIES_TO_ALL) or (isinstance(scope, list) and APPLIES_TO_ALL in scope):
+        return True
+    if source is None:
+        return False  # restricted to named sources, and this job has none
+    wanted = str(getattr(source, "value", source)).upper()
+    return isinstance(scope, list) and wanted in {str(s).upper() for s in scope}
+
+
+def find_standing_answer(
+    rows: list[StandingAnswer],
+    *,
+    question_key: str,
+    question_text: str | None,
+    source: JobSourceType | str | None,
+    company_name: str | None = None,
+    now: datetime | None = None,
+) -> StandingAnswer | None:
+    """The standing answer that may answer this live question, or ``None``.
+
+    * demographic questions never use one;
+    * the key must match and the row must apply to this source and not be expired;
+    * consent and legal declarations additionally need the wording to match
+      (:data:`WORDING_MATCH_THRESHOLD`) - a consent box with different wording still pauses.
+    """
+    if is_demographic_question(question_key, question_text):
+        return None
+    for row in rows:
+        if row.question_key != question_key or not standing_answer_applies(row, source, now=now):
+            continue
+        if requires_wording_match(question_key):
+            score = wording_similarity(row.question_text, question_text, company_name)
+            if score < WORDING_MATCH_THRESHOLD:
+                logger.info(
+                    "Standing answer for %s not reused: wording similarity %.2f < %.2f",
+                    question_key, score, WORDING_MATCH_THRESHOLD,
+                )
+                continue
+        return row
+    return None
+
+
+def list_standing_answers(db: Session, user_id: uuid.UUID) -> list[StandingAnswer]:
+    """Every standing answer the user has (active or switched off), by question."""
+    return list(
+        db.scalars(
+            select(StandingAnswer).where(StandingAnswer.user_id == user_id).order_by(StandingAnswer.question_key)
+        ).all()
+    )
+
+
+def active_standing_answers(db: Session, user_id: uuid.UUID, *, now: datetime | None = None) -> list[StandingAnswer]:
+    """The ones the answer engine may use right now (the source scope is checked per question)."""
+    moment = now or datetime.now(timezone.utc)
+    rows = db.scalars(
+        select(StandingAnswer).where(StandingAnswer.user_id == user_id, StandingAnswer.is_active.is_(True))
+    ).all()
+    return [row for row in rows if _aware(row.expires_at) is None or _aware(row.expires_at) > moment]
+
+
+def upsert_standing_answer(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    question_key: str,
+    question_text: str,
+    answer: str,
+    field_type: FieldType | str = FieldType.TEXT,
+    applies_to: Any = APPLIES_TO_ALL,
+    expires_at: datetime | None = None,
+    is_active: bool = True,
+    company_name: str | None = None,
+) -> StandingAnswer:
+    """Create the standing answer for ``question_key``, or replace the existing one.
+
+    ``company_name`` (the employer of the application it was captured from) is replaced by
+    ``{company}`` in the stored wording. Demographic questions and file uploads are refused.
+    """
+    from app.core.exceptions import ValidationFailed  # noqa: PLC0415
+
+    key = (question_key or "").strip()
+    text = template_question_text(question_text, company_name) or key
+    value = (answer or "").strip()
+    if not key or not value:
+        raise ValidationFailed("A standing answer needs a question and an answer", code="standing_answer_incomplete")
+    try:
+        resolved_type = FieldType(str(getattr(field_type, "value", field_type) or FieldType.TEXT.value).upper())
+    except ValueError:
+        resolved_type = FieldType.TEXT
+    if is_demographic_question(key, text):
+        raise ValidationFailed(
+            "Demographic questions are always answered by you, on each application",
+            code="standing_answer_not_allowed",
+            details={"question_key": key},
+        )
+    if resolved_type is FieldType.FILE:
+        raise ValidationFailed(
+            "File attachments come from your resume; they cannot be a standing answer",
+            code="standing_answer_not_allowed",
+            details={"question_key": key},
+        )
+    scope: Any = APPLIES_TO_ALL
+    if isinstance(applies_to, (list, tuple)):
+        sources = [str(getattr(s, "value", s)).strip().upper() for s in applies_to]
+        sources = [s for s in sources if s]
+        scope = APPLIES_TO_ALL if not sources or APPLIES_TO_ALL in sources else list(dict.fromkeys(sources))
+
+    row = db.scalars(
+        select(StandingAnswer).where(StandingAnswer.user_id == user_id, StandingAnswer.question_key == key)
+    ).first()
+    if row is None:
+        row = StandingAnswer(user_id=user_id, question_key=key)
+        db.add(row)
+    row.question_text = text
+    row.field_type = resolved_type
+    row.answer = value
+    row.applies_to = scope
+    row.expires_at = expires_at
+    row.is_active = bool(is_active)
+    db.flush()
+    logger.info("Standing answer saved for user %s: %s", user_id, key)
+    return row
+
+
+def delete_standing_answer(db: Session, user_id: uuid.UUID, standing_answer_id: uuid.UUID) -> None:
+    """Tombstone one of the user's standing answers (404 for anyone else's)."""
+    from app.core.exceptions import NotFoundError  # noqa: PLC0415
+    from app.core.soft_delete import soft_delete  # noqa: PLC0415
+
+    row = db.scalars(
+        select(StandingAnswer).where(StandingAnswer.id == standing_answer_id, StandingAnswer.user_id == user_id)
+    ).first()
+    if row is None:
+        raise NotFoundError("Standing answer not found")
+    soft_delete(row)
+    db.flush()

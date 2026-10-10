@@ -24,9 +24,9 @@ from app.models.enums import Actor, ResumeParseStatus
 from app.models.resume import Resume, ResumeVersion
 from app.modules.ai import tasks as ai_tasks
 from app.modules.ai.schemas import ParsedResume
-from app.modules.resumes import storage
+from app.modules.resumes import recommendations, storage
 from app.modules.resumes.extraction import try_extract_text
-from app.modules.resumes.schemas import ResumeRead, ResumeVersionRead
+from app.modules.resumes.schemas import ResumeRead, ResumeRecommendations, ResumeVersionRead, VersionScore
 
 logger = logging.getLogger(__name__)
 
@@ -314,10 +314,36 @@ def delete_resume(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> None
     logger.info("Resume %s deleted for user %s (promoted=%s)", resume_id, user_id, promoted.id if promoted else None)
 
 
+# --------------------------------------------------------------------------- recommendations
+
+
+def get_recommendations(
+    db: Session,
+    user_id: uuid.UUID,
+    resume_id: uuid.UUID,
+    *,
+    refresh: bool = False,
+) -> ResumeRecommendations:
+    """Improvement advice for one of the user's resumes (computed on demand, cached).
+
+    Read-only: nothing is written, so ``refresh=True`` only bypasses the in-process cache.
+    """
+    resume = get_resume(db, user_id, resume_id)
+    return recommendations.build_recommendations(db, user_id, resume, refresh=refresh)
+
+
+def get_recommendation_history(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> list[VersionScore]:
+    """Overall and average match score per stored version, for the before/after chart."""
+    resume = get_resume(db, user_id, resume_id)
+    return recommendations.build_version_history(db, user_id, resume)
+
+
 __all__ = [
     "create_resume_from_bytes",
     "delete_resume",
     "get_default_resume",
+    "get_recommendation_history",
+    "get_recommendations",
     "get_resume",
     "list_resumes",
     "list_versions",

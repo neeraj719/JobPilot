@@ -8,7 +8,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, saveBlob } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
-import type { ParsedResume, ResumeRead, ResumeUpdate, ResumeVersionRead } from '@/types/api'
+import type {
+  ParsedResume,
+  ResumeRead,
+  ResumeRecommendations,
+  ResumeUpdate,
+  ResumeVersionRead,
+  ResumeVersionScore,
+} from '@/types/api'
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024
 export const ACCEPTED_RESUME_TYPES = [
@@ -50,6 +57,43 @@ export function useResumeVersions(resumeId: string | null) {
     queryKey: qk.resumes.versions(resumeId ?? 'none'),
     queryFn: () => api.get<ResumeVersionRead[]>(`/resumes/${resumeId}/versions`),
     enabled: Boolean(resumeId),
+  })
+}
+
+/**
+ * Improvement advice for one resume. The server caches it for ten minutes, so a long
+ * client stale time adds nothing; saving parsed data invalidates `['resumes', …]` and
+ * with it this query.
+ */
+export function useResumeRecommendations(resumeId: string | null) {
+  return useQuery({
+    queryKey: qk.resumes.recommendations(resumeId ?? 'none'),
+    queryFn: () => api.get<ResumeRecommendations>(`/resumes/${resumeId}/recommendations`),
+    enabled: Boolean(resumeId),
+    staleTime: 60_000,
+  })
+}
+
+/** Re-run the analysis, bypassing the server cache, and swap the result in place. */
+export function useRefreshRecommendations() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (resumeId: string) =>
+      api.get<ResumeRecommendations>(`/resumes/${resumeId}/recommendations`, { params: { refresh: true } }),
+    onSuccess: (data, resumeId) => {
+      queryClient.setQueryData(qk.resumes.recommendations(resumeId), data)
+      queryClient.setQueryData(qk.resumes.recommendationHistory(resumeId), data.version_history)
+    },
+  })
+}
+
+/** Health and average match score per stored version, for the before/after chart. */
+export function useRecommendationHistory(resumeId: string | null) {
+  return useQuery({
+    queryKey: qk.resumes.recommendationHistory(resumeId ?? 'none'),
+    queryFn: () => api.get<ResumeVersionScore[]>(`/resumes/${resumeId}/recommendations/history`),
+    enabled: Boolean(resumeId),
+    staleTime: 60_000,
   })
 }
 

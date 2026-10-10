@@ -86,6 +86,12 @@ PRIORITY_COMPANIES: tuple[tuple[str, CompanyPriority, str], ...] = (
     ("Wipro", CompanyPriority.AVOID, "Not looking for service-based roles"),
 )
 
+#: Real public job boards are configured on a fresh install from the bundled known-board
+#: list ``app/data/known_boards.json`` (company, domain, ATS, board token, tags; every entry
+#: returned open jobs when it was verified with ``scripts/verify_known_boards.py``). Seeding
+#: only stores the tokens - it never calls the network; the board adapters read them at
+#: discovery time. See :func:`configure_company_boards`.
+
 DEMO_RESUME_TEXT = """Aarav Sharma
 Bangalore, Karnataka, India | +91 98765 43210 | demo@jobpilot.ai
 linkedin.com/in/aarav-sharma | github.com/aarav-sharma | https://aaravsharma.dev
@@ -396,6 +402,37 @@ def _fill_profile(db: Session, user: User) -> UserProfile:
     return profile
 
 
+def _fill_standing_answers(db: Session, user: User) -> int:
+    """The two things the demo ATS form asks that only a human may decide, answered once.
+
+    The consent wording is the demo form's own, with ``{company}`` for the employer it
+    names, so it is reused at every demo company; without these two the demo account's
+    first unattended run would pause on its first application.
+    """
+    from app.models.enums import FieldType
+    from app.modules.profiles.service import upsert_standing_answer
+
+    upsert_standing_answer(
+        db,
+        user.id,
+        question_key="custom:consent",
+        question_text=(
+            "I consent to {company} storing the information in this application and contacting me "
+            "about this role."
+        ),
+        answer="Yes",
+        field_type=FieldType.CHECKBOX,
+    )
+    upsert_standing_answer(
+        db,
+        user.id,
+        question_key="custom:start_date",
+        question_text="What is your preferred start date?",
+        answer="Right after my 30-day notice period",
+    )
+    return 2
+
+
 def _fill_preferences(db: Session, user: User) -> JobPreference:
     preference = db.scalars(select(JobPreference).where(JobPreference.user_id == user.id)).first()
     if preference is None:
@@ -426,6 +463,35 @@ def _fill_company_preferences(db: Session, user: User) -> int:
         upsert_preference(db, user.id, name, priority, notes=notes)
     db.flush()
     return len(PRIORITY_COMPANIES)
+
+
+def configure_company_boards(db: Session) -> int:
+    """Store every board of the bundled known-board list on the company registry.
+
+    No network access: the tokens come from ``app/data/known_boards.json``. Idempotent and
+    non-destructive: a company that already has a board (configured by a user through
+    ``PUT /companies/{id}/board`` or found by detection) keeps it, and only empty fields
+    (domain, website, tags) are filled in. Returns how many boards were set.
+    """
+    from app.modules.companies.board_detect import known_boards
+    from app.modules.companies.service import get_or_create_company
+
+    configured = 0
+    for board in known_boards():
+        attrs: dict[str, Any] = {"tags": list(board.tags)}
+        if board.domain:
+            attrs.update(domain=board.domain, website=f"https://{board.domain}")
+        company = get_or_create_company(db, board.name, **attrs)
+        if company.ats_board_token:
+            continue
+        company.ats_type = board.ats_type.value
+        company.ats_board_token = board.token
+        company.ats_board_url = board.board_url
+        configured += 1
+    db.flush()
+    if configured:
+        logger.info("Configured %d public job boards", configured)
+    return configured
 
 
 def _seed_skill_taxonomy(db: Session) -> int:
@@ -480,13 +546,15 @@ def _create_resume(db: Session, user: User) -> Resume | None:
 
 
 def _discover_jobs(db: Session, user: User, preference: JobPreference) -> tuple[int, int, int, list[Job]]:
-    from app.modules.adapters.registry import DISCOVERY_SOURCES, get_enabled_adapters
+    from app.modules.adapters.registry import BOARD_SOURCES, DISCOVERY_SOURCES, get_enabled_adapters
     from app.modules.jobs.service import build_search_query, ingest_discovered
 
     query = build_search_query(preference, limit=60)
     query.posted_within_hours = preference.only_posted_within_hours
     discovered: list[Any] = []
-    for adapter in get_enabled_adapters(list(DISCOVERY_SOURCES)):
+    # The public job boards are real third-party APIs: seeding never calls the network.
+    offline_sources = [source for source in DISCOVERY_SOURCES if source not in BOARD_SOURCES]
+    for adapter in get_enabled_adapters(offline_sources):
         try:
             found = adapter.search_jobs(query)
         except Exception as exc:  # pragma: no cover - a broken adapter must not stop the seed
@@ -1413,6 +1481,12 @@ def seed_demo_data(db: Session, *, force: bool = False) -> SeedSummary:
     summary = SeedSummary(email=settings.DEMO_USER_EMAIL)
     rng = random.Random(SEED_RANDOM)
 
+    # Shared reference data, not demo-user data: also applied on an existing install, and
+    # never overwrites a board a user configured.
+    boards = configure_company_boards(db)
+    if boards:
+        summary.messages.append(f"Configured {boards} public job boards.")
+
     # Tombstones included: a soft-deleted demo account still owns the email address as
     # far as a rebuild is concerned, and --force has to find it to clear it out.
     existing = db.scalars(
@@ -1434,6 +1508,7 @@ def seed_demo_data(db: Session, *, force: bool = False) -> SeedSummary:
     summary.user_id = user.id
 
     _fill_profile(db, user)
+    _fill_standing_answers(db, user)
     preference = _fill_preferences(db, user)
     _fill_company_preferences(db, user)
     summary.skills = _seed_skill_taxonomy(db)

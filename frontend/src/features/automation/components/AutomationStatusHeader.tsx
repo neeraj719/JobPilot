@@ -80,6 +80,13 @@ export function AutomationStatusHeader({
     ? `Daily at ${config.schedule_time} ${config.timezone}`
     : 'Schedule not configured'
 
+  // Sources the next run searches (the explicit list, else every source the server
+  // resolved a mode for) and how many of them may be applied to automatically.
+  const sourceModes = config?.source_modes ?? {}
+  const searchedSources =
+    config && config.enabled_sources.length > 0 ? config.enabled_sources : Object.keys(sourceModes)
+  const autoApplySources = searchedSources.filter((source) => sourceModes[source] === 'AUTO_APPLY').length
+
   if (loading) {
     return (
       <Card>
@@ -184,6 +191,13 @@ export function AutomationStatusHeader({
                 ? `${config.auto_submit_sources.length || 'All'} allowed source${config.auto_submit_sources.length === 1 ? '' : 's'}`
                 : 'Applications wait in the review queue'}
             </p>
+            {config ? (
+              <p className="text-xs text-muted-foreground" title="Sources in auto-apply mode vs discover-only">
+                <span className="font-medium tabular-nums text-foreground">{autoApplySources}</span> of{' '}
+                <span className="tabular-nums">{searchedSources.length}</span> source
+                {searchedSources.length === 1 ? '' : 's'} auto-apply
+              </p>
+            ) : null}
           </Metric>
         </div>
       </CardContent>

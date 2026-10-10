@@ -1,4 +1,4 @@
-import { Bell, Bot, Link2, Mail, ShieldCheck, SlidersHorizontal, UserCog } from 'lucide-react'
+import { Bell, Bot, Link2, Mail, ShieldCheck, SlidersHorizontal, UserCog, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { cn } from '@/lib/utils'
+import { AccountRolesCard } from '@/features/settings/components/AccountRolesCard'
 import { AiSettingsCard } from '@/features/settings/components/AiSettingsCard'
 import { AutomationSettingsForm } from '@/features/settings/components/AutomationSettingsForm'
 import { ConnectedAccountsCard } from '@/features/settings/components/ConnectedAccountsCard'
@@ -17,10 +18,11 @@ import { NotificationSettingsCard } from '@/features/settings/components/Notific
 import { SecurityCard } from '@/features/settings/components/SecurityCard'
 import { SettingsShortcuts } from '@/features/settings/components/SettingsShortcuts'
 
-type SettingsSection = 'general' | 'automation' | 'accounts' | 'email' | 'ai' | 'notifications' | 'security'
+type SettingsSection = 'general' | 'roles' | 'automation' | 'accounts' | 'email' | 'ai' | 'notifications' | 'security'
 
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: 'general', label: 'Your data', icon: UserCog },
+  { id: 'roles', label: 'Account roles', icon: Users },
   { id: 'automation', label: 'Limits & schedule', icon: SlidersHorizontal },
   { id: 'accounts', label: 'Connected accounts', icon: Link2 },
   { id: 'email', label: 'Email integration', icon: Mail },
@@ -129,6 +131,7 @@ export default function SettingsPage() {
 
         <div className="min-w-0">
           {activeSection === 'general' ? <SettingsShortcuts /> : null}
+          {activeSection === 'roles' ? <AccountRolesCard /> : null}
           {activeSection === 'automation' ? <AutomationSettingsForm /> : null}
           {activeSection === 'accounts' ? <ConnectedAccountsCard /> : null}
           {activeSection === 'email' ? <EmailIntegrationCard /> : null}

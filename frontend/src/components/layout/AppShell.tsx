@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 
 import { Sidebar } from '@/components/layout/Sidebar'
+import { StaySignedInNudge } from '@/components/layout/StaySignedInNudge'
 import { Topbar } from '@/components/layout/Topbar'
 import { findNavItem } from '@/components/layout/navigation'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -52,6 +53,7 @@ export function AppShell() {
         <div className={cn('flex min-h-svh flex-col transition-[padding] duration-200', collapsed ? 'lg:pl-16' : 'lg:pl-64')}>
           <Topbar title={active?.label} onOpenMenu={() => setMobileOpen(true)} />
           <main className="flex-1">
+            <StaySignedInNudge />
             <Outlet />
           </main>
         </div>

@@ -136,6 +136,7 @@ def test_mock_supports_every_task() -> None:
         "generate_cover_letter",
         "classify_email",
         "generate_interview_prep",
+        "polish_resume_recommendations",
     }
     for task_name in TASK_NAMES:
         assert provider.supports_task(task_name)

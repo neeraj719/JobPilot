@@ -16,8 +16,9 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
+import { SimpleTooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
-import { formatDateTime } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 import { Field, FieldGrid } from '@/features/profile/components/SectionCard'
 import { useAutomationConfig, useIntegrations, useUpdateAutomationConfig } from '@/features/settings/api'
 import { useSyncDefaults } from '@/features/profile/useSyncDefaults'
@@ -26,11 +27,138 @@ import {
   automationDefaults,
   automationSchema,
   automationToPayload,
+  defaultSourceMode,
   type AutomationValues,
 } from '@/features/settings/schema'
-import type { AdapterInfo } from '@/types/api'
+import type { AdapterInfo, SourceApplyMode } from '@/types/api'
 
 const FORM_ID = 'automation-settings-form'
+
+const APPLY_MODE_OPTIONS: { value: SourceApplyMode; label: string }[] = [
+  { value: 'AUTO_APPLY', label: 'Auto apply' },
+  { value: 'DISCOVER_ONLY', label: 'Discover only' },
+]
+
+/** Two-option segmented control for one source's apply mode. */
+function ApplyModeControl({
+  id,
+  value,
+  onChange,
+  disabled,
+  label,
+}: {
+  id: string
+  value: SourceApplyMode
+  onChange: (next: SourceApplyMode) => void
+  disabled: boolean
+  label: string
+}) {
+  return (
+    <div
+      id={id}
+      role="radiogroup"
+      aria-label={`Apply mode for ${label}`}
+      className={cn(
+        'inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      {APPLY_MODE_OPTIONS.map((option) => {
+        const selected = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'rounded-[5px] px-2.5 py-1 font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              disabled && 'pointer-events-none',
+            )}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** One row per source: name, what it can do, and the segmented apply-mode control. */
+function SourceModeTable({
+  adapters,
+  value,
+  onChange,
+  status,
+  onRetry,
+}: {
+  adapters: AdapterInfo[]
+  value: Record<string, SourceApplyMode>
+  onChange: (next: Record<string, SourceApplyMode>) => void
+  status: 'loading' | 'error' | 'empty' | 'ready'
+  onRetry: () => void
+}) {
+  if (status !== 'ready' || adapters.length === 0) {
+    return (
+      <AdapterNotice
+        status={status === 'ready' ? 'empty' : status}
+        emptyLabel="No adapters reported by the server."
+        onRetry={onRetry}
+      />
+    )
+  }
+  return (
+    <ul className="divide-y divide-border rounded-lg border border-border">
+      {adapters.map((adapter) => {
+        const supported = Boolean(adapter.supports_auto_apply)
+        const mode: SourceApplyMode = supported ? (value[adapter.source] ?? defaultSourceMode(adapter)) : 'DISCOVER_ONLY'
+        const control = (
+          <ApplyModeControl
+            id={`source-mode-${adapter.source}`}
+            value={mode}
+            disabled={!supported}
+            label={adapter.display_name}
+            onChange={(next) => onChange({ ...value, [adapter.source]: next })}
+          />
+        )
+        return (
+          <li key={adapter.source} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm">
+                {adapter.display_name}
+                {adapter.is_mock ? <span className="ml-1 text-xs text-muted-foreground">(mock)</span> : null}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {!supported
+                  ? 'Discovery only — this adapter cannot submit applications'
+                  : adapter.uses_browser
+                    ? 'Fills the real form in Chromium'
+                    : 'Applies inside the platform'}
+              </p>
+            </div>
+            {supported ? (
+              control
+            ) : (
+              <SimpleTooltip
+                side="left"
+                label={`${adapter.display_name} does not support automated applications, so its jobs can only be discovered.`}
+              >
+                {/* A disabled button cannot receive pointer events; the wrapper carries the tooltip. */}
+                <span tabIndex={0} className="inline-flex rounded-md">
+                  {control}
+                </span>
+              </SimpleTooltip>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 function ToggleRow({
   id,
@@ -388,6 +516,29 @@ export function AutomationSettingsForm() {
                   value={field.value}
                   onChange={field.onChange}
                   emptyLabel="No adapters reported by the server."
+                  status={adapterStatus}
+                  onRetry={retryAdapters}
+                />
+              )}
+            />
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">Per-source apply mode</h3>
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Auto apply</span> lets the pipeline prepare answers, fill the
+              form and park it for your approval (or submit it, if auto-submit allows that source).{' '}
+              <span className="font-medium text-foreground">Discover only</span> still finds and scores the jobs but
+              never creates an application — you apply from the Jobs page yourself.
+            </p>
+            <Controller
+              control={control}
+              name="source_modes"
+              render={({ field }) => (
+                <SourceModeTable
+                  adapters={adapters}
+                  value={field.value}
+                  onChange={field.onChange}
                   status={adapterStatus}
                   onRetry={retryAdapters}
                 />

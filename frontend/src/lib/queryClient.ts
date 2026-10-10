@@ -43,6 +43,8 @@ export const qk = {
     all: ['resumes'] as const,
     detail: (id: string) => ['resumes', id] as const,
     versions: (id: string) => ['resumes', id, 'versions'] as const,
+    recommendations: (id: string) => ['resumes', id, 'recommendations'] as const,
+    recommendationHistory: (id: string) => ['resumes', id, 'recommendations', 'history'] as const,
   },
   companies: {
     all: ['companies'] as const,

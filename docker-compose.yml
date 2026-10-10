@@ -59,6 +59,9 @@ services:
       TRUST_PROXY_HEADERS: "true"
       RUN_MIGRATIONS: "true"
       RUN_SEED: ${SEED_DEMO_DATA:-true}
+      # Only used with LLM_PROVIDER=ollama: Ollama runs natively on the host (see the
+      # commented-out "ollama" service below), and "localhost" here is this container.
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
     ports:
       - "8000:8000"
@@ -88,12 +91,35 @@ services:
       BROWSER_DISABLE_SANDBOX: "true"
       RUN_MIGRATIONS: "false"
       RUN_SEED: "false"
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
     command: ["python", "-m", "app.worker.main"]
     volumes:
       - uploads:/data/uploads
     depends_on:
       backend:
         condition: service_healthy
+
+  # Local LLM (LLM_PROVIDER=ollama). Deliberately NOT enabled: on the development machine
+  # Ollama runs natively on the host (installed with winget, GPU via the host driver), and
+  # the backend/worker containers reach it at host.docker.internal:11434. Uncomment this
+  # block (and the "ollama" volume at the bottom) only to run Ollama in Docker instead; then
+  # set OLLAMA_DOCKER_BASE_URL=http://ollama:11434 and pull the model once with
+  #   docker compose exec ollama ollama pull qwen2.5:3b-instruct
+  # The GPU reservation needs the NVIDIA Container Toolkit (Docker Desktop + WSL2 on Windows).
+  # ollama:
+  #   image: ollama/ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
 
   frontend:
     build:
@@ -108,3 +134,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  # ollama:

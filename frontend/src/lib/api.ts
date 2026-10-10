@@ -8,6 +8,8 @@
  *    (the refresh token lives in an HttpOnly cookie, hence `credentials: 'include'`),
  *    update the store and retry the original request
  *  - normalise error bodies (`{"error": {code, message, details}}`) into `ApiError`
+ *  - leave a `401 reauth_required` alone: it asks for the password again (sensitive
+ *    actions), and answering it with a refreshed token would defeat the check
  *
  * The auth wiring is injected by `src/stores/auth.ts` via `configureApiAuth` so that this
  * module stays free of store imports (no circular dependency).
@@ -58,6 +60,32 @@ export class ApiError extends Error {
 
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError
+}
+
+/**
+ * 401 codes that mean "this request needs something more", not "the session is over":
+ * no refresh-and-retry, and the user is not signed out.
+ *  - `reauth_required`: a sensitive action wants the password again (or a fresh sign-in).
+ *  - `invalid_credentials`: e.g. a wrong *current* password in the change-password form.
+ */
+const NON_SESSION_401_CODES = new Set(['reauth_required', 'invalid_credentials'])
+
+/** True when the API asks the user to confirm their password before a sensitive action. */
+export function isReauthRequired(error: unknown): boolean {
+  return isApiError(error) && error.status === 401 && error.code === 'reauth_required'
+}
+
+/** Header carrying the current password for a sensitive action (see `require_recent_auth`). */
+export const REAUTH_HEADER = 'X-Reauth-Password'
+
+/**
+ * Headers for re-authentication. Header values must be Latin-1 and lose surrounding
+ * whitespace, so anything beyond printable ASCII is sent percent-encoded (UTF-8); the
+ * server accepts both. The password goes straight into this one request and is not kept.
+ */
+export function reauthHeaders(password: string): Record<string, string> {
+  const plain = /^[\x21-\x7e]*$/.test(password)
+  return { [REAUTH_HEADER]: plain ? password : encodeURIComponent(password) }
 }
 
 /** Best-effort human-readable message for any thrown value. */
@@ -154,6 +182,16 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, `http_${response.status}`, response.statusText || 'Request failed', body)
 }
 
+/** The `error.code` of an error response, read from a clone so the body stays readable. */
+async function peekErrorCode(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.clone().json()
+    return looksLikeErrorBody(body) ? (body.error.code ?? null) : null
+  } catch {
+    return null
+  }
+}
+
 async function parseBody<T>(response: Response): Promise<T> {
   if (response.status === 204 || response.status === 205) return undefined as T
   const contentType = response.headers.get('content-type') ?? ''
@@ -246,7 +284,13 @@ async function request<T>(method: string, path: string, body?: Body, options: Re
     throw new ApiError(0, 'network_error', 'Cannot reach the JobPilot API. Check your connection.', cause)
   }
 
-  if (response.status === 401 && !options.skipRefresh && !options.skipAuth && token) {
+  if (
+    response.status === 401 &&
+    !options.skipRefresh &&
+    !options.skipAuth &&
+    token &&
+    !NON_SESSION_401_CODES.has((await peekErrorCode(response)) ?? '')
+  ) {
     const fresh = await refreshAccessToken()
     if (fresh) {
       try {
@@ -261,7 +305,9 @@ async function request<T>(method: string, path: string, body?: Body, options: Re
 
   if (!response.ok) {
     const error = await toApiError(response)
-    if (error.status === 401 && !options.skipAuth) authBridge.onAuthFailure()
+    if (error.status === 401 && !options.skipAuth && !NON_SESSION_401_CODES.has(error.code)) {
+      authBridge.onAuthFailure()
+    }
     throw error
   }
 

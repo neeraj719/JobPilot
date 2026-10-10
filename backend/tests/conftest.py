@@ -157,6 +157,42 @@ def _reset_rate_limiter():
     yield
 
 
+#: What every host resolves to while the network guard is on: a public documentation
+#: address (TEST-NET-3 is not "global", so example.com's address is used), so the board
+#: detector's public-address check passes and the refusing transport decides.
+TEST_PUBLIC_IP = "93.184.215.14"
+
+
+@pytest.fixture(autouse=True)
+def _no_job_board_network():
+    """The default suite never calls the real public job boards or company websites.
+
+    Every board request goes through ``app.modules.adapters.boards.http``, and every page
+    and robots.txt the board detector reads goes through ``companies.board_detect``; both
+    are routed to a transport that refuses, and the detector's DNS lookups to a stub, so a
+    test that forgets to mock the network fails loudly instead of quietly depending on
+    Greenhouse (or a company website) being up. Tests that need answers install their own
+    ``httpx.MockTransport``; the opt-in live tests restore the network.
+    """
+    import httpx
+
+    from app.modules.adapters.boards import http as board_http
+    from app.modules.companies import board_detect
+
+    def _refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"network access to {request.url.host} is disabled in tests", request=request)
+
+    board_http.clear_cache()
+    board_http.set_transport(httpx.MockTransport(_refuse))
+    board_detect.set_transport(httpx.MockTransport(_refuse))
+    board_detect.set_resolver(lambda host: [TEST_PUBLIC_IP])
+    yield
+    board_http.set_transport(None)
+    board_detect.set_transport(None)
+    board_detect.set_resolver(None)
+    board_http.clear_cache()
+
+
 @pytest.fixture
 def db() -> Session:
     session = SessionLocal()

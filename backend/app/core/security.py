@@ -43,6 +43,8 @@ def _now() -> datetime:
 
 
 def create_access_token(user_id: uuid.UUID | str, role: str, extra: dict[str, Any] | None = None) -> str:
+    """Issue an access token. ``role`` is the **active** role of this session: the one
+    the user chose to act as, which every guard checks (see ``app.core.deps``)."""
     expire = _now() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload: dict[str, Any] = {
         "sub": str(user_id),
@@ -62,6 +64,39 @@ def decode_access_token(token: str) -> dict[str, Any]:
     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     if payload.get("type") != "access":
         raise jwt.InvalidTokenError("Not an access token")
+    return payload
+
+
+#: ``type`` claim of the short-lived token handed out between password check and role choice.
+ROLE_SELECTION_TOKEN_TYPE = "role_selection"
+
+
+def create_role_selection_token(user_id: uuid.UUID | str, roles: list[str], *, ttl_seconds: int) -> str:
+    """Short-lived proof that the password was verified, valid only for choosing a role.
+
+    It carries the roles the user may pick from and nothing else; it is not an access
+    token (``decode_access_token`` rejects it by its ``type``), so it cannot call the API.
+    The lifetime is passed in by the auth module, which owns that constant.
+    """
+    now = _now()
+    payload: dict[str, Any] = {
+        "sub": str(user_id),
+        "roles": list(roles),
+        "type": ROLE_SELECTION_TOKEN_TYPE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=ttl_seconds)).timestamp()),
+        "jti": secrets.token_hex(16),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_role_selection_token(token: str) -> dict[str, Any]:
+    """Decode and validate a role-selection token. Raises ``jwt.PyJWTError`` on failure."""
+    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    if payload.get("type") != ROLE_SELECTION_TOKEN_TYPE:
+        raise jwt.InvalidTokenError("Not a role-selection token")
+    if not isinstance(payload.get("roles"), list) or not payload.get("sub"):
+        raise jwt.InvalidTokenError("Malformed role-selection token")
     return payload
 
 

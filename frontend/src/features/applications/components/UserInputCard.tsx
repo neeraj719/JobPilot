@@ -3,10 +3,12 @@ import * as React from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { AnswerField } from '@/features/applications/components/AnswerField'
 import { automationSummary, isManualStepPause } from '@/features/applications/components/AutomationBadge'
 import { questionLabel } from '@/features/applications/labels'
+import { canRememberAnswer } from '@/features/profile/standingAnswers'
 import { cn } from '@/lib/utils'
 import type { AnswerUpdate, ApplicationDetail } from '@/types/api'
 
@@ -33,6 +35,8 @@ export function UserInputCard({
 }: UserInputCardProps) {
   const pending = (application.answers ?? []).filter((answer) => answer.status === 'NEEDS_USER_INPUT')
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
+  /** Answers to keep as standing answers ("Remember this answer"). */
+  const [remember, setRemember] = React.useState<Record<string, boolean>>({})
   const summary = automationSummary(application)
   const manualStep = isManualStepPause(application.pause_reason)
   const applyUrl = application.job?.apply_url ?? application.external_url ?? application.job?.canonical_url ?? null
@@ -55,7 +59,11 @@ export function UserInputCard({
   async function handleSaveAndContinue() {
     const updates: AnswerUpdate[] = pending
       .filter((answer) => (drafts[answer.id] ?? '').trim().length > 0)
-      .map((answer) => ({ id: answer.id, answer: (drafts[answer.id] ?? '').trim() }))
+      .map((answer) => ({
+        id: answer.id,
+        answer: (drafts[answer.id] ?? '').trim(),
+        ...(remember[answer.id] ? { save_as_standing: true } : {}),
+      }))
     await onSaveAndContinue(updates)
   }
 
@@ -122,6 +130,21 @@ export function UserInputCard({
                     onChange={(value) => setDrafts((current) => ({ ...current, [answer.id]: value }))}
                     disabled={saving || resuming}
                   />
+                  {canRememberAnswer(answer.question_key, answer.field_type) ? (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`remember-${answer.id}`}
+                        checked={Boolean(remember[answer.id])}
+                        onCheckedChange={(checked) =>
+                          setRemember((current) => ({ ...current, [answer.id]: checked === true }))
+                        }
+                        disabled={saving || resuming}
+                      />
+                      <Label htmlFor={`remember-${answer.id}`} className="text-xs font-normal text-muted-foreground">
+                        Remember this answer for future applications
+                      </Label>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

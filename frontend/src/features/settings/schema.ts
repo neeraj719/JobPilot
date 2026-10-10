@@ -7,7 +7,19 @@
  */
 import { z } from 'zod'
 
-import type { AutomationConfigRead, AutomationConfigUpdate, JobSourceType } from '@/types/api'
+import {
+  SOURCE_APPLY_MODES,
+  type AdapterInfo,
+  type AutomationConfigRead,
+  type AutomationConfigUpdate,
+  type JobSourceType,
+  type SourceApplyMode,
+} from '@/types/api'
+
+/** The mode the server falls back to when the user has not chosen one for a source. */
+export function defaultSourceMode(adapter: Pick<AdapterInfo, 'supports_auto_apply'>): SourceApplyMode {
+  return adapter.supports_auto_apply ? 'AUTO_APPLY' : 'DISCOVER_ONLY'
+}
 
 /** Server cap (`settings.MAX_DAILY_APPLICATION_LIMIT`). */
 export const MAX_DAILY_APPLICATION_LIMIT = 100
@@ -69,6 +81,8 @@ export const automationSchema = z
     retry_limit: intField(0, 10, 'number'),
     auto_submit_enabled: z.boolean(),
     auto_submit_sources: z.array(z.string()),
+    /** source -> apply mode, as resolved by the server plus the user's edits. */
+    source_modes: z.record(z.enum(SOURCE_APPLY_MODES)),
     auto_generate_cover_letters: z.boolean(),
     notify_on_input_required: z.boolean(),
   })
@@ -115,6 +129,7 @@ export function automationDefaults(config: AutomationConfigRead | undefined): Au
     retry_limit: String(config?.retry_limit ?? 3),
     auto_submit_enabled: config?.auto_submit_enabled ?? false,
     auto_submit_sources: config?.auto_submit_sources ?? [],
+    source_modes: { ...(config?.source_modes ?? {}) },
     auto_generate_cover_letters: config?.auto_generate_cover_letters ?? true,
     notify_on_input_required: config?.notify_on_input_required ?? true,
   }
@@ -141,6 +156,7 @@ export function automationToPayload(values: AutomationValues): AutomationConfigU
     retry_limit: Number(values.retry_limit),
     auto_submit_enabled: values.auto_submit_enabled,
     auto_submit_sources: values.auto_submit_enabled ? (values.auto_submit_sources as JobSourceType[]) : [],
+    source_modes: values.source_modes,
     auto_generate_cover_letters: values.auto_generate_cover_letters,
     notify_on_input_required: values.notify_on_input_required,
   }

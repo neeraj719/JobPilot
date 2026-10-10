@@ -2,7 +2,7 @@
 
 PostgreSQL 18 in production and in the test suite, SQLite for the no-Docker local run (all
 column types are portable: `Uuid`, `JSON`, `DateTime(timezone=True)`, string-backed enums).
-27 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
+28 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
 Migrations: Alembic (`backend/alembic/versions`). Models: `backend/app/models/*.py`.
 Enums: `backend/app/models/enums.py`.
 
@@ -73,6 +73,7 @@ would fail. Every key a user can delete and legitimately re-create is therefore
 | `uq_browser_session_user_source_active` | `master.browser_sessions (user_id, source)` |
 | `uq_roles_name_active` | `master.roles (name)` |
 | `uq_user_roles_user_role_active` | `master.user_roles (user_id, role_id)` |
+| `uq_standing_answers_user_key_active` | `master.standing_answers (user_id, question_key)` |
 
 Keys nothing user-facing deletes stay plain UNIQUE constraints (`job_sources`,
 `job_matches`, `applications`, `email_messages`, `user_profiles.user_id`, …) — a partial
@@ -80,7 +81,7 @@ index there would cost a scan and buy nothing.
 
 ### 4. Every link is a uuid foreign key
 
-27 uuid primary keys, 37 uuid foreign keys, no natural or composite keys between tables.
+28 uuid primary keys, 38 uuid foreign keys, no natural or composite keys between tables.
 
 **One junction table per many-to-many relationship, named after both sides**
 (`user_roles`). **One-to-many keys live on the owning row**, not in a shared table: a future
@@ -216,8 +217,8 @@ skills (taxonomy)
 
 ## Tables
 
-All 27 carry the seven standard columns — `id` / `created_at` / `updated_at` /
-`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 27 carry the
+All 28 carry the seven standard columns — `id` / `created_at` / `updated_at` /
+`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 28 carry the
 `trg_<table>_updated_at` trigger; only what is *extra* is listed.
 
 | Table | Purpose | Notable columns / constraints |
@@ -227,9 +228,10 @@ All 27 carry the seven standard columns — `id` / `created_at` / `updated_at` /
 | `user_roles` | user↔role junction | partial-unique `(user_id, role_id)`; a revoked grant is a tombstoned row |
 | `refresh_tokens` | rotating refresh tokens | `token_hash` unique (sha256), `revoked_at`, `replaced_by_hash` |
 | `user_profiles` | candidate facts used by the answer engine | personal, professional (JSON lists), `skill_experience` (skill→years), `work_authorization` (country→bool), `requires_sponsorship`, `canonical_answers` |
+| `standing_answers` | answers the user gave once, reused by the answer engine on every application | `user_id`, `question_key` (canonical key, e.g. `custom:consent`), `question_text` (the wording answered, employer name stored as `{company}`), `field_type`, `answer`, `applies_to` (`"ALL"` or a JSON list of `JobSourceType`), `expires_at`; partial-unique `(user_id, question_key)` — added by migration `f3b8d1a6c920` |
 | `job_preferences` | targeting | `desired_titles`, `min_salary`, `desired_salary`, `currency`, `notice_period_days`, `preferred_locations`, `work_modes`, `employment_types`, `min_match_score`, `only_posted_within_hours` |
 | `company_preferences` | P1/P2/P3/AVOID per user | partial-unique `(user_id, normalized_name)` |
-| `companies` | normalised company registry | `normalized_name` unique, `domain`, `email_domains` (learned sender domains), `ats_type` |
+| `companies` | normalised company registry | `normalized_name` unique, `domain`, `email_domains` (learned sender domains), `ats_type` (a `JobSourceType` name: `GREENHOUSE` / `LEVER` / `ASHBY` / `SMARTRECRUITERS` / `WORKDAY` / `CUSTOM` / `DEMO_ATS`, normalised on write), `ats_board_token` (the company's public job board token on that ATS, read by the board adapters; `NULL` = no board), `ats_board_url` (the board URL the token came from, for display) — both added by migration `e4c2a9f71b36` |
 | `jobs` | one normalised posting | `dedupe_hash` (company+title+location), `apply_url`, `application_type`, skills JSON, salary/experience ranges |
 | `job_sources` | where a job was seen | unique `(source, external_id)`; several rows per job = cross-platform duplicate |
 | `job_matches` | per-user match analysis | unique `(job_id, user_id)`; `match_score` + part scores, `missing_skills`, `explanation` |
@@ -266,3 +268,103 @@ OFFER → OFFER (never downgrades an application).
 `email_integrations.encrypted_credentials`, `connected_accounts.encrypted_credentials` and
 `browser_sessions.encrypted_storage_state` are Fernet-encrypted with `ENCRYPTION_KEY`. Passwords are
 bcrypt hashes. Refresh tokens are stored as SHA-256 hashes. No plaintext secret is ever persisted.
+
+## Backups and restore
+
+Backups are `pg_dump` custom-format files. `pg_dump` and `pg_restore` run **inside** the
+compose `postgres` container (`docker compose exec -T postgres ...`), so nothing
+PostgreSQL-related has to be installed on the host. The scripts are POSIX `sh` and run under
+Git Bash on Windows. Run them from the repository root with the compose stack up
+(`docker compose up -d postgres` is enough).
+
+| Command | Script | What it does |
+|---|---|---|
+| `make db-backup` | `backend/scripts/db_backup.sh` | dump, verify, apply retention, print a summary |
+| `make db-restore-check` | `backend/scripts/db_restore_check.sh` | restore the newest dump into a scratch DB, assert, drop it |
+| — | `backend/scripts/db_restore.sh TARGET_DB DUMP_FILE` | restore any dump into any database |
+
+Git Bash on Windows has no `make`; run the script directly instead, e.g.
+`sh backend/scripts/db_backup.sh`. The Makefile targets are exactly those commands.
+
+### Taking a backup
+
+```sh
+make db-backup                     # or: sh backend/scripts/db_backup.sh
+BACKUP_KEEP=30 make db-backup      # keep 30 dumps instead of 14
+```
+
+- **Where files land:** `backups/jobpilot-YYYYMMDD-HHMMSS.dump` at the repository root
+  (`BACKUP_DIR` overrides the directory). `backups/` is gitignored — copy dumps somewhere
+  off the machine if they matter.
+- **Verification:** the dump is written to `*.dump.partial` first. It is renamed to `*.dump`
+  only if it is non-empty and `pg_restore --list` (in the container, file piped in) can read
+  its table of contents; otherwise the script exits non-zero and nothing is deleted.
+- **Retention:** after a verified dump, only the newest `BACKUP_KEEP` files matching
+  `jobpilot-*.dump` (default 14, newest by modification time) are kept; older ones are
+  deleted and each deletion is printed. `.partial` files and anything else in the directory
+  are never touched. The older manual dump `jobpilot-YYYYMMDD.dump` matches the pattern and
+  ages out like any other.
+- **Output:** one summary line, e.g.
+  `backup OK: backups/jobpilot-20261004-162332.dump  size=264 KB (269564 bytes)  tables=28 (27 in app schemas, 1 other)  kept=2/14 removed=0`.
+  The "1 other" is `public.alembic_version`.
+- **Not included:** uploaded files (resumes, cover letters) live in the `uploads` Docker
+  volume, not in PostgreSQL. A database dump does not contain them.
+
+Nothing schedules the backup; run it before migrations, before a `FORCE=1` restore and
+whenever you want a restore point (or wire `make db-backup` into Task Scheduler / cron).
+
+### Proving a backup restores (scratch database)
+
+```sh
+make db-restore-check              # or: sh backend/scripts/db_restore_check.sh
+```
+
+Restores the newest `backups/jobpilot-*.dump` into `jobpilot_restore_check` (dropped first
+if a previous run left it), then asserts it has **28 base tables across the five schemas**
+and the **same `alembic_version` as the live `jobpilot` database**. The scratch database is
+dropped on exit whether the check passes or fails. The live database is only read
+(`SELECT version_num FROM alembic_version`). Exit code 0 means PASS. If a migration adds or
+removes tables, update the expected count (`EXPECTED_TABLES=N`, or the default in the
+script).
+
+To restore a specific dump into a scratch database and look around yourself:
+
+```sh
+sh backend/scripts/db_restore.sh jobpilot_scratch backups/jobpilot-20261004-162332.dump
+docker compose exec postgres psql -U jobpilot -d jobpilot_scratch
+docker compose exec -T postgres psql -U jobpilot -d postgres -c "DROP DATABASE jobpilot_scratch"
+```
+
+`db_restore.sh` creates the target database if needed and runs
+`pg_restore --clean --if-exists --no-owner --single-transaction --exit-on-error`: the
+restore either applies completely or is rolled back. Afterwards it prints the restored
+database's `alembic_version` and table count. Target names must be plain lower-case
+identifiers; `postgres`, `template0` and `template1` are refused.
+
+### Restoring over the live database
+
+This replaces every object in `jobpilot` with the contents of the dump. Anything written
+since that dump was taken is lost.
+
+1. **Stop everything that connects to the database** — the API and the worker. With compose:
+   `docker compose stop backend worker`; without Docker, stop `uvicorn` and
+   `python -m app.worker.main`. Open connections hold locks that block the `DROP`s, and a
+   running worker would write into a half-restored database.
+2. Take a fresh backup of the current state first: `make db-backup`.
+3. Restore, with the explicit override:
+
+   ```sh
+   FORCE=1 sh backend/scripts/db_restore.sh jobpilot backups/jobpilot-YYYYMMDD-HHMMSS.dump
+   ```
+
+   Without `FORCE=1` the script refuses (exit 3) to touch `jobpilot`.
+4. Check the printed `alembic_version`. If the dump is older than the code, run
+   `make migrate` (or `alembic upgrade head`) before starting the API again.
+5. Start the services again: `docker compose start backend worker`.
+
+Fallback without the scripts (what they wrap):
+
+```sh
+docker compose exec -T postgres pg_dump -U jobpilot -d jobpilot --format=custom > backups/jobpilot-$(date +%Y%m%d-%H%M%S).dump
+docker compose exec -T postgres pg_restore -U jobpilot -d TARGET_DB --clean --if-exists --no-owner < backups/FILE.dump
+```

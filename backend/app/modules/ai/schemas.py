@@ -238,6 +238,28 @@ class CoverLetter(BaseModel):
     cover_letter: str = ""
 
 
+class PolishedRecommendation(BaseModel):
+    """One reworded resume recommendation (``polish_resume_recommendations``).
+
+    ``id`` must be one of the recommendation ids the caller sent; the task drops any
+    other id. An empty ``detail`` keeps the deterministic wording.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    detail: str | None = None
+    suggested_text: str | None = None
+
+
+class PolishedRecommendations(BaseModel):
+    """Envelope used on the wire for ``polish_resume_recommendations``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[PolishedRecommendation] = Field(default_factory=list)
+
+
 class AIStatus(BaseModel):
     provider: str
     model: str | None = None
@@ -257,5 +279,7 @@ __all__ = [
     "Links",
     "MatchExplanation",
     "ParsedResume",
+    "PolishedRecommendation",
+    "PolishedRecommendations",
     "ProjectEntry",
 ]

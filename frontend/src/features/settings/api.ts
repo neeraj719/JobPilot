@@ -7,7 +7,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api } from '@/lib/api'
+import { api, reauthHeaders } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
 import type {
   AiStatus,
@@ -22,6 +22,9 @@ import type {
   GmailStatus,
   IntegrationsOverview,
   OkResponse,
+  RememberDeviceRequest,
+  SessionRead,
+  SessionsRevoked,
   SyncResult,
 } from '@/types/api'
 
@@ -29,6 +32,8 @@ export const settingsKeys = {
   aiStatus: ['ai', 'status'] as const,
   browserStatus: ['browser', 'status'] as const,
   browserSessions: ['browser', 'sessions'] as const,
+  /** Signed-in sessions of the user's own account (Settings → Security). */
+  authSessions: ['auth', 'sessions'] as const,
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,7 +160,67 @@ export function useRevokeBrowserSession() {
 /* ------------------------------------------------------------------ */
 
 export function useChangePassword() {
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (payload: ChangePasswordRequest) => api.put<OkResponse>('/auth/me/password', payload),
+    // The current password doubles as the re-authentication proof, so an access token
+    // older than 10 minutes does not need a second prompt. Nothing keeps it afterwards.
+    mutationFn: (payload: ChangePasswordRequest) =>
+      api.put<OkResponse>('/auth/me/password', payload, { headers: reauthHeaders(payload.current_password) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: settingsKeys.authSessions })
+    },
+  })
+}
+
+/* ------------------------------------------------------------------ */
+/* Sessions and devices                                                */
+/* ------------------------------------------------------------------ */
+
+/** Optional password for a sensitive action, asked for only after `reauth_required`. */
+interface Reauth {
+  password?: string
+}
+
+function reauthOptions({ password }: Reauth) {
+  return password ? { headers: reauthHeaders(password) } : {}
+}
+
+export function useAuthSessions() {
+  return useQuery({
+    queryKey: settingsKeys.authSessions,
+    queryFn: () => api.get<SessionRead[]>('/auth/sessions'),
+  })
+}
+
+export function useRevokeAuthSession() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...reauth }: { id: string } & Reauth) =>
+      api.delete<SessionsRevoked>(`/auth/sessions/${id}`, reauthOptions(reauth)),
+    onSettled: () => {
+      // Ids change whenever a device refreshes, so always re-read the list.
+      void queryClient.invalidateQueries({ queryKey: settingsKeys.authSessions })
+    },
+  })
+}
+
+export function useRevokeOtherSessions() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (reauth: Reauth) => api.post<SessionsRevoked>('/auth/sessions/revoke-others', undefined, reauthOptions(reauth)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: settingsKeys.authSessions })
+    },
+  })
+}
+
+export function useRememberThisDevice() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ remember, ...reauth }: RememberDeviceRequest & Reauth) =>
+      api.post<SessionRead>('/auth/sessions/current/remember', { remember } satisfies RememberDeviceRequest, reauthOptions(reauth)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: settingsKeys.authSessions })
+    },
   })
 }

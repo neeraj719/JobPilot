@@ -41,11 +41,17 @@ export const JOB_SOURCE_TYPES = [
   'COMPANY_CAREERS',
   'GREENHOUSE',
   'LEVER',
+  'ASHBY',
+  'SMARTRECRUITERS',
   'WORKDAY',
   'DEMO_ATS',
   'OTHER',
 ] as const
 export type JobSourceType = (typeof JOB_SOURCE_TYPES)[number]
+
+/** ATS vendors with a public job board API JobPilot reads real postings from. */
+export const BOARD_ATS_TYPES = ['GREENHOUSE', 'LEVER', 'ASHBY', 'SMARTRECRUITERS'] as const
+export type BoardAtsType = (typeof BOARD_ATS_TYPES)[number]
 
 export const APPLICATION_TYPES = ['EASY_APPLY', 'EXTERNAL_FORM', 'ATS_FORM', 'EMAIL', 'UNKNOWN'] as const
 export type ApplicationType = (typeof APPLICATION_TYPES)[number]
@@ -198,6 +204,10 @@ export type AutomationRunTrigger = (typeof AUTOMATION_RUN_TRIGGERS)[number]
 
 export const AUTOMATION_RUN_STATUSES = ['RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED', 'PAUSED', 'CANCELLED'] as const
 export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUSES)[number]
+
+/** What the pipeline may do with one source's jobs (`SourceApplyMode`). */
+export const SOURCE_APPLY_MODES = ['AUTO_APPLY', 'DISCOVER_ONLY'] as const
+export type SourceApplyMode = (typeof SOURCE_APPLY_MODES)[number]
 
 export const NOTIFICATION_TYPES = [
   'JOB_FOUND',
@@ -457,6 +467,88 @@ export interface ResumeUpdate {
   is_default?: boolean
 }
 
+/* Resume recommendations — `resumes/schemas.py::ResumeRecommendations`. */
+
+export const RECOMMENDATION_CATEGORIES = [
+  'MISSING_SKILL',
+  'KEYWORD_GAP',
+  'WEAK_SUMMARY',
+  'EXPERIENCE_BULLETS',
+  'TITLE_ALIGNMENT',
+  'SECTION_MISSING',
+  'LENGTH_AND_FORMAT',
+  'STALE_CONTENT',
+] as const
+export type RecommendationCategory = (typeof RECOMMENDATION_CATEGORIES)[number]
+
+export const RECOMMENDATION_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW'] as const
+export type RecommendationPriority = (typeof RECOMMENDATION_PRIORITIES)[number]
+
+/** `add`: related experience exists; `learn`: nothing related yet; `list`: mentioned but not in skills. */
+export type RecommendationAction = 'add' | 'learn' | 'list'
+
+export interface RecommendationEvidence {
+  label: string
+  job_id: UUID | null
+  /** Resume field path, e.g. `experience[0].bullet`. */
+  field: string | null
+}
+
+export interface Recommendation {
+  /** Stable slug, e.g. `missing-skill-kubernetes`. */
+  id: string
+  category: RecommendationCategory
+  priority: RecommendationPriority
+  title: string
+  detail: string
+  evidence: RecommendationEvidence[]
+  suggested_text: string | null
+  /** Points on the average match score across target jobs if fully addressed. */
+  estimated_score_gain: number
+  action: RecommendationAction | null
+  skills: string[]
+}
+
+export interface ResumeTargetSummary {
+  jobs_analysed: number
+  top_titles: { title: string; count: number }[]
+  top_skills: { skill: string; count: number; share: number }[]
+}
+
+export interface ResumeScoreProjection {
+  current_average: number
+  projected_average: number
+  delta: number
+  added_skills: string[]
+  jobs_improved: number
+}
+
+export interface ResumeVersionScore {
+  version_number: number
+  created_at: ISODateString | null
+  note: string | null
+  overall_score: number
+  average_match_score: number
+  is_current: boolean
+}
+
+/** `GET /resumes/{id}/recommendations?refresh=` */
+export interface ResumeRecommendations {
+  resume_id: UUID
+  resume_version: number
+  generated_at: ISODateString
+  /** 0–100 resume health. */
+  overall_score: number
+  target_summary: ResumeTargetSummary
+  recommendations: Recommendation[]
+  score_projection: ResumeScoreProjection
+  version_history: ResumeVersionScore[]
+  /** False when the LLM wording step failed; the text is then the deterministic version. */
+  ai_polished: boolean
+  ai_provider: string | null
+  cached: boolean
+}
+
 /* ------------------------------------------------------------------ */
 /* companies                                                           */
 /* ------------------------------------------------------------------ */
@@ -476,7 +568,12 @@ export interface CompanyRead {
   size: string | null
   headquarters: string | null
   description: string | null
+  /** A `JobSourceType` name: GREENHOUSE, LEVER, ASHBY, SMARTRECRUITERS, WORKDAY, CUSTOM, DEMO_ATS. */
   ats_type: string | null
+  /** The company's public job board token on `ats_type` (null = no board configured). */
+  ats_board_token: string | null
+  /** The board URL the token was taken from, for display. */
+  ats_board_url: string | null
   tags: string[]
   /** Priority the current user assigned (null when they never set one). */
   priority: CompanyPriority | null
@@ -509,6 +606,29 @@ export interface CompanyPreferencesReplace {
 export interface CompanyListParams extends PageParams {
   q?: string
   priority?: CompanyPriority
+}
+
+/** Body of `PUT /companies/{id}/board` — the board is fetched once to verify it before saving. */
+export interface CompanyBoardUpdate {
+  ats_type: BoardAtsType
+  /** Board URL (`https://boards.greenhouse.io/stripe`) or a bare token (`stripe`). */
+  board_url: string
+}
+
+/** Response of `PUT /companies/{id}/board`. */
+export interface CompanyBoardResult {
+  company: CompanyRead
+  /** Open postings on the board when it was verified. */
+  board_job_count: number
+}
+
+/** Body of `POST /companies` — add a company that is not in the registry yet. */
+export interface CompanyCreate {
+  name: string
+  website?: string | null
+  board_url?: string | null
+  /** Optional when `board_url` is on the vendor's own host. */
+  ats_type?: BoardAtsType | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -1110,6 +1230,11 @@ export interface AutomationConfigRead {
   retry_limit: number
   auto_submit_enabled: boolean
   auto_submit_sources: JobSourceType[]
+  /**
+   * Per-source apply mode, *resolved* for every registered source (a source whose adapter
+   * cannot apply is always `DISCOVER_ONLY`). On update, send only the entries to override.
+   */
+  source_modes: Record<string, SourceApplyMode>
   auto_generate_cover_letters: boolean
   notify_on_input_required: boolean
   last_run_at: ISODateString | null
@@ -1130,6 +1255,8 @@ export interface AutomationRunStats {
   jobs_matched?: number
   high_match?: number
   queued?: number
+  /** Jobs from `DISCOVER_ONLY` sources: scored and listed, never turned into applications. */
+  discover_only?: number
   prepared?: number
   submitted?: number
   requires_user?: number
@@ -1373,3 +1500,196 @@ export interface OkResponse {
   ok: boolean
   message?: string
 }
+
+// --- auth roles ---
+// Active role: an account may hold several roles and acts as one of them per session.
+// Interface declaration merging extends `UserRead` / `TokenResponse` declared above.
+
+export interface UserRead {
+  /** The role this session acts as (the access token's `role` claim). */
+  active_role?: string | null
+}
+
+export interface TokenResponse {
+  /** Discriminator against `RoleSelectionRequired`; always `false` on a token response. */
+  requires_role_selection?: false
+  /** The role this access token acts as. */
+  active_role: string
+  /** Every role the user may switch to. */
+  available_roles: string[]
+}
+
+/** Login/register answer for an account holding several roles: pick one first. */
+export interface RoleSelectionRequired {
+  requires_role_selection: true
+  /** Short-lived (5 min), single-use; trade it at `POST /auth/select-role`. */
+  selection_token: string
+  available_roles: string[]
+  user: UserRead
+}
+
+/** What `POST /auth/login` and `POST /auth/register` return. */
+export type LoginResponse = TokenResponse | RoleSelectionRequired
+
+export interface SelectRoleRequest {
+  selection_token: string
+  role: string
+  remember?: boolean
+}
+
+export interface SwitchRoleRequest {
+  role: string
+}
+// --- end auth roles ---
+
+// --- auth sessions ---
+// Stay signed in + "Sessions and devices". No password is ever stored client-side: the
+// choice only sets how long the HttpOnly refresh cookie lives.
+// Interface declaration merging extends the request/response types declared above.
+
+export interface LoginRequest {
+  /** "Stay signed in on this device": persistent cookie, 14-day session. Default false. */
+  remember_me?: boolean
+}
+
+export interface RegisterRequest {
+  remember_me?: boolean
+}
+
+export interface SelectRoleRequest {
+  /** Repeats the login form's "Stay signed in" choice. */
+  remember_me?: boolean
+}
+
+export interface TokenResponse {
+  /** Whether the refresh cookie set with this response is a remembered-device one. */
+  remembered?: boolean | null
+}
+
+/** One signed-in session (a live refresh token) in Settings → Security. */
+export interface SessionRead {
+  id: UUID
+  created_at: ISODateString
+  expires_at: ISODateString
+  user_agent: string | null
+  /** Friendly parse of the user agent, e.g. "Chrome on Windows". */
+  device_label: string
+  /** The session whose refresh cookie came with the request (this browser). */
+  is_current: boolean
+  /** Started with "Stay signed in on this device". */
+  remembered: boolean
+}
+
+export interface SessionsRevoked {
+  ok: boolean
+  message?: string | null
+  revoked: number
+}
+
+export interface RememberDeviceRequest {
+  remember: boolean
+}
+// --- end auth sessions ---
+
+// --- standing answers (Step 1b) ---
+/**
+ * `PUT /applications/{id}/answers` item (merges into `AnswerUpdate` above): also keep the
+ * answer as a standing answer, reused on every later application that asks the same thing.
+ */
+export interface AnswerUpdate {
+  save_as_standing?: boolean
+}
+
+/** `"ALL"` or the job sources a standing answer is limited to. */
+export type StandingAnswerScope = 'ALL' | JobSourceType[]
+
+/** `GET /profiles/standing-answers` row. `{company}` in the wording stands for the employer. */
+export interface StandingAnswerRead {
+  id: UUID
+  question_key: string
+  question_text: string
+  field_type: FieldType
+  answer: string
+  applies_to: StandingAnswerScope
+  expires_at: ISODateString | null
+  is_active: boolean
+  created_at: ISODateString | null
+  updated_at: ISODateString | null
+}
+
+/** `PUT /profiles/standing-answers` body — creates, or replaces the one with this `question_key`. */
+export interface StandingAnswerUpsert {
+  question_key: string
+  question_text: string
+  answer: string
+  field_type?: FieldType
+  applies_to?: StandingAnswerScope
+  expires_at?: ISODateString | null
+  is_active?: boolean
+}
+// --- end standing answers ---
+
+// --- company board detection + quick start (Step 3) ---
+/** How a career board was found: the bundled known list, a token guess, a careers page scan, or not at all. */
+export type DetectionMethod = 'KNOWN' | 'GUESS' | 'SCAN' | 'NONE'
+
+/** Body of `POST /companies` gains `auto_detect` (default true): look the board up when no `board_url` is given. */
+export interface CompanyCreate {
+  auto_detect?: boolean
+}
+
+/** Body of `POST /companies/detect-board` — at least one of the two. Nothing is saved. */
+export interface BoardDetectRequest {
+  name?: string | null
+  website?: string | null
+}
+
+/** What board auto-detection found. `ats_type` WORKDAY is recognised but not readable (`supported` false). */
+export interface BoardDetection {
+  ats_type: string | null
+  token: string | null
+  board_url: string | null
+  method: DetectionMethod
+  /** Open postings counted by the verification fetch (null when not verified). */
+  open_jobs: number | null
+  /** Every lookup, guess and page that was checked, in order. */
+  tried: string[]
+  /** Company name the vendor's board shows (Greenhouse, SmartRecruiters) — spot a namesake's board. */
+  board_company: string | null
+  careers_url: string | null
+  supported: boolean
+  /** HTTP requests the detection made (at most 8). */
+  requests: number
+}
+
+/** Response of `POST /companies` and `POST /companies/{id}/detect-board`. */
+export interface CompanyDetectResult extends CompanyRead {
+  /** Null when no detection ran (board URL given, auto_detect off, or a board was already set). */
+  detection: BoardDetection | null
+  /** Whether the detection result was written to the company. */
+  detection_saved: boolean
+}
+
+/** One known-board company offered by the Companies "Quick start" panel. */
+export interface CompanySuggestion {
+  name: string
+  domain: string | null
+  ats_type: BoardAtsType
+  token: string
+  board_url: string
+  tags: string[]
+  /** The registry row with this name, when one exists. */
+  company_id: UUID | null
+  /** That row already has its board configured (adding needs no network). */
+  board_configured: boolean
+}
+
+/** Response of `GET /companies/suggestions?limit=`. */
+export interface CompanySuggestions {
+  items: CompanySuggestion[]
+  /** Companies on the user's list (not AVOID) with a configured board. */
+  board_companies: number
+  /** True while `board_companies` is below 3. */
+  show_quick_start: boolean
+}
+// --- end company board detection ---

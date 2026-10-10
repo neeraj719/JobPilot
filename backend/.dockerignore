@@ -1,0 +1,35 @@
+# Keep secrets, personal data and local tooling out of the image.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Uploaded resumes and local databases are personal data, never baked into an image.
+uploads/
+smoke_uploads/
+playwright-screenshots/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+*.dump
+
+# Tests stay in the repo; the runtime image does not need them.
+tests/
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+*.log

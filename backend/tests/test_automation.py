@@ -19,6 +19,7 @@ from app.models.enums import (
     CompanyPriority,
     JobSourceType,
     NotificationType,
+    SourceApplyMode,
 )
 from app.models.job import Job
 from app.models.notification import Notification
@@ -641,3 +642,280 @@ def test_user_lock_context_manager_raises_when_held():
             with locks.user_lock(user_id):
                 pass  # pragma: no cover
     assert not locks.is_locked(user_id)
+
+
+# --------------------------------------------------------------------------- per-source apply mode
+
+
+def test_resolve_source_mode_defaults_to_the_adapter_capability(db, user):
+    config = automation_service.get_config(db, user.id)
+    assert config.source_modes in (None, {})
+    # LinkedIn's mock adapter supports auto apply; Glassdoor's deliberately does not.
+    assert automation_service.resolve_source_mode(config, JobSourceType.LINKEDIN) is SourceApplyMode.AUTO_APPLY
+    assert automation_service.resolve_source_mode(config, JobSourceType.DEMO_ATS) is SourceApplyMode.AUTO_APPLY
+    assert automation_service.resolve_source_mode(config, JobSourceType.GLASSDOOR) is SourceApplyMode.DISCOVER_ONLY
+    # Unknown / unregistered sources can only ever be discovered.
+    assert automation_service.resolve_source_mode(config, JobSourceType.WORKDAY) is SourceApplyMode.DISCOVER_ONLY
+    assert automation_service.resolve_source_mode(config, None) is SourceApplyMode.DISCOVER_ONLY
+    assert automation_service.resolve_source_mode(None, "linkedin") is SourceApplyMode.AUTO_APPLY
+
+
+def test_resolve_source_mode_honours_a_stored_override(db, user):
+    config = automation_service.get_config(db, user.id)
+    config.source_modes = {"LINKEDIN": "DISCOVER_ONLY"}
+    db.flush()
+    assert automation_service.resolve_source_mode(config, JobSourceType.LINKEDIN) is SourceApplyMode.DISCOVER_ONLY
+    assert automation_service.resolve_source_mode(config, JobSourceType.NAUKRI) is SourceApplyMode.AUTO_APPLY
+
+
+def test_resolve_source_mode_never_forces_auto_apply_on_an_unsupported_adapter(db, user, caplog):
+    """Rule 3: a stored AUTO_APPLY for an adapter without supports_auto_apply is downgraded."""
+    import logging
+
+    config = automation_service.get_config(db, user.id)
+    config.source_modes = {"GLASSDOOR": "AUTO_APPLY", "COMPANY_CAREERS": "auto_apply"}
+    db.flush()
+    with caplog.at_level(logging.DEBUG, logger="app.modules.automation.service"):
+        assert automation_service.resolve_source_mode(config, JobSourceType.GLASSDOOR) is SourceApplyMode.DISCOVER_ONLY
+        assert automation_service.resolve_source_mode(config, JobSourceType.COMPANY_CAREERS) is SourceApplyMode.DISCOVER_ONLY
+    assert any("cannot apply" in record.message for record in caplog.records)
+
+
+def test_config_read_resolves_source_modes_for_every_registered_source(db, user):
+    from app.modules.adapters.registry import ADAPTERS
+
+    config = automation_service.get_config(db, user.id)
+    config.source_modes = {"LINKEDIN": "DISCOVER_ONLY"}
+    db.flush()
+    read = automation_service.to_config_read(config)
+    assert set(read.source_modes) == {source.value for source in ADAPTERS}
+    assert read.source_modes["LINKEDIN"] is SourceApplyMode.DISCOVER_ONLY
+    assert read.source_modes["NAUKRI"] is SourceApplyMode.AUTO_APPLY
+    assert read.source_modes["GLASSDOOR"] is SourceApplyMode.DISCOVER_ONLY
+
+
+@pytest.mark.parametrize(
+    ("payload", "code"),
+    [
+        ({"NOT_A_SOURCE": "AUTO_APPLY"}, "unknown_source"),
+        ({"LINKEDIN": "SOMETIMES"}, "invalid_source_mode"),
+        ({"GLASSDOOR": "AUTO_APPLY"}, "auto_apply_unsupported"),
+    ],
+)
+def test_source_modes_validation_rejects_bad_values(db, user, payload, code):
+    with pytest.raises(ValidationFailed) as excinfo:
+        automation_service.update_config(db, user.id, AutomationConfigUpdate(source_modes=payload))
+    assert excinfo.value.code == code
+
+
+def test_source_modes_update_normalises_and_stores(db, user):
+    updated = automation_service.update_config(
+        db, user.id, AutomationConfigUpdate(source_modes={"linkedin": "discover_only", "GLASSDOOR": "DISCOVER_ONLY"})
+    )
+    assert updated.source_modes == {"LINKEDIN": "DISCOVER_ONLY", "GLASSDOOR": "DISCOVER_ONLY"}
+    snapshot = automation_service.config_snapshot(updated)
+    assert snapshot["source_modes"]["LINKEDIN"] == "DISCOVER_ONLY"
+    assert snapshot["source_modes"]["NAUKRI"] == "AUTO_APPLY"
+
+
+def test_config_endpoint_rejects_auto_apply_for_a_mock_only_source(auth_client, api_user):
+    response = auth_client.put(f"{API}/config", json={"source_modes": {"GLASSDOOR": "AUTO_APPLY"}})
+    assert response.status_code == 422, response.text
+    body = response.json()["error"]
+    assert body["code"] == "auto_apply_unsupported"
+    assert "GLASSDOOR" in body["message"]
+
+    # A legal table round-trips, and the read side fills in every registered source.
+    response = auth_client.put(f"{API}/config", json={"source_modes": {"LINKEDIN": "DISCOVER_ONLY"}})
+    assert response.status_code == 200, response.text
+    modes = response.json()["source_modes"]
+    assert modes["LINKEDIN"] == "DISCOVER_ONLY"
+    assert modes["NAUKRI"] == "AUTO_APPLY"
+    assert modes["GLASSDOOR"] == "DISCOVER_ONLY"
+    assert "DEMO_ATS" in modes
+
+
+def test_discover_only_source_is_scored_but_never_queued(db, user, config, priorities):
+    """LinkedIn jobs are ingested and matched; none of them becomes an application."""
+    from app.models.job import JobMatch, JobSource
+
+    config.enabled_sources = ["LINKEDIN", "NAUKRI"]
+    config.source_modes = {"LINKEDIN": "DISCOVER_ONLY"}
+    config.daily_application_limit = 50
+    db.flush()
+
+    run = _run(db, user)
+    steps = _steps(run)
+
+    assert run.status in (AutomationRunStatus.SUCCESS, AutomationRunStatus.PARTIAL)
+    assert run.config_snapshot["source_modes"] == {"LINKEDIN": "DISCOVER_ONLY", "NAUKRI": "AUTO_APPLY"}
+    assert steps["search"]["data"]["source_modes"]["LINKEDIN"] == "DISCOVER_ONLY"
+
+    discover_only = steps["queue"]["data"]["discover_only"]
+    assert discover_only, "the LinkedIn catalogue must have produced at least one candidate"
+    assert run.stats["discover_only"] == len(discover_only)
+    assert all(entry["source"] == "LINKEDIN" for entry in discover_only)
+    assert all({"job_id", "title", "company", "source"} <= set(entry) for entry in discover_only)
+    assert all(entry["source"] != "LINKEDIN" for entry in steps["queue"]["data"]["applications"])
+    assert run.stats["queued"] == len(steps["queue"]["data"]["applications"])
+
+    # The discover-only jobs are real: ingested, with a LinkedIn source and a match score.
+    linkedin_job_ids = set(db.scalars(select(JobSource.job_id).where(JobSource.source == JobSourceType.LINKEDIN)).all())
+    assert {uuid.UUID(entry["job_id"]) for entry in discover_only} <= linkedin_job_ids
+    scored = set(db.scalars(select(JobMatch.job_id).where(JobMatch.user_id == user.id)).all())
+    assert {uuid.UUID(entry["job_id"]) for entry in discover_only} <= scored
+
+    # ... but no application exists for any of them.
+    applications = list(db.scalars(select(Application).where(Application.user_id == user.id)).unique())
+    assert applications, "the NAUKRI side of the run must still queue"
+    assert all(a.source != JobSourceType.LINKEDIN for a in applications)
+    assert {a.job_id for a in applications}.isdisjoint({uuid.UUID(entry["job_id"]) for entry in discover_only})
+
+
+def test_discover_only_dry_run_reports_both_lists(db, user, config, priorities):
+    config.enabled_sources = ["LINKEDIN", "NAUKRI"]
+    config.source_modes = {"LINKEDIN": "DISCOVER_ONLY"}
+    db.flush()
+    run = _run(db, user, dry_run=True)
+    data = _steps(run)["queue"]["data"]
+    assert data["discover_only"]
+    assert all(entry["source"] != "LINKEDIN" for entry in data["would_queue"])
+    assert run.stats["discover_only"] == len(data["discover_only"])
+    assert run.stats["would_queue"] == len(data["would_queue"])
+
+
+@pytest.fixture
+def greenhouse_catalogue(db, monkeypatch):
+    """Make the (normally empty) Greenhouse adapter return one browser-backed posting.
+
+    Board sources are searched only when a company has a board on that vendor, so the
+    fixture also registers the posting's company with a Greenhouse board token.
+    """
+    from datetime import datetime as _dt
+
+    from app.modules.adapters.base import DiscoveredJob
+    from app.modules.adapters.greenhouse import GreenhouseAdapter
+
+    def search_jobs(self, query):
+        return [
+            DiscoveredJob(
+                source=JobSourceType.GREENHOUSE,
+                external_id="gh-123",
+                url="https://boards.greenhouse.io/acme/jobs/123",
+                title="Software Engineer",
+                company_name="Acme Greenhouse",
+                location="Bangalore, India",
+                description="React, Node.js and TypeScript on a PostgreSQL stack.",
+                required_skills=["React", "Node.js", "TypeScript"],
+                posted_at=_dt.now(timezone.utc) - timedelta(hours=2),
+                apply_url="https://boards.greenhouse.io/acme/jobs/123#app",
+            )
+        ]
+
+    monkeypatch.setattr(GreenhouseAdapter, "search_jobs", search_jobs)
+    assert GreenhouseAdapter.uses_browser and GreenhouseAdapter.supports_auto_apply
+    db.add(
+        Company(
+            name="Acme Greenhouse",
+            normalized_name="acme greenhouse",
+            domain="acme-greenhouse.example",
+            ats_type="GREENHOUSE",
+            ats_board_token="acme",
+        )
+    )
+    db.flush()
+
+
+def _stub_prepare(monkeypatch) -> list[uuid.UUID]:
+    """Record which applications the answers step hands to ``start_application``."""
+    prepared: list[uuid.UUID] = []
+
+    def fake_prepare(ctx, application):
+        prepared.append(application.id)
+        return "prepared"
+
+    monkeypatch.setattr(pipeline, "_prepare_application", fake_prepare)
+    return prepared
+
+
+def test_browser_backed_source_is_prepared_when_the_browser_is_available(db, user, config, greenhouse_catalogue, monkeypatch):
+    config.enabled_sources = ["GREENHOUSE"]
+    config.min_match_score = 0
+    db.flush()
+    monkeypatch.setattr(pipeline, "_browser_available", lambda: True)
+    prepared = _stub_prepare(monkeypatch)
+
+    run = _run(db, user)
+    steps = _steps(run)
+
+    assert run.stats["queued"] == 1
+    queued = steps["queue"]["data"]["applications"]
+    assert [entry["source"] for entry in queued] == ["GREENHOUSE"]
+    assert steps["generate_answers"]["data"]["deferred"] == []
+    assert steps["generate_answers"]["data"]["prepared"] == 1
+    assert steps["generate_answers"]["data"]["browser_available"] is True
+    assert [str(a) for a in prepared] == [queued[0]["application_id"]]
+    assert steps["autofill"]["status"] != "SKIPPED" or steps["autofill"]["data"].get("total", 0) == 1
+    assert run.config_snapshot["source_modes"] == {"GREENHOUSE": "AUTO_APPLY"}
+
+
+def test_browser_backed_source_is_deferred_without_a_browser(db, user, config, greenhouse_catalogue, monkeypatch):
+    config.enabled_sources = ["GREENHOUSE"]
+    config.min_match_score = 0
+    db.flush()
+    prepared = _stub_prepare(monkeypatch)  # the autouse fixture already says "no browser"
+
+    run = _run(db, user)
+    steps = _steps(run)
+
+    assert run.stats["queued"] == 1
+    assert prepared == []
+    assert len(steps["generate_answers"]["data"]["deferred"]) == 1
+    assert steps["generate_answers"]["data"]["prepared"] == 0
+    assert "until a browser is available" in steps["generate_answers"]["message"]
+    assert steps["autofill"]["status"] == "SKIPPED"
+    application = db.scalars(select(Application).where(Application.user_id == user.id)).first()
+    assert application.status == ApplicationStatus.QUEUED
+    assert application.source == JobSourceType.GREENHOUSE
+
+
+def test_auto_submit_refuses_an_application_with_a_required_unanswered_question(db, user, config, priorities, monkeypatch):
+    """The submit gate is unchanged: anything still NEEDS_USER_INPUT stays put."""
+    from app.models.application import ApplicationAnswer
+    from app.models.enums import AnswerStatus, FieldType
+
+    # A fixed mock source: board sources (ASHBY, GREENHOUSE...) search only configured boards.
+    source = JobSourceType.LINKEDIN.value
+    assert JobSourceType.LINKEDIN in automation_service.auto_apply_sources()
+    config.enabled_sources = [source]
+    config.auto_submit_enabled = True
+    config.auto_submit_sources = [source]
+    config.daily_application_limit = 1
+    db.flush()
+
+    def fake_prepare(ctx, application):
+        db.add(
+            ApplicationAnswer(
+                application_id=application.id,
+                question_key="custom:consent",
+                question_text="I consent",
+                field_type=FieldType.CHECKBOX,
+                required=True,
+                status=AnswerStatus.NEEDS_USER_INPUT,
+            )
+        )
+        db.flush()
+        return "prepared"
+
+    monkeypatch.setattr(pipeline, "_prepare_application", fake_prepare)
+    submitted: list[uuid.UUID] = []
+    monkeypatch.setattr(pipeline, "_submit_application", lambda ctx, application: submitted.append(application.id) or "submitted")
+
+    run = _run(db, user)
+    steps = _steps(run)
+    assert run.stats["queued"] == 1
+    assert steps["queue"]["data"]["applications"][0]["auto_submit"] is True
+    assert submitted == [], "a required NEEDS_USER_INPUT answer must block unattended submission"
+    assert len(steps["auto_submit"]["data"]["skipped_needs_input"]) == 1
+    assert run.stats["submitted"] == 0
+    assert run.stats["requires_user"] == 1

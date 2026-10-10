@@ -35,6 +35,7 @@ TASK_NAMES: frozenset[str] = frozenset(
         "generate_cover_letter",
         "classify_email",
         "generate_interview_prep",
+        "polish_resume_recommendations",
     }
 )
 
@@ -254,6 +255,7 @@ class MockLLMProvider(LLMProvider):
             "generate_cover_letter": self._generate_cover_letter,
             "classify_email": self._classify_email,
             "generate_interview_prep": self._generate_interview_prep,
+            "polish_resume_recommendations": self._polish_resume_recommendations,
         }.get(task_name)
         if handler is None:
             raise NotImplementedError(f"MockLLMProvider cannot run task {task_name!r}")
@@ -690,7 +692,65 @@ class MockLLMProvider(LLMProvider):
         }
 
 
+    # -- resume recommendations ----------------------------------------------
+
+    def _polish_resume_recommendations(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Keep the rule-based wording and draft paste-ready text from resume facts only.
+
+        Numbers the resume does not contain are never written: outcomes the candidate
+        has to supply appear as bracketed placeholders.
+        """
+        resume = payload.get("resume") or {}
+        items: list[dict[str, Any]] = []
+        for rec in _as_list(payload.get("recommendations")):
+            if not isinstance(rec, dict) or not rec.get("id"):
+                continue
+            category = str(rec.get("category") or "")
+            suggested: str | None = None
+            if category == "WEAK_SUMMARY":
+                suggested = _draft_summary(resume)
+            elif category == "EXPERIENCE_BULLETS":
+                suggested = _draft_bullet(rec, resume)
+            items.append({"id": rec["id"], "detail": rec.get("detail"), "suggested_text": suggested})
+        return {"items": items}
+
+
 # --------------------------------------------------------------------------- module helpers
+
+
+def _draft_summary(resume: dict[str, Any]) -> str | None:
+    """A summary assembled only from the resume's own title, years, skills and employer."""
+    title = resume.get("recent_title")
+    years = resume.get("total_experience_years")
+    skills = [str(s) for s in _as_list(resume.get("summary_skills")) or _as_list(resume.get("skills"))][:3]
+    experience = [e for e in _as_list(resume.get("experience")) if isinstance(e, dict)]
+    company = experience[0].get("company") if experience else None
+    if not (title or skills):
+        return None
+    opening = title or "Engineer"
+    if years:
+        opening += f" with {_format_number(years)} years of experience"
+    if skills:
+        opening += (" building with " if years else " working with ") + _join(skills)
+    sentences = [_as_sentence(opening)]
+    if company:
+        sentences.append(f"Currently at {company}, delivering [the outcome you are proudest of].")
+    target = resume.get("target_title")
+    if target and title and str(target).strip().lower() != str(title).strip().lower():
+        sentences.append(f"Looking for {target} roles.")
+    return " ".join(sentences)
+
+
+def _draft_bullet(rec: dict[str, Any], resume: dict[str, Any]) -> str | None:
+    """Rewrite one weak bullet with an outcome placeholder, or sketch the missing bullets."""
+    for item in _as_list(rec.get("evidence")):
+        if isinstance(item, dict) and str(item.get("field") or "").endswith(".bullet") and item.get("label"):
+            bullet = str(item["label"]).strip().rstrip(".")
+            return f"{bullet}, resulting in [measurable outcome, e.g. X% faster or N more users]."
+    for item in _as_list(rec.get("evidence")):
+        if isinstance(item, dict) and str(item.get("field") or "").startswith("experience["):
+            return "[Action verb] [what you built or changed] using [tools], resulting in [measurable outcome]."
+    return None
 
 
 def _dedupe(items: list[str]) -> list[str]:

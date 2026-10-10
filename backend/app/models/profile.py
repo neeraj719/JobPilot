@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import SCHEMA_MASTER, Base, StandardColumnsMixin, soft_delete_where
-from app.models.enums import CompanyPriority
+from app.models.base import SCHEMA_MASTER, Base, StandardColumnsMixin, UTCDateTime, soft_delete_where
+from app.models.enums import CompanyPriority, FieldType
 
 if TYPE_CHECKING:
     from app.models.company import Company
@@ -111,3 +112,41 @@ class CompanyPreference(StandardColumnsMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="company_preferences", foreign_keys=lambda: [CompanyPreference.user_id])
     company: Mapped[Company | None] = relationship()
+
+
+#: ``StandingAnswer.applies_to`` value meaning "every job source".
+APPLIES_TO_ALL = "ALL"
+
+
+class StandingAnswer(StandardColumnsMixin, Base):
+    """An answer the user gave once and wants reused on every application.
+
+    Real ATS forms ask the same handful of things everywhere (consent, start date,
+    notice period, relocation...). Each one would otherwise pause the first application
+    at every company. The answer engine reads these right after anything typed on the
+    application itself and before profile facts (``applications/answers.py``).
+
+    ``question_key`` is the canonical key the field mapper produces (``custom:consent``,
+    ``custom:start_date``, ``notice_period_days``...). ``question_text`` is the wording the
+    user answered; for consent and legal declarations a standing answer is only reused when
+    the live wording matches it closely, so it is stored with the company name replaced by
+    ``{company}``. ``applies_to`` is ``"ALL"`` or a list of ``JobSourceType`` values.
+
+    Partial unique on ``(user_id, question_key)``: deleting a standing answer tombstones it
+    and saving the same question again must be allowed to re-use the key.
+    """
+
+    __tablename__ = "standing_answers"
+    __table_args__ = (
+        Index("uq_standing_answers_user_key_active", "user_id", "question_key", unique=True, **soft_delete_where()),
+        {"schema": SCHEMA_MASTER},
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("master.users.id", ondelete="CASCADE"), index=True, nullable=False)
+    question_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    field_type: Mapped[FieldType] = mapped_column(Enum(FieldType, native_enum=False, length=20), default=FieldType.TEXT, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    #: ``"ALL"`` or a list of ``JobSourceType`` values.
+    applies_to: Mapped[Any] = mapped_column(JSON, default=lambda: APPLIES_TO_ALL, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

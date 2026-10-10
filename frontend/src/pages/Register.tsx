@@ -46,7 +46,12 @@ export default function RegisterPage() {
 
   async function onSubmit(values: RegisterValues) {
     try {
-      const user = await register(values.full_name, values.email, values.password)
+      const outcome = await register(values.full_name, values.email, values.password)
+      if (outcome.status === 'role_selection') {
+        navigate('/choose-role', { replace: true })
+        return
+      }
+      const { user } = outcome
       toast.success('Account created', { description: `Welcome aboard, ${user.full_name || user.email}.` })
       navigate('/dashboard', { replace: true })
     } catch (error) {

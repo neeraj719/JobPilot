@@ -1,7 +1,8 @@
 """Job source adapter contract (see ``docs/CONTRACTS.md`` §8).
 
 Every platform JobPilot can discover jobs from — mock platforms, the local demo ATS
-and the Greenhouse/Lever style ATS stubs — implements :class:`JobSourceAdapter`.
+and the public ATS job boards (Greenhouse, Lever, Ashby, SmartRecruiters) — implements
+:class:`JobSourceAdapter`.
 
 Design notes
 ------------
@@ -20,7 +21,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from app.models.enums import (
     ApplicationStatus,
@@ -66,9 +67,32 @@ class DiscoveredJob:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+class BoardToken(NamedTuple):
+    """One company's public job board, as the board adapters need it.
+
+    The first two fields are the ``(company_id, token)`` pair the contract describes; the
+    rest let a stateless adapter label the postings with the configured company without a
+    database round trip. ``source`` says which vendor the token belongs to, so one
+    :class:`SearchQuery` can carry the boards of every vendor and each adapter picks its own.
+    """
+
+    company_id: Any
+    token: str
+    company_name: str = ""
+    company_domain: str | None = None
+    source: JobSourceType | None = None
+
+
 @dataclass
 class SearchQuery:
-    """What the user is looking for, built from their :class:`JobPreference`."""
+    """What the user is looking for, built from their :class:`JobPreference`.
+
+    ``board_tokens`` is filled by ``jobs.service.build_search_query`` with every company
+    that has a public job board configured (``companies.ats_board_token``). Only the
+    board adapters (Greenhouse, Lever, Ashby, SmartRecruiters) read it; a board adapter
+    with no token of its own vendor returns ``[]``. Plain ``(company_id, token)`` tuples
+    are accepted too and are then treated as boards of whichever adapter receives them.
+    """
 
     titles: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
@@ -76,6 +100,7 @@ class SearchQuery:
     posted_within_hours: int | None = None
     limit: int = 50
     work_modes: list[WorkMode] = field(default_factory=list)
+    board_tokens: list[BoardToken] = field(default_factory=list)
 
 
 @dataclass
@@ -84,6 +109,11 @@ class ApplyContext:
 
     ``page`` is a Playwright ``Page`` for browser based adapters and ``None`` for mock
     adapters. Typed as ``Any`` so importing this module never needs Playwright.
+
+    ``detected_form`` is the ``browser.schemas.DetectedForm`` the runner already read off
+    ``page`` (it records and answers the form's questions before filling). An adapter
+    that detects the form itself reuses it instead of detecting twice; ``None`` means
+    "detect it yourself".
     """
 
     application: Any = None
@@ -93,6 +123,7 @@ class ApplyContext:
     page: Any = None
     db: Any = None
     settings: Any = None
+    detected_form: Any = None
 
 
 @dataclass
@@ -158,7 +189,14 @@ PLATFORM_INTERNAL_SOURCES: frozenset[JobSourceType] = frozenset(
 
 #: Sources that are always an ATS style hosted form.
 ATS_SOURCES: frozenset[JobSourceType] = frozenset(
-    {JobSourceType.GREENHOUSE, JobSourceType.LEVER, JobSourceType.WORKDAY, JobSourceType.DEMO_ATS}
+    {
+        JobSourceType.GREENHOUSE,
+        JobSourceType.LEVER,
+        JobSourceType.ASHBY,
+        JobSourceType.SMARTRECRUITERS,
+        JobSourceType.WORKDAY,
+        JobSourceType.DEMO_ATS,
+    }
 )
 
 #: Fragments in an apply URL that identify a hosted ATS form.
@@ -183,7 +221,7 @@ def detect_application_type(
 ) -> ApplicationType:
     """Best-effort classification of how an application has to be submitted.
 
-    * Greenhouse / Lever / Workday / demo ATS (by source **or** URL) → ``ATS_FORM``
+    * Greenhouse / Lever / Ashby / SmartRecruiters / Workday / demo ATS (by source **or** URL) → ``ATS_FORM``
     * Platform internal apply URL on an "easy apply" platform → ``EASY_APPLY``
     * Anything else → ``EXTERNAL_FORM``
     """

@@ -1,12 +1,13 @@
 """Profile / job-preference schemas and the flattened ``CandidateContext`` (contract §3, §11)."""
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.enums import EmploymentType, WorkMode
+from app.models.enums import EmploymentType, FieldType, JobSourceType, WorkMode
 
 
 class ProfileBase(BaseModel):
@@ -146,3 +147,54 @@ class CandidateContext(BaseModel):
 
     def skill_years(self, skill: str) -> float | None:
         return self.flat.get(f"skill_years:{(skill or '').strip().lower()}")
+
+
+# --------------------------------------------------------------------------- standing answers
+
+
+class StandingAnswerBase(BaseModel):
+    """An answer the user gave once and the answer engine reuses (``master.standing_answers``).
+
+    ``applies_to`` is ``"ALL"`` or a non-empty list of job sources. ``question_text`` is the
+    wording the user answered; ``{company}`` stands for the employer's name, so a consent box
+    that names the company still matches at the next employer.
+    """
+
+    question_key: str = Field(min_length=1, max_length=120)
+    question_text: str = Field(min_length=1, max_length=2000)
+    field_type: FieldType = FieldType.TEXT
+    answer: str = Field(min_length=1, max_length=5000)
+    applies_to: Literal["ALL"] | list[JobSourceType] = "ALL"
+    expires_at: datetime | None = None
+    is_active: bool = True
+
+    @field_validator("question_key", "question_text", "answer")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            raise ValueError("must not be blank")
+        return text
+
+    @field_validator("applies_to")
+    @classmethod
+    def _sources(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            if not value:
+                raise ValueError('use "ALL" or name at least one source')
+            return list(dict.fromkeys(value))  # keep order, drop repeats
+        return value
+
+
+class StandingAnswerUpsert(StandingAnswerBase):
+    """``PUT /profiles/standing-answers``: create, or replace the one with this ``question_key``."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class StandingAnswerRead(StandingAnswerBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

@@ -315,3 +315,196 @@ def test_captcha_pauses_instead_of_being_solved(db: Session, user: User, demo_jo
     assert application.pause_reason == PauseReason.CAPTCHA
     assert application.status != ApplicationStatus.APPLIED
     assert application.external_application_id is None
+
+
+# --------------------------------------------------------------------------- the pipeline, end to end
+
+
+def test_pipeline_auto_applies_to_the_demo_ats_end_to_end(db: Session, user: User, demo_server: BackgroundServer):
+    """Manual run, DEMO_ATS in AUTO_APPLY, auto-submit on for DEMO_ATS → APPLIED, unattended.
+
+    The demo form asks two things the answer engine deliberately never decides for a
+    human - the data-processing consent checkbox and a preferred start date - so those
+    two are stored up front as answers the user typed (the only way the product lets
+    them in). Everything else - discovery, scoring, queueing, answers, Chromium autofill
+    and the submission - is the pipeline's own work.
+    """
+    from app.models.application import ApplicationAnswer
+    from app.models.enums import AnswerSource, AutomationRunStatus, AutomationRunTrigger, CompanyPriority, FieldType
+    from app.modules.adapters.registry import get_adapter
+    from app.modules.automation import locks
+    from app.modules.automation import service as automation_service
+    from app.modules.automation.pipeline import run_pipeline
+    from app.modules.jobs.service import build_search_query, ingest_discovered
+
+    preference = db.scalars(select(JobPreference).where(JobPreference.user_id == user.id)).first()
+    preference.desired_titles = ["Full Stack Engineer"]  # matches exactly one demo posting
+    preference.preferred_locations = []
+    preference.only_posted_within_hours = 24 * 30
+
+    config = automation_service.get_config(db, user.id)
+    config.enabled_sources = ["DEMO_ATS"]
+    config.source_modes = {"DEMO_ATS": "AUTO_APPLY"}
+    config.auto_submit_enabled = True
+    config.auto_submit_sources = ["DEMO_ATS"]
+    config.min_match_score = 0
+    config.daily_application_limit = 1
+    config.only_posted_within_hours = 24 * 30
+    config.delay_between_actions_seconds = 0.0
+    config.retry_limit = 1
+    config.auto_generate_cover_letters = False
+    db.flush()
+
+    # The two human-only answers, stored on a DISCOVERED application for every posting the
+    # search can return ("Full Stack Engineer" also matches Google's "Software Engineer II,
+    # Full Stack"); the budget of 1 means the run re-queues exactly one of them.
+    discovered = get_adapter(JobSourceType.DEMO_ATS).search_jobs(build_search_query(preference))
+    assert DEMO_SLUG in {job.external_id for job in discovered}
+    ingested = ingest_discovered(db, user.id, discovered)
+    resume = db.scalars(select(Resume).where(Resume.user_id == user.id)).first()
+    seeded: set[uuid.UUID] = set()
+    for job_id in ingested.job_ids_all:
+        application = Application(
+            user_id=user.id,
+            job_id=job_id,
+            resume_id=resume.id,
+            status=ApplicationStatus.DISCOVERED,
+            priority=CompanyPriority.P2,
+            source=JobSourceType.DEMO_ATS,
+            review_required=True,
+            form_snapshot={},
+        )
+        db.add(application)
+        db.flush()
+        seeded.add(application.id)
+        for key, text, field_type, answer in (
+            ("custom:consent", "I consent to the processing of my data", FieldType.CHECKBOX, "Yes"),
+            ("custom:start_date", "What is your preferred start date?", FieldType.TEXT, "1 December 2026"),
+        ):
+            db.add(
+                ApplicationAnswer(
+                    application_id=application.id,
+                    question_key=key,
+                    question_text=text,
+                    field_type=field_type,
+                    required=True,
+                    answer=answer,
+                    answer_source=AnswerSource.USER,
+                    status=AnswerStatus.ANSWERED,
+                    confidence=1.0,
+                    rationale="Provided by you",
+                )
+            )
+    db.commit()
+
+    locks.reset_locks()
+    run = run_pipeline(user.id, AutomationRunTrigger.MANUAL, db=db, sleep_fn=lambda seconds: None)
+    db.commit()
+    steps = {step["step"]: step for step in run.steps}
+
+    assert run.status == AutomationRunStatus.SUCCESS, run.steps
+    assert run.config_snapshot["source_modes"] == {"DEMO_ATS": "AUTO_APPLY"}
+    queued = steps["queue"]["data"]["applications"]
+    assert len(queued) == 1 and queued[0]["source"] == "DEMO_ATS" and queued[0]["auto_submit"] is True
+    application_id = uuid.UUID(queued[0]["application_id"])
+    assert application_id in seeded, "the run must re-queue the DISCOVERED row that carries the user's answers"
+    assert steps["generate_answers"]["data"] == {
+        **steps["generate_answers"]["data"],
+        "prepared": 1,
+        "deferred": [],
+        "browser_available": True,
+    }
+    assert steps["autofill"]["data"]["filled"] == 1
+    assert steps["auto_submit"]["status"] == "SUCCESS"
+    assert steps["auto_submit"]["data"] == {"submitted": 1, "skipped_needs_input": []}
+    assert run.stats["queued"] == 1 and run.stats["submitted"] == 1 and run.stats["requires_user"] == 0
+
+    db.expire_all()
+    application = db.get(Application, application_id)
+    assert application.status == ApplicationStatus.APPLIED
+    assert application.automation_state == AutomationState.SUCCESS
+    assert application.auto_submit is True
+    assert application.automation_run_id == run.id
+    assert application.applied_at is not None and application.approved_at is not None
+    assert (application.external_application_id or "").startswith("DEMO-"), application.external_application_id
+    assert "Thank you for applying" in (application.confirmation_message or "")
+    submissions = (Path(settings.UPLOAD_DIR) / "demo_ats_submissions.jsonl").read_text(encoding="utf-8")
+    assert application.external_application_id in submissions
+
+
+def test_pipeline_auto_applies_with_standing_answers_only(db: Session, user: User, demo_server: BackgroundServer):
+    """Same unattended run, but nothing is stored on any application: only the user's two
+    standing answers (consent, saved at another company, and a start date). The runner
+    answers the form from them before filling, so the run ends APPLIED with no pause."""
+    from app.models.enums import AnswerSource, AutomationRunStatus, AutomationRunTrigger, FieldType
+    from app.modules.automation import locks
+    from app.modules.automation import service as automation_service
+    from app.modules.automation.pipeline import run_pipeline
+    from app.modules.profiles.service import upsert_standing_answer
+
+    preference = db.scalars(select(JobPreference).where(JobPreference.user_id == user.id)).first()
+    preference.desired_titles = ["Full Stack Engineer"]
+    preference.preferred_locations = []
+    preference.only_posted_within_hours = 24 * 30
+
+    config = automation_service.get_config(db, user.id)
+    config.enabled_sources = ["DEMO_ATS"]
+    config.source_modes = {"DEMO_ATS": "AUTO_APPLY"}
+    config.auto_submit_enabled = True
+    config.auto_submit_sources = ["DEMO_ATS"]
+    config.min_match_score = 0
+    config.daily_application_limit = 1
+    config.only_posted_within_hours = 24 * 30
+    config.delay_between_actions_seconds = 0.0
+    config.retry_limit = 1
+    config.auto_generate_cover_letters = False
+
+    # Saved while applying to a *different* company: the employer's name is factored out.
+    upsert_standing_answer(
+        db,
+        user.id,
+        question_key="custom:consent",
+        question_text=(
+            "I consent to Acme Cloud storing the information in this application and contacting me "
+            "about this role. *"
+        ),
+        answer="Yes",
+        field_type=FieldType.CHECKBOX,
+        company_name="Acme Cloud",
+    )
+    upsert_standing_answer(
+        db,
+        user.id,
+        question_key="custom:start_date",
+        question_text="What is your preferred start date?",
+        answer="1 December 2026",
+    )
+    db.commit()
+    assert db.scalars(select(Application).where(Application.user_id == user.id)).first() is None
+
+    locks.reset_locks()
+    run = run_pipeline(user.id, AutomationRunTrigger.MANUAL, db=db, sleep_fn=lambda seconds: None)
+    db.commit()
+    steps = {step["step"]: step for step in run.steps}
+
+    assert run.status == AutomationRunStatus.SUCCESS, run.steps
+    queued = steps["queue"]["data"]["applications"]
+    assert len(queued) == 1 and queued[0]["source"] == "DEMO_ATS" and queued[0]["auto_submit"] is True
+    assert steps["autofill"]["data"]["filled"] == 1 and steps["autofill"]["data"]["requires_user"] == 0
+    assert steps["approval_queue"]["data"] == {"ready_for_review": 0, "requires_user": 0}
+    assert steps["auto_submit"]["data"] == {"submitted": 1, "skipped_needs_input": []}
+    assert run.stats["submitted"] == 1 and run.stats["requires_user"] == 0
+
+    db.expire_all()
+    application = db.get(Application, uuid.UUID(queued[0]["application_id"]))
+    assert application.status == ApplicationStatus.APPLIED
+    assert application.automation_state == AutomationState.SUCCESS
+    assert (application.external_application_id or "").startswith("DEMO-"), application.external_application_id
+    by_key = {a.question_key: a for a in application.answers}
+    for key, expected in (("custom:consent", "Yes"), ("custom:start_date", "1 December 2026")):
+        assert by_key[key].answer == expected
+        assert by_key[key].answer_source == AnswerSource.USER
+        assert by_key[key].rationale == "Standing answer you saved"
+    assert not [a for a in application.answers if a.required and a.status == AnswerStatus.NEEDS_USER_INPUT]
+    submissions = (Path(settings.UPLOAD_DIR) / "demo_ats_submissions.jsonl").read_text(encoding="utf-8")
+    assert application.external_application_id in submissions

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_token
 from app.models.audit import AuditLog
 from app.models.automation import AutomationConfig
 from app.models.profile import JobPreference, UserProfile
@@ -193,6 +194,7 @@ def test_logout_revokes_the_refresh_token(client: TestClient, db: Session) -> No
 def test_change_password_flow(client: TestClient, db: Session) -> None:
     body = _register(client)
     headers = {"Authorization": f"Bearer {body['access_token']}"}
+    first_cookie = client.cookies.get("refresh_token")
 
     assert client.put(PASSWORD, json={"current_password": "x", "new_password": "AnotherPass1"}, headers=headers).status_code == 401
     weak = client.put(
@@ -211,7 +213,12 @@ def test_change_password_flow(client: TestClient, db: Session) -> None:
 
     db.expire_all()
     assert db.scalars(select(AuditLog).where(AuditLog.action == "auth.password_changed")).first() is not None
-    assert all(t.revoked_at is not None for t in db.scalars(select(RefreshToken)).all())
+    # This device's session is rotated (not ended); every other session is signed out
+    # (see tests/test_auth_sessions.py for the multi-device version).
+    new_cookie = client.cookies.get("refresh_token")
+    assert new_cookie and new_cookie != first_cookie
+    live = [t for t in db.scalars(select(RefreshToken)).all() if t.revoked_at is None]
+    assert [t.token_hash for t in live] == [hash_token(new_cookie)]
 
     assert client.post(LOGIN, json={"email": CREDENTIALS["email"], "password": CREDENTIALS["password"]}).status_code == 401
     assert client.post(LOGIN, json={"email": CREDENTIALS["email"], "password": "AnotherPass1"}).status_code == 200

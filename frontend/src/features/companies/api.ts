@@ -10,10 +10,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
 import type {
+  BoardDetectRequest,
+  BoardDetection,
+  CompanyBoardResult,
+  CompanyBoardUpdate,
+  CompanyCreate,
+  CompanyDetectResult,
   CompanyListParams,
   CompanyPreferenceRead,
   CompanyPreferenceUpsert,
   CompanyRead,
+  CompanySuggestions,
   OkResponse,
   PageResponse,
 } from '@/types/api'
@@ -76,6 +83,77 @@ export function useDeleteCompanyPreference() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.companies.all })
       void queryClient.invalidateQueries({ queryKey: qk.jobs.all })
+    },
+  })
+}
+
+/**
+ * Add a company by name. With a `board_url` the board is verified server-side first;
+ * without one (and `auto_detect`, the default) the server looks the board up and the
+ * response carries the `detection`.
+ */
+export function useCreateCompany() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: CompanyCreate) => api.post<CompanyDetectResult>('/companies', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.companies.all })
+      void queryClient.invalidateQueries({ queryKey: qk.jobs.all })
+    },
+  })
+}
+
+/** Look a career board up by name / website without saving anything (`POST /companies/detect-board`). */
+export function useDetectBoard() {
+  return useMutation({
+    mutationFn: (payload: BoardDetectRequest) => api.post<BoardDetection>('/companies/detect-board', payload),
+  })
+}
+
+/** Re-run board detection for an existing company and save what is found. */
+export function useDetectCompanyBoard() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (companyId: string) => api.post<CompanyDetectResult>(`/companies/${companyId}/detect-board`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.companies.all })
+      void queryClient.invalidateQueries({ queryKey: qk.jobs.all })
+    },
+  })
+}
+
+/** Known-board companies for the "Quick start" panel (`GET /companies/suggestions`). */
+export function useQuickStartSuggestions(limit = 20) {
+  return useQuery({
+    queryKey: [...qk.companies.all, 'suggestions', limit] as const,
+    queryFn: () => api.get<CompanySuggestions>('/companies/suggestions', { params: { limit } }),
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * Verify and save a company's public job board. The server fetches the board once and
+ * answers 422 `board_not_found` when it does not exist or is empty.
+ */
+export function useSetCompanyBoard() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ companyId, ...body }: CompanyBoardUpdate & { companyId: string }) =>
+      api.put<CompanyBoardResult>(`/companies/${companyId}/board`, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.companies.all })
+      void queryClient.invalidateQueries({ queryKey: qk.jobs.all })
+    },
+  })
+}
+
+/** Stop reading a company's job board. */
+export function useClearCompanyBoard() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (companyId: string) => api.delete<CompanyRead>(`/companies/${companyId}/board`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.companies.all })
     },
   })
 }

@@ -57,6 +57,29 @@ cd frontend && npm install && npm run dev            # http://localhost:5173, pr
 Run the tests: `cd backend && pytest` (SQLite + mock LLM, no services required) and
 `cd frontend && npm run typecheck && npm run build`.
 
+### Free local AI with Ollama (recommended)
+
+The mock LLM is rule-based. For real model output at zero cost, run a local model with
+[Ollama](https://ollama.com); nothing is sent to a hosted API and no key is needed.
+
+```bash
+winget install --id Ollama.Ollama -e    # Windows; macOS/Linux: see ollama.com/download
+ollama pull qwen2.5:3b-instruct          # ~1.9 GB, fits a 4 GB GPU with an 8k context
+```
+
+Then set two lines in `.env` and restart the API:
+
+```bash
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen2.5:3b-instruct
+```
+
+`GET /api/v1/ai/status` reports `configured: true` once the server answers and the model is pulled.
+`qwen2.5:7b-instruct` (~4.7 GB) writes noticeably better text, but on a 4 GB GPU it splits between
+GPU and CPU and runs roughly 5-10x slower, so the 3b model is the default. Under Docker the API
+reaches the host's Ollama at `host.docker.internal:11434` (already set in `docker-compose.yml`).
+Optional: `OLLAMA_BASE_URL`, `OLLAMA_KEEP_ALIVE` (default `10m`), `OLLAMA_NUM_CTX` (default `8192`).
+
 ## The demo scenario (spec §31)
 
 1. Log in as the demo user → **Dashboard** shows jobs found / matched / high-match / queued and what needs attention.
@@ -92,8 +115,10 @@ Everything is environment-driven — see [`.env.example`](.env.example). Highlig
 
 | Variable | Purpose |
 |---|---|
-| `LLM_PROVIDER` | `mock` (default, deterministic, no key) · `openai` · `anthropic` |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | only needed for real providers |
+| `LLM_PROVIDER` | `mock` (default, deterministic, no key) · `ollama` (free local model, recommended) · `openai` · `anthropic` |
+| `LLM_MODEL` | model name; `qwen2.5:3b-instruct` when `LLM_PROVIDER=ollama` and unset |
+| `OLLAMA_BASE_URL`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_NUM_CTX` | local Ollama server, model residency, context size |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | only needed for the hosted providers |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | enable Gmail OAuth (read-only scope) |
 | `SECRET_KEY`, `ENCRYPTION_KEY` | JWT signing / Fernet encryption — change in production |
 | `DEFAULT_DAILY_APPLICATION_LIMIT`, `MAX_DAILY_APPLICATION_LIMIT` | automation safety rails |

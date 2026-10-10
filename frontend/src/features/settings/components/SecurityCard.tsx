@@ -18,6 +18,7 @@ import { errorMessage } from '@/lib/api'
 import { formatDateTime, formatRelative, humanizeEnum } from '@/lib/utils'
 import { Field } from '@/features/profile/components/SectionCard'
 import { useBrowserSessions, useChangePassword, useRevokeBrowserSession } from '@/features/settings/api'
+import { DeviceSessionsCard } from '@/features/settings/components/DeviceSessionsCard'
 import { passwordSchema, type PasswordValues } from '@/features/settings/schema'
 import type { BrowserSessionRead } from '@/types/api'
 
@@ -39,7 +40,7 @@ function ChangePasswordCard() {
         new_password: values.new_password,
       })
       reset({ current_password: '', new_password: '', confirm_password: '' })
-      toast.success('Password changed', { description: 'Sign in again on your other devices.' })
+      toast.success('Password changed', { description: 'Your other devices have been signed out.' })
     } catch (error) {
       toast.error('Could not change your password', { description: errorMessage(error) })
     }
@@ -197,20 +198,21 @@ function SignOutCard() {
           Sign out
         </CardTitle>
         <CardDescription>
-          Revokes the refresh token for {user?.email ?? 'this account'} and clears the session in this browser.
+          Revokes this browser&apos;s session for {user?.email ?? 'this account'}. To sign out other devices, use
+          Sessions and devices above.
         </CardDescription>
       </CardHeader>
       <CardFooter className="justify-end border-t bg-muted/30 py-3">
         <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-          Sign out everywhere
+          Sign out of this device
         </Button>
       </CardFooter>
 
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
-        title="Sign out everywhere?"
-        description="Your refresh token is revoked, so every signed-in browser will need your password again."
+        title="Sign out of this device?"
+        description="This browser's session is revoked and it will need your password again. Other devices stay signed in."
         confirmLabel="Sign out"
         loading={busy}
         onConfirm={confirm}
@@ -223,6 +225,7 @@ export function SecurityCard() {
   return (
     <div className="space-y-6">
       <ChangePasswordCard />
+      <DeviceSessionsCard />
       <BrowserSessionsCard />
       <SignOutCard />
     </div>

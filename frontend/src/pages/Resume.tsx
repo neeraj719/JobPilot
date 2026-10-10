@@ -21,6 +21,7 @@ import {
 } from '@/features/resume/api'
 import { ParsedDataPanel } from '@/features/resume/components/ParsedDataPanel'
 import { ResumeCard } from '@/features/resume/components/ResumeCard'
+import { ResumeInsights } from '@/features/resume/components/ResumeInsights'
 import { ResumeUploadCard } from '@/features/resume/components/ResumeUploadCard'
 import { ResumeVersionHistory } from '@/features/resume/components/ResumeVersionHistory'
 import type { ResumeRead } from '@/types/api'
@@ -171,6 +172,7 @@ export default function ResumePage() {
         <div className="space-y-6">
           {selected ? (
             <>
+              <ResumeInsights resume={selected} />
               <ParsedDataPanel resume={selected} />
               <ResumeVersionHistory resumeId={selected.id} currentVersion={selected.current_version} />
             </>
