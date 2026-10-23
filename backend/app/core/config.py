@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     #: How long Ollama keeps the model in memory after a request ("10m", "0" unloads at once).
     OLLAMA_KEEP_ALIVE: str = "10m"
     OLLAMA_NUM_CTX: int = 8192
+    #: Local embedding model (served by the same Ollama) used to rank target jobs by
+    #: similarity. Any failure falls back to the deterministic selection.
+    EMBEDDINGS_ENABLED: bool = True
+    EMBEDDING_MODEL: str = "embeddinggemma"
 
     # --- Gmail OAuth (least privilege: gmail.readonly only) ---
     GOOGLE_CLIENT_ID: str | None = None

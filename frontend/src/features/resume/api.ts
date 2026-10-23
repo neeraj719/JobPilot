@@ -10,6 +10,9 @@ import { api, saveBlob } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
 import type {
   ParsedResume,
+  ResumeApplyPlan,
+  ResumeApplyRequest,
+  ResumeApplyResult,
   ResumeRead,
   ResumeRecommendations,
   ResumeUpdate,
@@ -83,6 +86,7 @@ export function useRefreshRecommendations() {
     onSuccess: (data, resumeId) => {
       queryClient.setQueryData(qk.resumes.recommendations(resumeId), data)
       queryClient.setQueryData(qk.resumes.recommendationHistory(resumeId), data.version_history)
+      void queryClient.invalidateQueries({ queryKey: qk.resumes.applyPlan(resumeId) })
     },
   })
 }
@@ -163,4 +167,39 @@ export function useDeleteResume() {
 export async function downloadResume(resume: Pick<ResumeRead, 'id' | 'original_filename'>): Promise<void> {
   const blob = await api.download(`/resumes/${resume.id}/download`)
   saveBlob(blob, resume.original_filename || 'resume')
+}
+
+/**
+ * What "Apply suggestions" can change on this resume. Built from the (cached)
+ * recommendations, so it is cheap; it goes stale whenever the resume or the analysis does.
+ */
+export function useApplyPlan(resumeId: string | null) {
+  return useQuery({
+    queryKey: qk.resumes.applyPlan(resumeId ?? 'none'),
+    queryFn: () => api.get<ResumeApplyPlan>(`/resumes/${resumeId}/recommendations/apply-plan`),
+    enabled: Boolean(resumeId),
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * Apply the selected changes and save a new version. The response carries the saved
+ * resume and fresh recommendations, so both caches are written directly (no refetch);
+ * only the plan and the version list are invalidated.
+ */
+export function useApplySuggestions(resumeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ResumeApplyRequest) =>
+      api.post<ResumeApplyResult>(`/resumes/${resumeId}/recommendations/apply`, body),
+    onSuccess: (result) => {
+      queryClient.setQueryData<ResumeRead[]>(qk.resumes.all, (list) =>
+        list?.map((item) => (item.id === result.resume.id ? result.resume : item)),
+      )
+      queryClient.setQueryData(qk.resumes.recommendations(resumeId), result.recommendations)
+      queryClient.setQueryData(qk.resumes.recommendationHistory(resumeId), result.recommendations.version_history)
+      void queryClient.invalidateQueries({ queryKey: qk.resumes.applyPlan(resumeId) })
+      void queryClient.invalidateQueries({ queryKey: qk.resumes.versions(resumeId) })
+    },
+  })
 }

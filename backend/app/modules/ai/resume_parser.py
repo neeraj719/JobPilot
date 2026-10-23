@@ -359,6 +359,20 @@ def _is_location_part(part: str) -> bool:
     return any(hint == lowered or hint in lowered for hint in _LOCATION_HINTS) and not _is_title_part(part)
 
 
+def _strip_trailing_location(part: str) -> str:
+    """"Austere Systems Limited Gurugram" -> "Austere Systems Limited" (company, then its city)."""
+    words = part.split()
+    while len(words) > 1:
+        tail2 = " ".join(words[-2:]).lower()
+        if tail2 in _LOCATION_HINTS:
+            words = words[:-2]
+        elif words[-1].lower().strip(",.") in _LOCATION_HINTS:
+            words = words[:-1]
+        else:
+            break
+    return " ".join(words)
+
+
 # --------------------------------------------------------------------------- sections
 
 
@@ -385,7 +399,17 @@ def _parse_experience(section_lines: list[str]) -> list[dict[str, Any]]:
             parts.extend(_split_header_parts(line))
 
         title = next((p for p in parts if _is_title_part(p)), None)
-        remaining = [p for p in parts if p != title and not _is_location_part(p)]
+        remaining: list[str] = []
+        for p in parts:
+            if p == title:
+                continue
+            if _is_location_part(p):
+                # A company written with its city on one line ("Acme Labs Gurugram") keeps the name.
+                trimmed = _strip_trailing_location(p)
+                if trimmed and trimmed != p and not _is_location_part(trimmed):
+                    remaining.append(trimmed)
+                continue
+            remaining.append(p)
         company = next((p for p in remaining if p), None)
         if title is None and len(parts) >= 2:
             title, company = parts[0], parts[1]
@@ -483,15 +507,41 @@ _PROJECT_META_RE = re.compile(
 _PROJECT_HEADING_RE = re.compile(r"^[A-Za-z0-9][\w .+#/&'()-]{1,60}?(?:\s+[-–—|]\s+|:\s+)")
 
 
+#: Bullet sentences open with an action word ("Leading the team - ...", "Built X - Y").
+_ACTION_START_RE = re.compile(r"^[A-Za-z]+(?:ed|ing)\b|^(?:built|led|wrote|ran|drove|made|grew|won|set|cut|shipped)\b", re.IGNORECASE)
+
+
+def _is_dated_heading(line: str) -> bool:
+    """A short line carrying a date range and not reading like a sentence: "HRPMS (...) Mar 2026 - Present"."""
+    stripped = line.strip()
+    if not stripped or _is_bullet(line) or not DATE_RANGE_RE.search(stripped):
+        return False
+    name = DATE_RANGE_RE.sub(" ", stripped).strip(" -|,")
+    return bool(name) and len(name.split()) <= 14 and not name.endswith(".") and not _ACTION_START_RE.match(name)
+
+
 def _is_project_heading(line: str) -> bool:
     stripped = line.strip()
     if not stripped or _is_bullet(line) or _PROJECT_META_RE.match(stripped):
         return False
+    if _ACTION_START_RE.match(stripped):
+        return False  # "Leading and mentoring the team - assigning tasks..." is a bullet
     return bool(_PROJECT_HEADING_RE.match(stripped))
 
 
 def _split_project_blocks(section_lines: list[str]) -> list[list[str]]:
     """Blank lines first; otherwise split on "Name - description" heading lines."""
+    dated = [i for i, line in enumerate(section_lines) if _is_dated_heading(line)]
+    if dated:
+        # Projects with dates on their heading line: one block per dated heading.
+        blocks = []
+        for position, index in enumerate(dated):
+            stop = dated[position + 1] if position + 1 < len(dated) else len(section_lines)
+            start = 0 if position == 0 else index
+            block = [line for line in section_lines[start:stop] if line.strip()]
+            if block:
+                blocks.append(block)
+        return blocks
     refined: list[list[str]] = []
     for block in _split_blocks_by_blank(section_lines):
         heads = [i for i, line in enumerate(block) if _is_project_heading(line)]
@@ -512,6 +562,8 @@ def _parse_projects(section_lines: list[str]) -> list[dict[str, Any]]:
         if not block_text:
             continue
         head = _strip_bullet(block[0]).strip()
+        if _is_dated_heading(head):
+            head = DATE_RANGE_RE.sub(" ", head).strip(" -|,")  # the dates are not part of the name
         head_parts = re.split(r"\s+[-–—:|]\s+|:\s+", head, maxsplit=1)
         name = (head_parts[0] if head_parts else head).strip(" .:-")
         inline_description = head_parts[1].strip() if len(head_parts) > 1 else ""

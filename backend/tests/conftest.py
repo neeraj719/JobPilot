@@ -37,6 +37,8 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
 os.environ.setdefault("ENV", "test")
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("LLM_PROVIDER", "mock")
+#: Local embeddings (Ollama) stay off unless a test mocks them; the deterministic path is the default.
+os.environ.setdefault("EMBEDDINGS_ENABLED", "false")
 os.environ.setdefault("SEED_DEMO_DATA", "false")
 os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp(prefix="jobpilot-test-uploads-"))
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-0123456789")

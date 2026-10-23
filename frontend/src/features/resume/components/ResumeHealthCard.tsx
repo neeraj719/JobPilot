@@ -1,4 +1,5 @@
 import { ArrowRight, RefreshCw, Sparkles } from 'lucide-react'
+import type * as React from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,10 +48,12 @@ export interface ResumeHealthCardProps {
   data: ResumeRecommendations
   refreshing: boolean
   onRefresh: () => void
+  /** Rendered next to "Refresh analysis" (the "Apply suggestions" button). */
+  action?: React.ReactNode
 }
 
 /** Overall score, average match now vs projected, and what the analysis looked at. */
-export function ResumeHealthCard({ data, refreshing, onRefresh }: ResumeHealthCardProps) {
+export function ResumeHealthCard({ data, refreshing, onRefresh, action }: ResumeHealthCardProps) {
   const { overall_score: score, score_projection: projection, target_summary: summary } = data
   const hasTargets = summary.jobs_analysed > 0
   const gain = projection.delta
@@ -62,10 +65,13 @@ export function ResumeHealthCard({ data, refreshing, onRefresh }: ResumeHealthCa
           <CardTitle className="text-base">Resume health</CardTitle>
           <CardDescription>{targetSummaryLine(summary)}</CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={onRefresh} loading={refreshing} disabled={refreshing}>
-          {refreshing ? null : <RefreshCw aria-hidden />}
-          Refresh analysis
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {action}
+          <Button variant="outline" size="sm" onClick={onRefresh} loading={refreshing} disabled={refreshing}>
+            {refreshing ? null : <RefreshCw aria-hidden />}
+            Refresh analysis
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-6">

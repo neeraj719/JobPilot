@@ -118,6 +118,7 @@ KEYWORD_MAX_TERMS = 8
 KEYWORD_MEDIUM_TERMS = 4
 BOILERPLATE_MIN_JOBS = 5
 BOILERPLATE_SHINGLE = 4
+BOILERPLATE_SHARE = 0.25
 
 SUMMARY_MIN_WORDS = 30
 MAX_BULLETS = 8
@@ -179,6 +180,9 @@ STOP_WORDS: frozenset[str] = frozenset(
     without work working works world would write writing year years yrs you your
     engineer engineers engineering developer developers location locations week weeks month months annum
     compensation engagement inr lpa ctc usd per pay paid month
+    overview fully back hear love send profile ships ship shipped bar mindset ownership partner partners
+    clean issues monitor matters thrive excited excite awesome amazing love loves enjoy enjoys reach apply
+    resume cv email contact today tomorrow soon hello hey thanks thank please hope ready able keen
     """.split()
 )
 
@@ -734,7 +738,9 @@ def boilerplate_shingles(jobs: list[TargetJob]) -> set[tuple[str, ...]]:
     counts: Counter = Counter()
     for job in jobs:
         counts.update(set().union(*(_shingles(line) for line in _line_tokens(job.description))))
-    threshold = max(BOILERPLATE_MIN_JOBS, len(jobs) / 2)
+    # A quarter of the posts is enough: job boards rotate a few templates ("About the role",
+    # "Role overview", "The opportunity"), so each template phrase reaches only a fraction.
+    threshold = max(3, len(jobs) * BOILERPLATE_SHARE)
     return {shingle for shingle, count in counts.items() if count >= threshold}
 
 
@@ -752,7 +758,9 @@ def distinctive_tokens(job: TargetJob, boilerplate: set[tuple[str, ...]]) -> set
 
 def rule_keyword_gap(view: ResumeView, ctx: TargetContext) -> list[Recommendation]:
     """KEYWORD_GAP — frequent non-skill terms of the target posts missing from the resume."""
-    if not ctx.size:
+    # Below this many posts the boilerplate filter cannot work, and every post's filler words
+    # ("ownership", "mindset", "bar") look like keywords. Saying nothing beats saying noise.
+    if ctx.size < BOILERPLATE_MIN_JOBS:
         return []
     noise = set(STOP_WORDS) | _ALIAS_WORDS | _LEVEL_WORDS
     for job in ctx.jobs:
@@ -1189,6 +1197,30 @@ def analyze_resume(
     )
 
 
+# --------------------------------------------------------------------------- advice text
+
+#: Resume content is written about the candidate, never to them, and never as an instruction.
+_SECOND_PERSON_RE = re.compile(r"\b(?:you|your|yours|yourself|you're|you've)\b", re.IGNORECASE)
+_ADVICE_START_RE = re.compile(
+    r"^\s*(?:add|include|consider|highlight|mention|strengthen|try|make sure|ensure|quantify|emphasi[sz]e|"
+    r"list|show|state|describe|write|rewrite|replace|remove|focus|keep|avoid|use|update|tailor|start|open)\b",
+    re.IGNORECASE,
+)
+
+#: Only these categories have a piece of resume text worth copying (a summary, a bullet).
+COPYABLE_CATEGORIES = frozenset({"WEAK_SUMMARY", "EXPERIENCE_BULLETS"})
+
+
+def looks_like_advice(text: str | None) -> bool:
+    """True for coaching text ("Add a sentence to your summary...") rather than resume content."""
+    if not text:
+        return False
+    # Bracketed placeholders ("[the outcome you are proudest of]") are prompts for the
+    # candidate to fill in, not part of the sentence, so they are ignored here.
+    sentence = re.sub(r"\[[^\[\]]*\]", " ", text)
+    return bool(_SECOND_PERSON_RE.search(sentence) or _ADVICE_START_RE.search(sentence))
+
+
 # --------------------------------------------------------------------------- LLM polish
 
 
@@ -1196,14 +1228,20 @@ def polish(analysis: Analysis) -> tuple[list[Recommendation], bool, str | None]:
     """Reword the top recommendations with the LLM; any failure keeps the deterministic text.
 
     Returns ``(recommendations, ai_polished, provider_name)``.
+
+    Only the :data:`COPYABLE_CATEGORIES` recommendations are sent: the model's ``detail``
+    rewording is discarded anyway and every other category's ``suggested_text`` is dropped
+    below, so sending them only made a local model generate text nobody sees (seconds per
+    analysis). With nothing copyable the call is skipped entirely.
     """
     recs = analysis.recommendations
-    if not recs:
+    copyable = [rec for rec in recs if rec.category in COPYABLE_CATEGORIES][:POLISH_MAX_ITEMS]
+    if not copyable:
         return recs, False, None
     provider_name: str | None = None
     try:
         provider_name = getattr(get_llm_provider(), "name", None)
-        result = ai_tasks.polish_resume_recommendations(analysis.resume_payload, recs[:POLISH_MAX_ITEMS])
+        result = ai_tasks.polish_resume_recommendations(analysis.resume_payload, copyable)
     except Exception as exc:  # noqa: BLE001 - the deterministic text is always a valid answer
         logger.warning("Resume recommendation polish failed (%s); showing the deterministic text", exc)
         return recs, False, provider_name
@@ -1216,18 +1254,287 @@ def polish(analysis: Analysis) -> tuple[list[Recommendation], bool, str | None]:
         if item is None:
             polished.append(rec)
             continue
-        polished.append(
-            rec.model_copy(
-                update={"detail": item.detail or rec.detail, "suggested_text": item.suggested_text or rec.suggested_text}
-            )
-        )
+        # The deterministic detail is specific ("6 of 6 bullets have no number") and is kept:
+        # small local models reword it into vaguer or garbled sentences. The model only drafts
+        # resume text to copy, and only where such text exists and is not itself advice.
+        suggested = item.suggested_text or rec.suggested_text
+        if rec.category not in COPYABLE_CATEGORIES or looks_like_advice(suggested):
+            suggested = None
+        polished.append(rec.model_copy(update={"suggested_text": suggested}))
     return polished, True, provider_name
 
 
 # --------------------------------------------------------------------------- DB inputs
 
 
-def load_target_jobs(db: Session, user_id: uuid.UUID, *, top_n: int = DEFAULT_TOP_N) -> list[TargetJob]:
+#: Fewer relevant jobs than this and the analysis is topped up from the shared job pool.
+MIN_TARGET_JOBS = 10
+#: ``scoring.score_title`` at or above this counts as "the same kind of role".
+ROLE_TITLE_MIN = 60
+#: How many recent pool jobs are scanned for role matches.
+POOL_SCAN_LIMIT = 600
+
+
+#: Words that say nothing about *which* role it is ("Senior DevOps Engineer" vs "Full Stack Engineer").
+_GENERIC_ROLE_WORDS = frozenset(
+    """engineer engineers engineering developer developers dev devs programmer senior sr junior jr lead
+    principal staff associate intern trainee mid level i ii iii iv v 1 2 3 specialist consultant
+    professional expert the and of for with remote hybrid onsite""".split()
+)
+_ROLE_SYNONYMS = (
+    (re.compile(r"\bfull[\s-]?stack\b"), "fullstack"),
+    (re.compile(r"\bback[\s-]?end\b"), "backend"),
+    (re.compile(r"\bfront[\s-]?end\b"), "frontend"),
+    (re.compile(r"\bnode(?:\.?js)?\b"), "node"),
+    (re.compile(r"\breact(?:\.?js)?\b"), "react"),
+    (re.compile(r"\bsde\b|\bswe\b"), "software"),
+    (re.compile(r"\bsite reliability\b|\bsre\b"), "sre"),
+    (re.compile(r"\bml\b"), "machine learning"),
+)
+
+
+def _role_tokens(text: str | None) -> set[str]:
+    value = (text or "").lower()
+    for pattern, replacement in _ROLE_SYNONYMS:
+        value = pattern.sub(replacement, value)
+    return set(re.findall(r"[a-z0-9+#]+", value))
+
+
+def role_matches(title: str | None, roles: list[str]) -> bool:
+    """True when ``title`` is the same kind of role as one of ``roles``.
+
+    The role's distinctive words must all appear in the title, so "Full Stack Engineer" matches
+    "Senior Full-Stack Engineer" but not "DevOps Engineer". A role made only of generic words
+    ("Engineer") falls back to the looser title score.
+    """
+    title_tokens = _role_tokens(title)
+    for role in roles:
+        core = _role_tokens(role) - _GENERIC_ROLE_WORDS
+        if core:
+            if core <= title_tokens:
+                return True
+        elif scoring.score_title(title, [role]) >= ROLE_TITLE_MIN:
+            return True
+    return False
+
+
+#: Kinds of role a title can name. Two titles naming incompatible kinds are different roles,
+#: whatever an embedding says ("Frontend Engineer" is never a "Backend Engineer").
+_ROLE_KIND_TOKENS: dict[str, str] = {
+    "frontend": "frontend",
+    "ui": "frontend",
+    "react": "frontend",
+    "angular": "frontend",
+    "vue": "frontend",
+    "backend": "backend",
+    "python": "backend",
+    "django": "backend",
+    "java": "backend",
+    "golang": "backend",
+    "go": "backend",
+    "node": "backend",
+    "php": "backend",
+    "ruby": "backend",
+    "api": "backend",
+    "fullstack": "fullstack",
+    "devops": "devops",
+    "sre": "devops",
+    "platform": "devops",
+    "infrastructure": "devops",
+    "kubernetes": "devops",
+    "cloud": "devops",
+    "data": "data",
+    "analyst": "data",
+    "analytics": "data",
+    "learning": "ml",
+    "ai": "ml",
+    "mobile": "mobile",
+    "android": "mobile",
+    "ios": "mobile",
+    "flutter": "mobile",
+    "qa": "qa",
+    "test": "qa",
+    "testing": "qa",
+    "automation": "qa",
+    "security": "security",
+    "embedded": "embedded",
+    "firmware": "embedded",
+    "designer": "design",
+    "design": "design",
+    "manager": "management",
+    "sales": "business",
+    "marketing": "business",
+}
+#: Kinds that overlap: a Full Stack role covers frontend and backend work, and so on.
+_COMPATIBLE_KINDS: frozenset[frozenset[str]] = frozenset(
+    frozenset(pair)
+    for pair in (
+        ("fullstack", "frontend"),
+        ("fullstack", "backend"),
+        ("backend", "data"),
+        ("data", "ml"),
+        ("backend", "ml"),
+    )
+)
+
+
+def role_kinds(text: str | None) -> set[str]:
+    """The kinds of role ``text`` names (``frontend``, ``backend``, ``devops``, ...)."""
+    return {_ROLE_KIND_TOKENS[token] for token in _role_tokens(text) if token in _ROLE_KIND_TOKENS}
+
+
+def different_role(title: str | None, roles: list[str]) -> bool:
+    """True when the tokens alone prove ``title`` is another kind of role than every one of ``roles``.
+
+    A title or role that names no kind ("Software Engineer", "SDE II") proves nothing; neither
+    does a title sharing or overlapping a kind with a role (Full Stack covers Backend).
+    """
+    title_kinds = role_kinds(title)
+    if not title_kinds:
+        return False
+    for role in roles:
+        kinds = role_kinds(role)
+        if not kinds:
+            return False
+        for a in title_kinds:
+            for b in kinds:
+                if a == b or frozenset((a, b)) in _COMPATIBLE_KINDS:
+                    return False
+    return True
+
+
+#: Cosine between a job title's and a target role's embeddings at or above which a title the
+#: token rule did not match still counts as that kind of role. Titles are compared without level
+#: words ("Senior", "Lead", "II"), which otherwise move the cosine more than the role does.
+#: Calibrated with embeddinggemma on the live job pool: 0.78 admits Frontend/Backend/Software
+#: Engineer for "Full Stack Engineer" and nothing extra for "Python Developer" (at 0.75 the SDE,
+#: Node.js Developer and Full Stack Developer titles came in there too, none of them Python roles).
+SEMANTIC_TITLE_MIN = 0.78
+#: Characters of the job description used for the resume-similarity ranking.
+RANK_DESCRIPTION_CHARS = 600
+
+
+def _job_rank_text(job: TargetJob) -> str:
+    return "\n".join(
+        p for p in (job.title, ", ".join(job.required_skills), (job.description or "")[:RANK_DESCRIPTION_CHARS]) if p
+    )
+
+
+def semantic_title_matches(titles: list[str], roles: list[str], *, threshold: float = SEMANTIC_TITLE_MIN) -> list[bool] | None:
+    """Per title: embedding cosine to any role >= ``threshold`` and not provably a different role.
+
+    ``None`` when embeddings are unavailable.
+    """
+    from app.modules.ai import embeddings
+
+    if not titles or not roles:
+        return [False] * len(titles)
+    vectors = embeddings.embed([_core_title(t) or t for t in [*roles, *titles]])
+    if vectors is None:
+        return None
+    role_vectors, title_vectors = vectors[: len(roles)], vectors[len(roles) :]
+    return [
+        not different_role(title, roles) and max(embeddings.cosine(vector, rv) for rv in role_vectors) >= threshold
+        for title, vector in zip(titles, title_vectors)
+    ]
+
+
+def rank_by_similarity(jobs: list[TargetJob], resume_text: str | None) -> list[TargetJob] | None:
+    """``jobs`` ordered by embedding similarity to ``resume_text`` (stable on ties), or ``None``."""
+    from app.modules.ai import embeddings
+
+    text = (resume_text or "").strip()
+    if not jobs or not text:
+        return None
+    vectors = embeddings.embed([text, *(_job_rank_text(job) for job in jobs)])
+    if vectors is None:
+        return None
+    resume_vector = vectors[0]
+    scored = [(embeddings.cosine(resume_vector, vector), index) for index, vector in enumerate(vectors[1:])]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [jobs[index] for _, index in scored]
+
+
+def load_target_jobs(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    top_n: int = DEFAULT_TOP_N,
+    roles: list[str] | None = None,
+    resume_text: str | None = None,
+) -> list[TargetJob]:
+    """Jobs to analyse the resume against.
+
+    Without ``roles``: the user's top-N matches plus every job they queued or applied to.
+    With ``roles`` (the resume's target role, else the preferred titles): only those jobs
+    whose title is that kind of role, topped up from recent jobs in the shared pool when the
+    user has fewer than :data:`MIN_TARGET_JOBS` of their own, so one stray DevOps match cannot
+    make Kubernetes look "required by 50% of your target jobs" for a Full Stack resume.
+
+    With local embeddings available (``ai.embeddings``; any failure keeps the token rule):
+
+    * when the token rule still finds fewer than :data:`MIN_TARGET_JOBS`, pool jobs whose
+      *title* embedding is within :data:`SEMANTIC_TITLE_MIN` cosine of a target role are
+      admitted too, unless :func:`different_role` proves otherwise;
+    * the candidates are ranked by similarity to ``resume_text`` (title, required skills and
+      the start of the description) and the top N are kept.
+
+    The selection is reflected in ``jobs_fingerprint`` (it hashes the chosen job ids), so a
+    change in what embeddings select is never served from a stale cache entry.
+    """
+    roles = [r for r in (roles or []) if str(r).strip()]
+    targets = _load_user_target_jobs(db, user_id, top_n=top_n)
+    if not roles:
+        return targets
+    relevant = [job for job in targets if role_matches(job.title, roles)]
+    limit = max(top_n, MIN_TARGET_JOBS)
+    if len(relevant) >= MIN_TARGET_JOBS:
+        ranked = rank_by_similarity(relevant, resume_text)
+        return (ranked or relevant)[:limit]
+    seen = {str(job.id) for job in relevant}
+    pool = [
+        job
+        for job in db.scalars(
+            select(Job)
+            .options(noload(Job.company))
+            .where(Job.is_active.is_(True))
+            .order_by(Job.posted_at.desc().nulls_last(), Job.id)
+            .limit(POOL_SCAN_LIMIT)
+        ).all()
+        if str(job.id) not in seen
+    ]
+    extra = [job for job in pool if role_matches(job.title, roles)]
+    if len(relevant) + len(extra) < MIN_TARGET_JOBS:
+        rest = [job for job in pool if not role_matches(job.title, roles)]
+        admitted = semantic_title_matches([job.title or "" for job in rest], roles)
+        if admitted:
+            extra += [job for job, ok in zip(rest, admitted) if ok]
+    if extra:
+        names = dict(db.execute(select(Company.id, Company.name).where(Company.id.in_({j.company_id for j in extra}))).all())
+        candidates = relevant + [TargetJob.from_job(job, None, company_name=names.get(job.company_id, "")) for job in extra]
+    else:
+        candidates = relevant
+    ranked = rank_by_similarity(candidates, resume_text)
+    if ranked is not None:
+        return ranked[:top_n]
+    # Deterministic fallback (no embeddings): the user's own jobs, then the newest pool jobs.
+    return candidates[: max(len(relevant), top_n)]
+
+
+def resume_rank_text(resume: Resume) -> str:
+    """What the resume "is about" for ranking: the extracted text, else its parsed fields."""
+    text = (resume.text_content or "").strip()
+    if text:
+        return text
+    parsed = resume.parsed_data if isinstance(resume.parsed_data, dict) else {}
+    parts = [_text(parsed.get("summary")), ", ".join(_str_list(parsed.get("skills")))]
+    for entry in _as_list(parsed.get("experience")):
+        if isinstance(entry, dict):
+            parts += [_text(entry.get("title")), _text(entry.get("description"))]
+    return "\n".join(p for p in parts if p)
+
+
+def _load_user_target_jobs(db: Session, user_id: uuid.UUID, *, top_n: int = DEFAULT_TOP_N) -> list[TargetJob]:
     """Top-N jobs by stored match score plus every job the user queued or applied to.
 
     The company priority is the one already resolved for that user: ``JobMatch`` first
@@ -1340,6 +1647,16 @@ def clear_cache() -> None:
         _CACHE.clear()
 
 
+def invalidate_resume(resume_id: uuid.UUID | str) -> int:
+    """Drop every cached result for one resume (any version, any jobs fingerprint)."""
+    key_id = str(resume_id)
+    with _CACHE_LOCK:
+        stale = [key for key in _CACHE if key[0] == key_id]
+        for key in stale:
+            _CACHE.pop(key, None)
+    return len(stale)
+
+
 # --------------------------------------------------------------------------- public API
 
 
@@ -1376,6 +1693,12 @@ def version_history(
     return history
 
 
+def target_roles(resume: Resume, inputs: MatchInputs) -> list[str]:
+    """The roles a resume is aimed at: its own target role, else the user's preferred titles."""
+    own = (resume.target_role or "").strip()
+    return [own] if own else list(inputs.desired_titles)
+
+
 def build_recommendations(
     db: Session,
     user_id: uuid.UUID,
@@ -1386,8 +1709,10 @@ def build_recommendations(
     today: date | None = None,
 ) -> ResumeRecommendations:
     """Recommendations for ``resume`` (ownership already checked by the caller)."""
-    targets = load_target_jobs(db, user_id, top_n=top_n)
     inputs = load_match_inputs(db, user_id)
+    targets = load_target_jobs(
+        db, user_id, top_n=top_n, roles=target_roles(resume, inputs), resume_text=resume_rank_text(resume)
+    )
     key = cache_key(resume, jobs_fingerprint(targets, inputs))
     if not refresh:
         cached = cache_get(key)
@@ -1422,8 +1747,10 @@ def build_version_history(
     today: date | None = None,
 ) -> list[VersionScore]:
     """Only the history; served from a warm recommendations cache, never calls the LLM."""
-    targets = load_target_jobs(db, user_id, top_n=top_n)
     inputs = load_match_inputs(db, user_id)
+    targets = load_target_jobs(
+        db, user_id, top_n=top_n, roles=target_roles(resume, inputs), resume_text=resume_rank_text(resume)
+    )
     cached = cache_get(cache_key(resume, jobs_fingerprint(targets, inputs)))
     if cached is not None:
         return cached.version_history
@@ -1442,6 +1769,7 @@ __all__ = [
     "cache_key",
     "clear_cache",
     "has_outcome",
+    "invalidate_resume",
     "jobs_fingerprint",
     "match_score",
     "overall_score",

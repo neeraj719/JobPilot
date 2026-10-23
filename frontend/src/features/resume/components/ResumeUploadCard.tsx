@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { ACCEPTED_RESUME_TYPES, MAX_RESUME_BYTES, formatBytes, useUploadResume } from '@/features/resume/api'
+import { TargetRoleSelect } from '@/features/resume/components/TargetRoleSelect'
 
 export interface ResumeUploadCardProps {
   /** True when the account has no resume yet — the copy changes to a first-run nudge. */
@@ -168,11 +169,10 @@ export function ResumeUploadCard({ isFirstResume, onUploaded }: ResumeUploadCard
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="resume-target-role">Target role</Label>
-              <Input
+              <TargetRoleSelect
                 id="resume-target-role"
                 value={targetRole}
-                onChange={(event) => setTargetRole(event.target.value)}
-                placeholder="Backend Engineer"
+                onChange={(role) => setTargetRole(role ?? '')}
                 disabled={upload.isPending}
               />
             </div>

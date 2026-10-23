@@ -186,8 +186,15 @@ def test_missing_skill_not_raised_when_the_skill_is_listed_under_an_alias():
 
 
 def test_keyword_gap_flags_frequent_terms_missing_from_the_resume():
-    jobs = [target(i, description=f"Join our payments platform team {i}. Observability matters.") for i in range(3)]
-    jobs.append(target(3, description="Internal tooling."))
+    descriptions = [
+        "Payments platform with strong observability.",
+        "We build payments infrastructure; observability is key.",
+        "Observability for our payments ledger.",
+        "Scale payments APIs and observability.",
+        "Payments reconciliation and observability dashboards.",
+    ]
+    jobs = [target(i, description=d) for i, d in enumerate(descriptions)]
+    jobs.append(target(5, description="Internal tooling."))
     [gap] = by_category(analyze(parsed_resume(), jobs), "KEYWORD_GAP")
     terms = {e.label.split(":")[0] for e in gap.evidence}
     assert {"payments", "observability"} <= terms
@@ -699,3 +706,46 @@ def test_no_target_jobs_still_returns_resume_advice(client: TestClient, db: Sess
     assert body["target_summary"]["jobs_analysed"] == 0
     assert body["score_projection"]["current_average"] == 0
     assert not [r for r in body["recommendations"] if r["category"] in {"MISSING_SKILL", "KEYWORD_GAP"}]
+
+
+def test_keyword_gap_is_silent_with_too_few_jobs_to_tell_keywords_from_filler():
+    jobs = [target(i, description="Ownership mindset, raise the bar, partner with teams.") for i in range(4)]
+    assert not by_category(analyze(parsed_resume(), jobs), "KEYWORD_GAP")
+
+
+def test_polish_keeps_the_specific_detail_and_drops_advice_as_copy_text(monkeypatch):
+    from app.modules.ai.schemas import PolishedRecommendation, PolishedRecommendations
+
+    from app.modules.resumes.schemas import Recommendation
+
+    analysis = analyze(parsed_resume(summary="Engineer."), [target(0)])
+    skill_rec = Recommendation(
+        id="missing-skill-kubernetes", category="MISSING_SKILL", priority="HIGH",
+        title="Add Kubernetes if you have used it", detail="Kubernetes is required by 3 of 5 target jobs (60%).",
+    )
+    analysis.recommendations.append(skill_rec)
+    original = {r.id: r.detail for r in analysis.recommendations}
+
+    def fake(payload, recs):
+        return PolishedRecommendations(
+            items=[
+                PolishedRecommendation(id="weak-summary", detail="vague", suggested_text="Add a summary that shows your value."),
+                PolishedRecommendation(id=skill_rec.id, detail="vague", suggested_text="Kubernetes"),
+            ]
+        )
+
+    monkeypatch.setattr(rec.ai_tasks, "polish_resume_recommendations", fake)
+    recs, polished, _ = rec.polish(analysis)
+    by_id = {r.id: r for r in recs}
+    assert by_id["weak-summary"].detail == original["weak-summary"]  # deterministic detail kept
+    assert by_id["weak-summary"].suggested_text is None  # advice is not resume text
+    assert by_id[skill_rec.id].suggested_text is None  # no copy box for advice-only items
+
+
+def test_target_jobs_follow_the_role_and_ignore_unrelated_matches():
+    assert rec.role_matches("Senior Full Stack Engineer", ["Full Stack Engineer"])
+    assert not rec.role_matches("DevOps Engineer", ["Full Stack Engineer"])
+    assert not rec.role_matches("Data Analyst", ["Full Stack Engineer", "Backend Engineer"])
+    assert rec.role_matches("Software Engineer, Payments", ["Software Engineer II"])
+    assert rec.role_matches("Back-end Developer (Node.js)", ["Backend Engineer"])
+    assert not rec.role_matches("Frontend Engineer", ["Backend Engineer"])

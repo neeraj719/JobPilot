@@ -20,11 +20,12 @@ export function Topbar({ title, onOpenMenu, className }: TopbarProps) {
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-6',
+        'sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 sm:px-6',
         className,
       )}
     >
-      <Button variant="ghost" size="icon" className="lg:hidden" onClick={onOpenMenu} aria-label="Open navigation">
+      {/* Mobile and tablet: open the slide-in drawer. */}
+      <Button variant="ghost" size="icon" className="-ml-2 shrink-0 lg:hidden" onClick={onOpenMenu} aria-label="Open navigation">
         <Menu />
       </Button>
 

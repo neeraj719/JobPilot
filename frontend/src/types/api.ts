@@ -1693,3 +1693,55 @@ export interface CompanySuggestions {
   show_quick_start: boolean
 }
 // --- end company board detection ---
+
+// --- resume apply suggestions ---
+/* `resumes/schemas.py::ApplyPlan` / `ApplyRequest` / `ApplyResult`. Edits `parsed_data`; the uploaded file is untouched. */
+
+export type ResumeChangeKind = 'ADD_SKILL' | 'REPLACE_SUMMARY' | 'REPLACE_BULLET'
+
+export interface ResumeApplicableChange {
+  /** Recommendation id; bullet changes add `--bullet-N`. */
+  id: string
+  recommendation_id: string
+  kind: ResumeChangeKind
+  title: string
+  before: string | null
+  after: string
+  /** Field path in `parsed_data`, e.g. `skills`, `summary`, `experience[1].description`. */
+  target: string
+  selected_by_default: boolean
+  requires_confirmation: boolean
+  confirmation_label: string | null
+  has_placeholders: boolean
+  estimated_score_gain: number
+}
+
+export interface ResumeManualItem {
+  recommendation_id: string
+  title: string
+  detail: string
+  category: RecommendationCategory
+  priority: RecommendationPriority
+}
+
+/** `GET /resumes/{id}/recommendations/apply-plan` */
+export interface ResumeApplyPlan {
+  resume_id: UUID
+  resume_version: number
+  changes: ResumeApplicableChange[]
+  manual: ResumeManualItem[]
+}
+
+/** Body of `POST /resumes/{id}/recommendations/apply`. */
+export interface ResumeApplyRequest {
+  resume_version: number
+  changes: { id: string; after?: string }[]
+}
+
+export interface ResumeApplyResult {
+  resume: ResumeRead
+  applied: { id: string; kind: ResumeChangeKind; title: string }[]
+  skipped: { id: string; reason: string }[]
+  recommendations: ResumeRecommendations
+}
+// --- end resume apply suggestions ---

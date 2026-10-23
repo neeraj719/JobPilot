@@ -231,6 +231,32 @@ def test_reparse_reruns_extraction(api: TestClient) -> None:
     assert {"React", "Node.js", "PostgreSQL"} <= set(body["parsed_data"]["skills"])
 
 
+def test_reparse_saves_a_new_version_so_edits_can_be_restored(api: TestClient) -> None:
+    resume = _upload(api, build_pdf(), "cv.pdf").json()
+    edited = api.put(f"{RESUMES}/{resume['id']}/parsed-data", json={"name": "Edited", "skills": ["React"]}).json()
+    assert edited["current_version"] == 2
+
+    body = api.post(f"{RESUMES}/{resume['id']}/reparse").json()
+    assert body["current_version"] == 3
+    versions = api.get(f"{RESUMES}/{resume['id']}/versions").json()
+    by_number = {v["version_number"]: v for v in versions}
+    assert by_number[3]["note"] == "Re-parsed from the uploaded file"
+    assert by_number[2]["parsed_data"]["name"] == "Edited"  # the edit is still restorable
+
+    again = api.post(f"{RESUMES}/{resume['id']}/reparse").json()
+    assert again["current_version"] == 3  # an unchanged re-parse adds no version
+
+
+def test_reparse_keeps_skills_the_user_added(api: TestClient) -> None:
+    resume = _upload(api, build_pdf(), "cv.pdf").json()
+    skills = list(resume["parsed_data"]["skills"]) + ["Kubernetes", "Linux"]
+    api.put(f"{RESUMES}/{resume['id']}/parsed-data", json={**resume["parsed_data"], "skills": skills})
+
+    body = api.post(f"{RESUMES}/{resume['id']}/reparse").json()
+    assert {"Kubernetes", "Linux"} <= set(body["parsed_data"]["skills"])
+    assert {"React", "Node.js", "PostgreSQL"} <= set(body["parsed_data"]["skills"])
+
+
 # --------------------------------------------------------------------------- download / delete
 
 

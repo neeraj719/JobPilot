@@ -166,8 +166,89 @@ class ResumeRecommendations(BaseModel):
     cached: bool = False
 
 
+# --------------------------------------------------------------------------- apply suggestions
+
+ChangeKind = Literal["ADD_SKILL", "REPLACE_SUMMARY", "REPLACE_BULLET"]
+
+
+class ApplicableChange(BaseModel):
+    """One edit to ``parsed_data`` that a recommendation can make, for the user to review."""
+
+    #: The recommendation id; bullet changes add ``--bullet-N`` (one change per weak bullet).
+    id: str
+    recommendation_id: str
+    kind: ChangeKind
+    title: str
+    before: str | None = None
+    after: str
+    #: Field path inside ``parsed_data``: ``skills``, ``summary``, ``experience[1].description``.
+    target: str
+    selected_by_default: bool = False
+    requires_confirmation: bool = False
+    confirmation_label: str | None = None
+    #: ``after`` still holds a ``[...]`` placeholder the user must replace before applying.
+    has_placeholders: bool = False
+    #: Points on the average match score across the target jobs (skills only move it).
+    estimated_score_gain: float = 0.0
+
+
+class ManualItem(BaseModel):
+    """Advice the app cannot apply for the user (it needs their own work or facts)."""
+
+    recommendation_id: str
+    title: str
+    detail: str
+    category: RecommendationCategory
+    priority: RecommendationPriority
+
+
+class ApplyPlan(BaseModel):
+    resume_id: uuid.UUID
+    #: Send back in :class:`ApplyRequest`; a newer version makes the plan stale (409).
+    resume_version: int
+    changes: list[ApplicableChange] = Field(default_factory=list)
+    manual: list[ManualItem] = Field(default_factory=list)
+
+
+class ApplyChangeRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=200)
+    #: Edited text for REPLACE_SUMMARY / REPLACE_BULLET; ignored for ADD_SKILL.
+    after: str | None = Field(default=None, max_length=4000)
+
+
+class ApplyRequest(BaseModel):
+    resume_version: int = Field(ge=1)
+    changes: list[ApplyChangeRequest] = Field(min_length=1, max_length=100)
+
+
+class AppliedChange(BaseModel):
+    id: str
+    kind: ChangeKind
+    title: str
+
+
+class SkippedChange(BaseModel):
+    id: str
+    reason: str
+
+
+class ApplyResult(BaseModel):
+    resume: ResumeRead
+    applied: list[AppliedChange] = Field(default_factory=list)
+    skipped: list[SkippedChange] = Field(default_factory=list)
+    recommendations: ResumeRecommendations
+
+
 __all__ = [
+    "AppliedChange",
+    "ApplicableChange",
+    "ApplyChangeRequest",
+    "ApplyPlan",
+    "ApplyRequest",
+    "ApplyResult",
     "CertificationEntry",
+    "ManualItem",
+    "SkippedChange",
     "EducationEntry",
     "ExperienceEntry",
     "Links",

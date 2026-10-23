@@ -484,3 +484,121 @@ def test_tasks_tolerate_a_missing_candidate() -> None:
     result = tasks.generate_answer("What is your phone number?", "PHONE", [], JOB, None)
     assert result.needs_user_input is True
     assert uuid.UUID(JOB["id"])  # sanity: the fixture id stays a valid UUID
+
+
+
+# --------------------------------------------------------------------------- resume parse merge
+
+
+def test_llm_parse_only_fills_gaps_and_never_drops_rule_based_fields():
+    text = "\n".join(
+        [
+            "NEERAJ MISHRA",
+            "neeraj@example.com | +91 9800000000",
+            "SUMMARY",
+            "Full-stack developer building React apps.",
+            "SKILLS",
+            "React, Node.js, Docker",
+            "EXPERIENCE",
+            "Software Developer, Acme (2023 - Present)",
+            "- Built React apps.",
+        ]
+    )
+    rule = ParsedResume(
+        name="NEERAJ MISHRA", email="neeraj@example.com", summary="Full-stack developer building React apps.",
+        skills=["React", "Node.js"], experience=[{"title": "Software Developer", "company": "Acme"}],
+    )
+    llm = ParsedResume(
+        name=None, email=None, summary="",
+        skills=["React", "Docker", "Kubernetes", "AI Full-Stack Developer Engineer Lead", "docker"],
+        experience=[{"title": "Software Developer"}, {"title": "Software Developer"}],
+        certifications=[{"name": "AWS"}],
+    )
+    merged = tasks.merge_parsed_resume(rule, llm, text)
+    assert merged.name == "NEERAJ MISHRA" and merged.email == "neeraj@example.com"
+    assert merged.summary == "Full-stack developer building React apps."
+    assert len(merged.experience) == 1  # the LLM's split into several jobs is ignored
+    # LLM skills are added only when they appear in the text, and phrases are dropped
+    assert merged.skills == ["React", "Node.js", "Docker"]
+    assert merged.certifications and merged.certifications[0].name == "AWS"  # a real gap is filled
+
+
+def test_llm_summary_is_used_only_when_it_is_in_the_document():
+    text = "\n".join(["JANE DOE", "Backend engineer who designs payment APIs in Python.", "SKILLS", "Python"])
+    rule = ParsedResume(name="JANE DOE", skills=["Python"])
+    found = tasks.merge_parsed_resume(rule, ParsedResume(summary="Backend engineer who designs payment APIs in Python."), text)
+    assert found.summary == "Backend engineer who designs payment APIs in Python."
+    invented = tasks.merge_parsed_resume(rule, ParsedResume(summary="Visionary leader driving global transformation."), text)
+    assert not invented.summary
+
+
+
+def test_company_on_its_own_line_with_city_and_dated_project_headings():
+    from app.modules.ai.resume_parser import parse_resume_text
+
+    text = "\n".join(
+        [
+            "JANE DOE",
+            "+91-9000000000 | jane@example.com",
+            "Experience",
+            "Northwind Systems Limited Gurugram, India",
+            "Software Developer Nov 2024 - Present",
+            "Leading the project - guiding a team of developers through planning and code reviews.",
+            "Engineered platforms with microservices and REST APIs.",
+            "Projects",
+            "LedgerX (Payments Ledger System) March 2026 - Present",
+            "Developed a full-stack platform using React.js and Node.js.",
+            "Leading and mentoring the project team - assigning tasks and reviewing code.",
+            "Atlas (Search Service) Jul 2025 - Dec 2025",
+            "Built a search system with FastAPI and PostgreSQL.",
+        ]
+    )
+    parsed = parse_resume_text(text)
+    [job] = parsed["experience"]
+    assert job["company"] == "Northwind Systems Limited"
+    assert job["title"] == "Software Developer"
+    assert "Leading the project" in job["description"]
+    names = [p["name"] for p in parsed["projects"]]
+    assert names == ["LedgerX (Payments Ledger System)", "Atlas (Search Service)"]
+    assert "Leading and mentoring" in parsed["projects"][0]["description"]
+
+
+
+def test_llm_skills_must_be_known_or_listed_and_aliases_collapse():
+    text = "\n".join(
+        [
+            "JANE DOE",
+            "Summary",
+            "Builds scalable microservices and AI-driven solutions with React.js.",
+            "Technical Skills",
+            "Frontend: React.js, Redux, jQuery",
+            "Leadership & Tools: Team Leadership, Code Reviews, Postman",
+        ]
+    )
+    rule = ParsedResume(name="JANE DOE", skills=["React", "Redux"])
+    llm = ParsedResume(skills=["React.js", "scalable microservices", "AI-driven solutions", "jQuery", "Postman", "Code Reviews"])
+    merged = tasks.merge_parsed_resume(rule, llm, text)
+    assert "React.js" not in merged.skills  # collapsed into React
+    assert "scalable microservices" not in merged.skills and "AI-driven solutions" not in merged.skills
+    assert {"jQuery", "Postman", "Code Reviews"} <= set(merged.skills)  # listed in a skills line
+
+
+
+def test_every_item_of_a_skills_line_is_read_without_the_llm():
+    text = "\n".join(
+        [
+            "JANE DOE",
+            "Technical Skills",
+            "Frontend: React.js, Next.js, jQuery",
+            "AI/ML: RAG, NLP, LLM Integration (OpenAI API, LangChain), Chatbots",
+            "Cloud & DevOps: AWS (EC2, Lambda, S3, RDS), Docker, CI/CD Pipelines",
+            "Leadership & Tools: Team Leadership, Code Reviews, GitHub",
+            "Graduated among the top 5% of the batch, with honours, in 2024.",
+        ]
+    )
+    parsed = tasks.parse_resume(text)  # mock provider: rules only
+    skills = set(parsed.skills)
+    assert {"jQuery", "RAG", "Chatbots", "Team Leadership", "Code Reviews", "GitHub", "Docker"} <= skills
+    assert "React" in skills and "React.js" not in skills  # alias collapsed
+    assert not any("(" in s or ")" in s for s in skills)  # "AWS (EC2, ...)" is one item without details
+    assert not any("Graduated" in s for s in skills)

@@ -231,7 +231,14 @@ def update_resume(
     return resume
 
 
-def update_parsed_data(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID, parsed: ParsedResume) -> Resume:
+def update_parsed_data(
+    db: Session,
+    user_id: uuid.UUID,
+    resume_id: uuid.UUID,
+    parsed: ParsedResume,
+    *,
+    note: str = "Edited by user",
+) -> Resume:
     """Save user-edited parsed data as a **new version** of the resume."""
     resume = get_resume(db, user_id, resume_id)
     resume.parsed_data = parsed.model_dump(mode="json")
@@ -240,7 +247,7 @@ def update_parsed_data(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID, pa
     resume.parsed_at = utcnow()
     resume.current_version = int(resume.current_version or 1) + 1
     db.add(resume)
-    _add_version(db, resume, note="Edited by user")
+    _add_version(db, resume, note=note)
     audit(
         db,
         action="resume.parsed_data_updated",
@@ -253,7 +260,7 @@ def update_parsed_data(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID, pa
 
 
 def reparse(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> Resume:
-    """Re-run extraction + parsing on the stored file (does not create a version)."""
+    """Re-run extraction + parsing on the stored file; a changed result is saved as a new version."""
     resume = get_resume(db, user_id, resume_id)
     path = Path(resume.file_path)
     if not path.is_file():
@@ -264,7 +271,29 @@ def reparse(db: Session, user_id: uuid.UUID, resume_id: uuid.UUID) -> Resume:
         logger.warning("Reparse failed: file missing for resume %s", resume.id)
         return resume
 
+    before = resume.parsed_data or {}
     _parse_into(resume, path.read_bytes(), path.suffix.lstrip("."))
+    if resume.parse_status == ResumeParseStatus.PARSED:
+        # Skills the user added (by hand or through "Apply suggestions") are confirmed facts that
+        # the file does not contain; a re-parse must not silently drop them.
+        fresh = dict(resume.parsed_data or {})
+        skills = [str(s) for s in fresh.get("skills") or []]
+        seen = {s.lower() for s in skills}
+        kept = [str(s) for s in before.get("skills") or [] if str(s).strip() and str(s).lower() not in seen]
+        if kept:
+            fresh["skills"] = skills + kept
+            resume.parsed_data = fresh
+    if resume.parse_status == ResumeParseStatus.PARSED and (resume.parsed_data or {}) != before:
+        # Saved as a new version, so a re-parse never silently replaces the user's edits:
+        # the previous version stays in the history and can be restored.
+        resume.current_version = int(resume.current_version or 1) + 1
+        _add_version(db, resume, note="Re-parsed from the uploaded file")
+        try:
+            from app.modules.resumes.recommendations import invalidate_resume
+
+            invalidate_resume(resume.id)
+        except Exception:  # noqa: BLE001 - a stale cache entry expires on its own
+            logger.debug("Could not invalidate recommendations for %s", resume.id)
     db.add(resume)
     audit(
         db,

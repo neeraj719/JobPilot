@@ -18,8 +18,11 @@ from app.core.deps import get_current_user
 from app.core.exceptions import NotFoundError
 from app.models.enums import Actor
 from app.models.user import User
-from app.modules.resumes import service, storage
+from app.modules.resumes import apply, service, storage
 from app.modules.resumes.schemas import (
+    ApplyPlan,
+    ApplyRequest,
+    ApplyResult,
     ParsedResume,
     ResumeRead,
     ResumeRecommendations,
@@ -151,6 +154,46 @@ def get_recommendation_history(
     user: User = Depends(get_current_user),
 ) -> list[VersionScore]:
     return service.get_recommendation_history(db, user.id, resume_id)
+
+
+@router.get(
+    "/{resume_id}/recommendations/apply-plan",
+    response_model=ApplyPlan,
+    summary="Suggestions that can be applied to the resume",
+)
+def get_apply_plan(
+    resume_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ApplyPlan:
+    """Applicable changes (skills, summary, bullets) and the advice that needs the user's own work.
+
+    Changes edit the structured resume data (``parsed_data``) that matching, autofill and
+    the recommendations read. The uploaded original file (PDF/DOCX) is never modified.
+    """
+    return apply.build_apply_plan(db, user.id, resume_id)
+
+
+@router.post(
+    "/{resume_id}/recommendations/apply",
+    response_model=ApplyResult,
+    summary="Apply selected suggestions and save a new resume version",
+)
+def apply_suggestions(
+    resume_id: uuid.UUID,
+    payload: ApplyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ApplyResult:
+    """Apply the chosen plan changes to ``parsed_data`` and save them as a new version.
+
+    Only the ids sent are applied, each checked against a plan rebuilt on the server.
+    Errors: 409 ``stale_plan`` when ``resume_version`` is not the current version; 422
+    ``unknown_change``, ``placeholder_left``, ``invented_number`` (summary text with a
+    number the resume does not contain) or ``empty_text``, with ``details.id`` naming the
+    change. The uploaded original file (PDF/DOCX) is not modified.
+    """
+    return apply.apply_changes(db, user.id, resume_id, payload)
 
 
 @router.get("/{resume_id}/download", summary="Download the original file")

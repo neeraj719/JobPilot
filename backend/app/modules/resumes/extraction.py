@@ -20,9 +20,46 @@ class ExtractionError(Exception):
     """Raised when a document's text cannot be read."""
 
 
+#: Typographic characters that resumes are full of, mapped to plain text. Word and PDF
+#: exporters emit em/en dashes, curly quotes, non-breaking and zero-width spaces, soft
+#: hyphens and a zoo of bullet glyphs (Symbol/Wingdings private-use code points included);
+#: the rules downstream (bullet splitting, keyword matching, number checks) and the UI want
+#: one plain form. U+FFFD (a character some decoder already lost) carries nothing and is
+#: dropped.
+_CHAR_MAP: dict[int, str | None] = {
+    **{ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2212\ufe58\ufe63\uff0d"},
+    **{ord(c): " - " for c in "\u2014\u2015"},
+    **{ord(c): "'" for c in "\u2018\u2019\u201a\u201b\u2032"},
+    **{ord(c): '"' for c in "\u201c\u201d\u201e\u201f\u2033"},
+    **{
+        ord(c): "\u2022"
+        for c in "\u25aa\u25cf\u25e6\u2023\u2043\u2219\u25a0\u25a1\u25c6\u2666\u27a2\u2794\u25ba\u2713\u2714"
+        "\uf0b7\uf0a7\uf0d8\uf076\uf0fc"
+    },
+    **{ord(c): " " for c in "\u00a0\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"},
+    **{ord(c): None for c in "\u00ad\u200b\u200c\u200d\u2060\ufeff\ufffd"},
+    ord("\u2026"): "...",
+}
+#: A bullet glyph at the start of a line becomes the plain marker "- ".
+_LEADING_BULLET_RE = re.compile(r"^[ \t]*[\u2022\u00b7][ \t]*", re.MULTILINE)
+#: A bullet glyph inside a line separates two items; keep it as " \u2022 " (``split_bullets`` splits on it).
+_INLINE_BULLET_RE = re.compile(r"[ \t]*\u2022[ \t]*")
+#: Control characters other than tab and newline (form feeds, vertical tabs, NULs from PDFs).
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def normalize_text(text: str) -> str:
+    """Plain-text form of typographic characters (see :data:`_CHAR_MAP`)."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _CONTROL_RE.sub(" ", text.translate(_CHAR_MAP))
+    text = _LEADING_BULLET_RE.sub("- ", text)
+    return _INLINE_BULLET_RE.sub(" \u2022 ", text)
+
+
 def _tidy(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace(" ", " ")
+    text = normalize_text(text)
     text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" +\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -101,5 +138,6 @@ __all__ = [
     "extract_pdf_text",
     "extract_text",
     "extract_text_from_path",
+    "normalize_text",
     "try_extract_text",
 ]

@@ -64,11 +64,20 @@ export function ParsedDataPanel({ resume }: ParsedDataPanelProps) {
   })
 
   const onReparse = async () => {
+    if ((resume.current_version ?? 1) > 1 && !window.confirm('Re-running extraction reads your uploaded file again and replaces the information below, including edits and applied suggestions. The current version stays in the history so you can restore it. Continue?')) return
     try {
+      const previous = resume.current_version ?? 1
       const updated = await reparse.mutateAsync(resume.id)
+      const saved = (updated.current_version ?? 1) > previous
       toast[updated.parse_status === 'PARSED' ? 'success' : 'warning'](
         updated.parse_status === 'PARSED' ? 'Extraction re-run' : 'Extraction did not finish',
-        { description: updated.parse_error ?? 'The fields below now show the fresh result.' },
+        {
+          description:
+            updated.parse_error ??
+            (saved
+              ? `Saved as version ${updated.current_version}. Version ${previous} is kept in the history.`
+              : 'Nothing changed.'),
+        },
       )
     } catch (error) {
       toast.error('Could not re-run extraction', { description: errorMessage(error) })

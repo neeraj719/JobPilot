@@ -130,22 +130,27 @@ function RecommendationItem({
 export interface RecommendationListProps {
   resumeId: string
   items: Recommendation[]
+  /** Rendered at the top of the list (the "Apply suggestions" button). */
+  action?: React.ReactNode
 }
 
 /** Recommendations grouped by priority, with a local "Mark as done" toggle. */
-export function RecommendationList({ resumeId, items }: RecommendationListProps) {
+export function RecommendationList({ resumeId, items, action }: RecommendationListProps) {
   const { done, toggle } = useDoneRecommendations(resumeId)
   const remaining = items.filter((item) => !done.has(item.id)).length
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Recommendations</CardTitle>
-        <CardDescription>
-          {items.length === 0
-            ? 'Nothing to fix right now.'
-            : `${remaining} of ${items.length} still open. Every suggestion comes from your resume and target jobs; only change what is true.`}
-        </CardDescription>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+        <div className="min-w-0 space-y-1.5">
+          <CardTitle className="text-base">Recommendations</CardTitle>
+          <CardDescription>
+            {items.length === 0
+              ? 'Nothing to fix right now.'
+              : `${remaining} of ${items.length} still open. Every suggestion comes from your resume and target jobs; only change what is true.`}
+          </CardDescription>
+        </div>
+        {action}
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (

@@ -63,7 +63,8 @@ MongoDB Associate Developer (2022)
 
 def _escape_pdf_text(line: str) -> bytes:
     escaped = line.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-    return escaped.encode("latin-1", errors="replace")
+    # The font uses WinAnsiEncoding, which is cp1252: dashes, curly quotes and bullets survive.
+    return escaped.encode("cp1252", errors="replace")
 
 
 def _content_stream(lines: list[str]) -> bytes:

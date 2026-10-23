@@ -219,6 +219,7 @@ export const useAuthStore = create<AuthState>()(
           } catch {
             // A failed logout must never trap the user in the app.
           } finally {
+            forgetSessionHint()
             set({ ...SIGNED_OUT, isBootstrapped: true })
           }
         },
@@ -247,7 +248,7 @@ export const useAuthStore = create<AuthState>()(
         bootstrap: async () => {
           if (get().isBootstrapped) return
           if (!get().accessToken) {
-            if (!get().pendingRoleSelection) {
+            if (!get().pendingRoleSelection && mayHaveSession()) {
               set({ isLoading: true })
               try {
                 // A new tab or a reopened browser: the HttpOnly refresh cookie (if this
@@ -293,6 +294,39 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 )
+
+/*
+ * A per-browser hint that a refresh cookie may exist. Without it, every visit by a signed-out
+ * browser would call /auth/refresh just to get a 401 (the cookie is HttpOnly, so JS cannot
+ * check it directly). Set whenever a session starts, cleared on sign-out.
+ */
+const SESSION_HINT_KEY = 'jobpilot.mayHaveSession'
+
+function mayHaveSession(): boolean {
+  try {
+    return localStorage.getItem(SESSION_HINT_KEY) === '1'
+  } catch {
+    return true // storage blocked: fall back to trying, as before
+  }
+}
+
+function forgetSessionHint(): void {
+  try {
+    localStorage.removeItem(SESSION_HINT_KEY)
+  } catch {
+    /* storage blocked */
+  }
+}
+
+useAuthStore.subscribe((state, previous) => {
+  if (state.accessToken && !previous.accessToken) {
+    try {
+      localStorage.setItem(SESSION_HINT_KEY, '1')
+    } catch {
+      /* storage blocked */
+    }
+  }
+})
 
 // Teach the fetch client how to read/refresh the token without importing the store.
 configureApiAuth({

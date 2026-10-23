@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { cn, formatDate } from '@/lib/utils'
 import { formatBytes } from '@/features/resume/api'
 import type { ResumeParseStatus, ResumeRead } from '@/types/api'
+import { TargetRoleSelect } from '@/features/resume/components/TargetRoleSelect'
 
 export interface ResumeCardProps {
   resume: ResumeRead
@@ -32,6 +33,7 @@ export interface ResumeCardProps {
   busy: boolean
   onSelect: () => void
   onRename: (name: string) => void
+  onRetarget: (role: string | null) => void
   onSetDefault: () => void
   onDownload: () => void
   onReparse: () => void
@@ -50,6 +52,7 @@ export function ResumeCard({
   busy,
   onSelect,
   onRename,
+  onRetarget,
   onSetDefault,
   onDownload,
   onReparse,
@@ -110,9 +113,6 @@ export function ResumeCard({
             ) : (
               <h3 className="truncate text-sm font-semibold">{resume.name}</h3>
             )}
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {resume.target_role ? `Target: ${resume.target_role}` : 'No target role set'}
-            </p>
           </button>
 
           <DropdownMenu>
@@ -150,6 +150,18 @@ export function ResumeCard({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground">Target</span>
+          <TargetRoleSelect
+            size="sm"
+            allowNone
+            value={resume.target_role}
+            onChange={onRetarget}
+            disabled={busy}
+            className="min-w-0 flex-1"
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">

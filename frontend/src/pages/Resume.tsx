@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { FileText, UserRound } from 'lucide-react'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
+import { qk } from '@/lib/queryClient'
 import {
   downloadResume,
   useDeleteResume,
@@ -31,6 +33,7 @@ export default function ResumePage() {
 
   const resumesQuery = useResumes()
   const updateResume = useUpdateResume()
+  const queryClient = useQueryClient()
   const reparse = useReparseResume()
   const deleteResume = useDeleteResume()
 
@@ -72,6 +75,20 @@ export default function ResumePage() {
       }
     })
 
+  const handleRetarget = (resume: ResumeRead, role: string | null) =>
+    withBusy(resume.id, async () => {
+      try {
+        await updateResume.mutateAsync({ id: resume.id, target_role: role ?? '' })
+        // The analysis is aimed at the target role, so it has to be recomputed.
+        void queryClient.invalidateQueries({ queryKey: qk.resumes.recommendations(resume.id) })
+        toast.success(role ? `Target role set to ${role}` : 'Target role cleared', {
+          description: 'Recommendations are being updated for this role.',
+        })
+      } catch (error) {
+        toast.error('Could not update the target role', { description: errorMessage(error) })
+      }
+    })
+
   const handleSetDefault = (resume: ResumeRead) =>
     withBusy(resume.id, async () => {
       try {
@@ -93,6 +110,7 @@ export default function ResumePage() {
 
   const handleReparse = (resume: ResumeRead) =>
     withBusy(resume.id, async () => {
+      if ((resume.current_version ?? 1) > 1 && !window.confirm('Re-running extraction reads your uploaded file again and replaces the information below, including edits and applied suggestions. The current version stays in the history so you can restore it. Continue?')) return
       try {
         const updated = await reparse.mutateAsync(resume.id)
         toast[updated.parse_status === 'PARSED' ? 'success' : 'warning'](
@@ -159,6 +177,7 @@ export default function ResumePage() {
                   busy={busyId === resume.id}
                   onSelect={() => setSelectedId(resume.id)}
                   onRename={(name) => void handleRename(resume, name)}
+                  onRetarget={(role) => void handleRetarget(resume, role)}
                   onSetDefault={() => void handleSetDefault(resume)}
                   onDownload={() => void handleDownload(resume)}
                   onReparse={() => void handleReparse(resume)}
