@@ -432,14 +432,29 @@ export interface ParsedResume {
   }
 }
 
+/** UPLOADED keeps the original file; CREATED / TAILORED only have structured data. */
+export const RESUME_KINDS = ['UPLOADED', 'CREATED', 'TAILORED'] as const
+export type ResumeKind = (typeof RESUME_KINDS)[number]
+
+/** Who produced a resume version: the user, the AI, or the system (upload, re-parse, restore). */
+export const RESUME_CHANGE_SOURCES = ['USER', 'AI', 'SYSTEM'] as const
+export type ResumeChangeSource = (typeof RESUME_CHANGE_SOURCES)[number]
+
 export interface ResumeRead {
   id: UUID
   name: string
   target_role: string | null
   is_default: boolean
-  original_filename: string
-  mime_type: string
-  size_bytes: number
+  kind: ResumeKind
+  template: string
+  source_resume_id: UUID | null
+  archived_at: ISODateString | null
+  draft_saved_at: ISODateString | null
+  /** False for resumes built in the editor: the file columns below are null then. */
+  has_file: boolean
+  original_filename: string | null
+  mime_type: string | null
+  size_bytes: number | null
   parse_status: ResumeParseStatus
   parse_error: string | null
   parsed_at: ISODateString | null
@@ -449,13 +464,12 @@ export interface ResumeRead {
   updated_at: ISODateString
 }
 
-/** NOTE: shape inferred from the `ResumeVersion` model — confirm against OpenAPI. */
 export interface ResumeVersionRead {
   id: UUID
-  /** Confirmed against `resumes/schemas.py::ResumeVersionRead`. */
-  resume_id?: UUID
+  resume_id: UUID
   version_number: number
   note: string | null
+  change_source: ResumeChangeSource
   parsed_data: ParsedResume | Record<string, never>
   created_at: ISODateString
 }

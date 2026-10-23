@@ -2,7 +2,7 @@
 
 PostgreSQL 18 in production and in the test suite, SQLite for the no-Docker local run (all
 column types are portable: `Uuid`, `JSON`, `DateTime(timezone=True)`, string-backed enums).
-28 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
+35 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
 Migrations: Alembic (`backend/alembic/versions`). Models: `backend/app/models/*.py`.
 Enums: `backend/app/models/enums.py`.
 
@@ -81,7 +81,7 @@ index there would cost a scan and buy nothing.
 
 ### 4. Every link is a uuid foreign key
 
-28 uuid primary keys, 38 uuid foreign keys, no natural or composite keys between tables.
+35 uuid primary keys, 58 uuid foreign keys (plus the `created_by` / `updated_by` pair on every table), no natural or composite keys between tables.
 
 **One junction table per many-to-many relationship, named after both sides**
 (`user_roles`). **One-to-many keys live on the owning row**, not in a shared table: a future
@@ -198,6 +198,13 @@ users ──N:M── roles   (through user_roles)
   │ ──1:1── email_integrations
   │ ──1:N── company_preferences ──N:1── companies
   │ ──1:N── resumes ──1:N── resume_versions
+  │           └──N:1── resumes (source_resume_id: a TAILORED copy → its source)
+  │ ──1:N── job_targets ──1:N── job_description_snapshots
+  │           │ ──N:1── resumes (source / tailored), applications?, jobs?, companies?
+  │           └──1:N── ats_analyses ──1:N── optimization_suggestions
+  │ ──1:1── ai_provider_settings
+  │ ──1:N── ai_provider_credentials (one live row per provider)
+  │ ──1:N── ai_usage_events
   │ ──1:N── connected_accounts
   │ ──1:N── browser_sessions
   │ ──1:N── notifications
@@ -217,8 +224,8 @@ skills (taxonomy)
 
 ## Tables
 
-All 28 carry the seven standard columns — `id` / `created_at` / `updated_at` /
-`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 28 carry the
+All 35 carry the seven standard columns — `id` / `created_at` / `updated_at` /
+`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 35 carry the
 `trg_<table>_updated_at` trigger; only what is *extra* is listed.
 
 | Table | Purpose | Notable columns / constraints |
@@ -235,7 +242,14 @@ All 28 carry the seven standard columns — `id` / `created_at` / `updated_at` /
 | `jobs` | one normalised posting | `dedupe_hash` (company+title+location), `apply_url`, `application_type`, skills JSON, salary/experience ranges |
 | `job_sources` | where a job was seen | unique `(source, external_id)`; several rows per job = cross-platform duplicate |
 | `job_matches` | per-user match analysis | unique `(job_id, user_id)`; `match_score` + part scores, `missing_skills`, `explanation` |
-| `resumes` / `resume_versions` | uploaded files + parsed JSON history | `is_default`, `parsed_data`, `parse_status`, `sha256` |
+| `resumes` / `resume_versions` | uploaded, built or tailored resumes + parsed JSON history | `is_default`, `parsed_data`, `parse_status`, `sha256`; `kind` (`UPLOADED` / `CREATED` / `TAILORED`), `template`, `source_resume_id` (self FK, SET NULL), `archived_at`, `draft_data` / `draft_saved_at` (editor autosave); the file columns are null for resumes without an upload; versions carry `change_source` (`USER` / `AI` / `SYSTEM`) — migration `a9c3e5b7d1f0` |
+| `job_targets` | a saved opportunity (company + role) and its workflow status | partial-unique `(user_id, fingerprint)` (sha256 of normalised company, role, URL); `status` (`SAVED` … `ARCHIVED`), `source_resume_id` / `tailored_resume_id`, `submitted_resume_version`, `application_id`, `job_id`, `latest_snapshot_id` / `last_analysis_id` (`use_alter` FKs closing the cycle) — migration `b4d6f8a0c2e4` |
+| `job_description_snapshots` | immutable copy of a JD as read | `source` (`PASTED` / `UPLOADED` / `URL` / `BOARD` / `JOB`), `raw_text` (≤ 50 k chars), `structured` JSON, `text_sha256`, `changed_from_previous`, `changes` |
+| `ats_analyses` | one estimated ATS report: resume version × snapshot | `overall_score`, `category_scores`, `matched_keywords` / `missing_keywords`, `weak_items`, `parse_risks`, `methodology_version`, `weights`, `status` / `progress` (background polish) |
+| `optimization_suggestions` | concrete changes an analysis proposes | `kind`, `before` / `after`, `safe`, `requires_confirmation`, `status` (`PROPOSED` / `APPLIED` / `IGNORED` / `EDITED`), `checks` (guard results) |
+| `ai_provider_settings` | the user's AI provider, per-workflow models, fallback, limits | partial-unique `user_id`; `workflow_models` JSON, `fallback_enabled` (default off), `daily_call_limit`, `monthly_budget_usd` — migration `c7e9b1d3f5a7` |
+| `ai_provider_credentials` | the user's own API keys | partial-unique `(user_id, provider)`; `encrypted_api_key` (Fernet), `key_hint`, `base_url`, `credential_version`, last test status; deleting tombstones the row **and** wipes the ciphertext |
+| `ai_usage_events` | one row per real model call (append-only) | `provider`, `model`, `task`, `workflow`, tokens (`tokens_estimated`), `estimated_cost_usd`, `duration_ms`, `status`; never holds prompt or response text |
 | `skills` | taxonomy with aliases | `normalized_name` unique |
 | `applications` | the tracked application | unique `(user_id, job_id)`; `status` (13 states), `automation_state` (IDLE/RUNNING/SUCCESS/FAILED/PAUSED/REQUIRES_USER/RETRYING), `pause_reason`, `form_snapshot` (detected fields + values shown in the Approval Center), `applied_at`, `external_application_id`, `next_action` |
 | `application_answers` | one row per form question | `question_key` (canonical), `status` ANSWERED/NEEDS_USER_INPUT/SKIPPED, `answer_source`, `is_sensitive`, `rationale` |
@@ -265,8 +279,9 @@ OFFER → OFFER (never downgrades an application).
 
 ## Encryption at rest
 
-`email_integrations.encrypted_credentials`, `connected_accounts.encrypted_credentials` and
-`browser_sessions.encrypted_storage_state` are Fernet-encrypted with `ENCRYPTION_KEY`. Passwords are
+`email_integrations.encrypted_credentials`, `connected_accounts.encrypted_credentials`,
+`browser_sessions.encrypted_storage_state` and `ai_provider_credentials.encrypted_api_key` are
+Fernet-encrypted with `ENCRYPTION_KEY`; no API key is ever returned to the browser. Passwords are
 bcrypt hashes. Refresh tokens are stored as SHA-256 hashes. No plaintext secret is ever persisted.
 
 ## Backups and restore
@@ -320,7 +335,7 @@ make db-restore-check              # or: sh backend/scripts/db_restore_check.sh
 ```
 
 Restores the newest `backups/jobpilot-*.dump` into `jobpilot_restore_check` (dropped first
-if a previous run left it), then asserts it has **28 base tables across the five schemas**
+if a previous run left it), then asserts it has **35 base tables across the five schemas**
 and the **same `alembic_version` as the live `jobpilot` database**. The scratch database is
 dropped on exit whether the check passes or fails. The live database is only read
 (`SELECT version_num FROM alembic_version`). Exit code 0 means PASS. If a migration adds or

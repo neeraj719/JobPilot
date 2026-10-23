@@ -352,3 +352,60 @@ def test_storage_layout_is_per_user(db: Session) -> None:
 def test_sample_fixture_text_is_what_we_think_it_is() -> None:
     assert "Work Experience" in SAMPLE_RESUME_TEXT
     assert "PostgreSQL" in SAMPLE_RESUME_TEXT
+
+
+# --------------------------------------------------------------------------- built from structured data
+
+
+def test_create_resume_from_parsed_has_no_file_and_renders_text(db: Session, owner: User) -> None:
+    from app.models.enums import ResumeChangeSource, ResumeKind
+    from app.modules.ai.schemas import ExperienceEntry, ParsedResume
+
+    parsed = ParsedResume(
+        name="Aarav Sharma",
+        email="aarav@example.com",
+        summary="Backend developer with five years of Python.",
+        skills=["Python", "FastAPI"],
+        experience=[ExperienceEntry(company="Acme", title="Developer", start="2020", end="2024", description="Built billing APIs.")],
+    )
+    resume = service.create_resume_from_parsed(db, owner.id, parsed, name="Built resume", target_role="Python Developer")
+    db.flush()
+
+    assert resume.kind == ResumeKind.CREATED
+    assert resume.file_path is None and resume.original_filename is None and resume.size_bytes is None
+    assert resume.parse_status == ResumeParseStatus.PARSED
+    assert resume.is_default is True  # first resume of the user
+    assert "FastAPI" in (resume.text_content or "") and "Built billing APIs." in (resume.text_content or "")
+    versions = service.list_versions(db, owner.id, resume.id)
+    assert [v.version_number for v in versions] == [1]
+    assert versions[0].change_source == ResumeChangeSource.USER and versions[0].file_path is None
+
+    read = service.resume_to_read(resume)
+    assert read.has_file is False and read.kind == ResumeKind.CREATED and read.template == "classic"
+
+
+def test_tailored_resume_must_point_at_the_users_own_source(db: Session, owner: User) -> None:
+    from app.core.exceptions import NotFoundError
+    from app.models.enums import ResumeChangeSource, ResumeKind
+    from app.modules.ai.schemas import ParsedResume
+
+    source = service.create_resume_from_parsed(db, owner.id, ParsedResume(name="Aarav", skills=["Python"]), name="Source")
+    tailored = service.create_resume_from_parsed(
+        db,
+        owner.id,
+        ParsedResume(name="Aarav", skills=["Python", "Django"]),
+        name="Source - Acme",
+        kind=ResumeKind.TAILORED,
+        source_resume_id=source.id,
+        note="Tailored for Acme",
+        change_source=ResumeChangeSource.AI,
+    )
+    db.flush()
+    assert tailored.source_resume_id == source.id and tailored.source_resume.id == source.id
+    assert service.list_versions(db, owner.id, tailored.id)[0].change_source == ResumeChangeSource.AI
+
+    other = _create_user(db, "other@example.com")
+    with pytest.raises(NotFoundError):
+        service.create_resume_from_parsed(
+            db, other.id, ParsedResume(name="X"), name="Steal", kind=ResumeKind.TAILORED, source_resume_id=source.id
+        )

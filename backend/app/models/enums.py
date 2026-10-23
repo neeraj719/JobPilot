@@ -195,6 +195,22 @@ class ResumeParseStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ResumeKind(StrEnum):
+    """Where a resume's structured data came from."""
+
+    UPLOADED = "UPLOADED"  # parsed from a PDF/DOCX the user uploaded (the file is the original)
+    CREATED = "CREATED"  # built in the editor or imported from structured data; no original file
+    TAILORED = "TAILORED"  # generated from another resume (``source_resume_id``) for a job target
+
+
+class ResumeChangeSource(StrEnum):
+    """Who produced a resume version, so AI edits stay distinguishable from the user's own."""
+
+    USER = "USER"
+    AI = "AI"
+    SYSTEM = "SYSTEM"
+
+
 class EmailProvider(StrEnum):
     GMAIL = "GMAIL"
 
@@ -295,3 +311,52 @@ class BrowserSessionStatus(StrEnum):
     ACTIVE = "ACTIVE"
     EXPIRED = "EXPIRED"
     REVOKED = "REVOKED"
+
+
+# --------------------------------------------------------------------------- ATS optimizer (ats stream)
+
+
+class JobTargetStatus(StrEnum):
+    """Where one saved job opportunity (``media.job_targets``) stands."""
+
+    SAVED = "SAVED"
+    PREPARING = "PREPARING"  # a tailored resume is being prepared
+    READY = "READY"  # tailored resume ready to send
+    APPLIED = "APPLIED"
+    INTERVIEW = "INTERVIEW"
+    OFFER = "OFFER"
+    REJECTED = "REJECTED"
+    ARCHIVED = "ARCHIVED"
+
+
+class JdSource(StrEnum):
+    """How a job-description snapshot was obtained."""
+
+    PASTED = "PASTED"
+    UPLOADED = "UPLOADED"
+    URL = "URL"  # fetched from a posting page the user gave
+    BOARD = "BOARD"  # read from a public ATS board API (Greenhouse, Lever, Ashby, SmartRecruiters)
+    JOB = "JOB"  # copied from a job JobPilot discovered (``unified.jobs``)
+
+
+class AtsAnalysisStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"  # deterministic result stored; the model is polishing the suggestions
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+
+class SuggestionKind(StrEnum):
+    ADD_SKILL = "ADD_SKILL"
+    REPLACE_BULLET = "REPLACE_BULLET"
+    REPLACE_SUMMARY = "REPLACE_SUMMARY"
+    REORDER_SECTION = "REORDER_SECTION"
+    ADD_KEYWORD_CONTEXT = "ADD_KEYWORD_CONTEXT"
+    MANUAL = "MANUAL"
+
+
+class SuggestionStatus(StrEnum):
+    PROPOSED = "PROPOSED"
+    APPLIED = "APPLIED"
+    IGNORED = "IGNORED"
+    EDITED = "EDITED"  # applied with text the user edited

@@ -53,7 +53,10 @@ export function ParsedDataPanel({ resume }: ParsedDataPanelProps) {
 
   const onSubmit = handleSubmit(async (values) => {
     try {
-      const updated = await saveParsed.mutateAsync({ id: resume.id, data: toParsedResume(values) })
+      // Keep the fields this panel does not edit (headline, achievements, section order…,
+      // set in the resume editor): the backend replaces the whole structure on save.
+      const data = { ...(resume.parsed_data as Record<string, unknown>), ...toParsedResume(values) } as typeof resume.parsed_data
+      const updated = await saveParsed.mutateAsync({ id: resume.id, data: data as ReturnType<typeof toParsedResume> })
       reset(parsedResumeDefaults(updated.parsed_data))
       toast.success(`Saved as version ${updated.current_version}`, {
         description: 'The previous version is kept in the history below.',

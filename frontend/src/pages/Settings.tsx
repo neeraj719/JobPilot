@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { cn } from '@/lib/utils'
 import { AccountRolesCard } from '@/features/settings/components/AccountRolesCard'
+import { AiProvidersLinkCard } from '@/features/ai-providers/components/AiProvidersLinkCard'
 import { AiSettingsCard } from '@/features/settings/components/AiSettingsCard'
 import { AutomationSettingsForm } from '@/features/settings/components/AutomationSettingsForm'
 import { ConnectedAccountsCard } from '@/features/settings/components/ConnectedAccountsCard'
@@ -135,7 +136,12 @@ export default function SettingsPage() {
           {activeSection === 'automation' ? <AutomationSettingsForm /> : null}
           {activeSection === 'accounts' ? <ConnectedAccountsCard /> : null}
           {activeSection === 'email' ? <EmailIntegrationCard /> : null}
-          {activeSection === 'ai' ? <AiSettingsCard /> : null}
+          {activeSection === 'ai' ? (
+            <>
+              <AiProvidersLinkCard />
+              <AiSettingsCard />
+            </>
+          ) : null}
           {activeSection === 'notifications' ? <NotificationSettingsCard /> : null}
           {activeSection === 'security' ? <SecurityCard /> : null}
         </div>

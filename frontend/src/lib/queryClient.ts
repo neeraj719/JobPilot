@@ -47,6 +47,39 @@ export const qk = {
     recommendationHistory: (id: string) => ['resumes', id, 'recommendations', 'history'] as const,
     applyPlan: (id: string) => ['resumes', id, 'recommendations', 'apply-plan'] as const,
   },
+  // Resume studio (builder / editor / templates / export / version diff) — owned by the
+  // resume-builder stream; extend inside this namespace only.
+  resumeStudio: {
+    all: ['resume-studio'] as const,
+    templates: ['resume-studio', 'templates'] as const,
+    dashboard: ['resume-studio', 'dashboard'] as const,
+    list: (includeArchived: boolean) => ['resume-studio', 'list', includeArchived] as const,
+    prefill: ['resume-studio', 'prefill'] as const,
+    draft: (id: string) => ['resume-studio', 'draft', id] as const,
+    history: (params: unknown) => ['resume-studio', 'history', params] as const,
+    versionDiff: (id: string, version: number, against: number | null) =>
+      ['resume-studio', 'diff', id, version, against] as const,
+    resumeDiff: (id: string, against: string) => ['resume-studio', 'resume-diff', id, against] as const,
+  },
+  // ATS optimizer (job targets, JD snapshots, analyses, tailoring) — owned by the ats stream.
+  ats: {
+    all: ['ats'] as const,
+    targets: (params: unknown) => ['ats', 'targets', params] as const,
+    target: (id: string) => ['ats', 'targets', id] as const,
+    analysis: (id: string) => ['ats', 'analyses', id] as const,
+    analyses: (params: unknown) => ['ats', 'analyses', 'list', params] as const,
+    methodology: ['ats', 'methodology'] as const,
+    compare: (id: string) => ['ats', 'compare', id] as const,
+    summary: ['ats', 'summary'] as const,
+    lookup: (name: string, role: string) => ['ats', 'lookup', name, role] as const,
+  },
+  // AI provider settings, credentials, model registry, usage — owned by the ai-providers stream.
+  aiProviders: {
+    all: ['ai-providers'] as const,
+    settings: ['ai-providers', 'settings'] as const,
+    models: (provider: string) => ['ai-providers', provider, 'models'] as const,
+    usage: (params: unknown) => ['ai-providers', 'usage', params] as const,
+  },
   companies: {
     all: ['companies'] as const,
     list: (params: unknown) => ['companies', 'list', params] as const,

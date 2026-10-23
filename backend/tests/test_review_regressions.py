@@ -459,7 +459,9 @@ def test_a_dry_run_does_not_consume_the_days_scheduled_slot(auth_client: TestCli
     user = current_user(auth_client, db)
     config = get_config(db, user.id)
     config.enabled = True
-    config.schedule_time = "09:00"
+    # Midnight, so the scheduled slot has already opened whatever the wall clock says (a 09:00
+    # slot is not due yet before 09:00 IST, which made this test fail every early morning).
+    config.schedule_time = "00:00"
     config.timezone = "Asia/Kolkata"
     config.last_run_at = None
     db.flush()

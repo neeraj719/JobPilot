@@ -94,7 +94,8 @@ def _resume_skills(resume: Resume | None) -> list[str]:
 def _default_resume(db: Session, user_id: uuid.UUID) -> Resume | None:
     stmt = (
         select(Resume)
-        .where(Resume.user_id == user_id)
+        # An archived resume is put away on purpose: never score jobs against it.
+        .where(Resume.user_id == user_id, Resume.archived_at.is_(None))
         .order_by(Resume.is_default.desc(), Resume.created_at.desc())
         .limit(1)
     )

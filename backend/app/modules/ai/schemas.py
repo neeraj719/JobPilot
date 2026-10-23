@@ -38,6 +38,9 @@ class ExperienceEntry(BaseModel):
     end: str | None = None
     description: str | None = None
     technologies: list[str] = Field(default_factory=list)
+    # Resume-studio additions (optional; older JSON validates unchanged).
+    location: str | None = None
+    url: str | None = None
 
 
 class EducationEntry(BaseModel):
@@ -56,6 +59,9 @@ class ProjectEntry(BaseModel):
     name: str | None = None
     description: str | None = None
     technologies: list[str] = Field(default_factory=list)
+    # Resume-studio additions (optional; older JSON validates unchanged).
+    location: str | None = None
+    url: str | None = None
 
 
 class CertificationEntry(BaseModel):
@@ -71,6 +77,19 @@ class CertificationEntry(BaseModel):
         if v is None or v == "":
             return None
         return str(v)
+
+
+#: Every section a structured resume can show, in the default display order.
+RESUME_SECTION_KEYS: tuple[str, ...] = (
+    "summary",
+    "skills",
+    "experience",
+    "projects",
+    "education",
+    "certifications",
+    "achievements",
+    "languages",
+)
 
 
 class ParsedResume(BaseModel):
@@ -89,6 +108,35 @@ class ParsedResume(BaseModel):
     certifications: list[CertificationEntry] = Field(default_factory=list)
     total_experience_years: float | None = None
     links: Links = Field(default_factory=Links)
+    # Resume-studio additions (optional; defaults keep older JSON and its consumers unchanged).
+    headline: str | None = None
+    location: str | None = None
+    achievements: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    #: Section keys in display order (``summary, skills, experience, projects, education,
+    #: certifications, achievements, languages``); empty means the template's default order.
+    section_order: list[str] = Field(default_factory=list)
+
+    @field_validator("achievements", "languages", mode="before")
+    @classmethod
+    def _text_list(cls, v: Any) -> list[str]:
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            v = v.splitlines()
+        return [str(item).strip() for item in v if item is not None and str(item).strip()]
+
+    @field_validator("section_order", mode="before")
+    @classmethod
+    def _known_sections(cls, v: Any) -> list[str]:
+        if not v:
+            return []
+        out: list[str] = []
+        for item in v:
+            key = str(item or "").strip().lower()
+            if key in RESUME_SECTION_KEYS and key not in out:
+                out.append(key)
+        return out
 
     @field_validator("total_experience_years", mode="before")
     @classmethod
@@ -264,6 +312,8 @@ class AIStatus(BaseModel):
     provider: str
     model: str | None = None
     configured: bool = False
+    #: What the signed-in user's calls resolve to (AI Model Settings); omitted when unknown.
+    effective: dict[str, Any] | None = None
 
 
 __all__ = [

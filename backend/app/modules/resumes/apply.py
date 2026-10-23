@@ -252,13 +252,41 @@ def bullet_problem(text: str, original: str, facts: _Facts) -> str | None:
     return None
 
 
-def _llm_bullet(bullet: str, entry: dict[str, Any]) -> str | None:
-    """Ask the configured model for a rewrite; ``None`` when it is the mock or anything fails."""
-    try:
-        from app.modules.ai.factory import get_llm_provider
+def bullet_checks(text: str, original: str, facts: _Facts) -> dict[str, bool]:
+    """The three facts-preserving checks the editor shows next to a rewritten bullet.
 
-        provider = get_llm_provider()
-        if getattr(provider, "name", "") == "mock":
+    ``no_new_numbers``: every number is in the original or the candidate's resume/profile;
+    ``no_new_claims``: no skill, tool or claim word (led, award, large-scale…) the original
+    does not make; ``kept_details``: the original's details are still there and a strong
+    opening verb was kept. Same rules as :func:`bullet_problem`, reported one by one.
+    """
+    no_numbers = not ai_tasks.invented_numbers(text, original, *facts.number_sources())
+    known = facts.known_skills() | {s.lower() for s in extract_skills(original)}
+    original_words = _content_words(original)
+    new_words = _content_words(text)
+    original_stems = {_stem(w) for w in original_words}
+    new_stems = {_stem(w) for w in new_words}
+    added = [w for w in new_words if _stem(w) not in original_stems]
+    no_claims = not any(s.lower() not in known for s in extract_skills(text)) and not any(
+        w in _CLAIM_WORDS and _stem(w) not in original_stems for w in added
+    )
+    body = original_words[1:] or original_words
+    kept = (sum(1 for w in body if _stem(w) in new_stems) / len(body)) >= MIN_KEPT_SHARE if body else True
+    first_original = original_words[0] if original_words else ""
+    first_new = new_words[0] if new_words else ""
+    if first_original and first_original not in _WEAK_FIRST and _stem(first_new) != _stem(first_original):
+        kept = False
+    if len(added) > MAX_NEW_WORDS:
+        kept = False
+    return {"kept_details": bool(kept), "no_new_numbers": bool(no_numbers), "no_new_claims": bool(no_claims)}
+
+
+def _llm_bullet(bullet: str, entry: dict[str, Any]) -> str | None:
+    """Ask the user's bullet-rewriting model for a rewrite; ``None`` when it is the mock or anything fails."""
+    try:
+        from app.modules.resumes import llm as resume_llm  # lazy: llm imports ai, which imports resumes helpers
+
+        if resume_llm.provider_is_mock(resume_llm.TASK_REWRITE_BULLET):
             return None
         context = {
             "title": entry.get("title"),
@@ -274,8 +302,11 @@ def _llm_bullet(bullet: str, entry: dict[str, Any]) -> str | None:
             if first and first not in _WEAK_FIRST
             else "You may replace the weak opening word with a stronger past-tense verb of the same meaning."
         )
-        result = provider.complete_json(
-            f"Bullet to rewrite:\n{bullet}\n\nResume context for this role (facts you may use):\n{context}\n\n"
+        result = resume_llm.llm_json(
+            resume_llm.TASK_REWRITE_BULLET,
+            f"Bullet to rewrite:\n{resume_llm.wrap_untrusted('RESUME BULLET', bullet, max_chars=600)}\n\n"
+            "Resume context for this role (facts you may use):\n"
+            f"{resume_llm.wrap_untrusted('ROLE CONTEXT', str(context), max_chars=1600)}\n\n"
             f"{verb_rule}\n"
             'Return JSON: {"bullet": "<rewritten bullet>"}',
             schema={"type": "object", "properties": {"bullet": {"type": "string"}}, "required": ["bullet"]},
@@ -648,6 +679,7 @@ __all__ = [
     "apply_to_parsed",
     "build_apply_plan",
     "build_factual_summary",
+    "bullet_checks",
     "has_placeholder",
     "plan_from",
     "summary_problem",

@@ -39,6 +39,9 @@ _CHAR_MAP: dict[int, str | None] = {
     **{ord(c): " " for c in "\u00a0\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"},
     **{ord(c): None for c in "\u00ad\u200b\u200c\u200d\u2060\ufeff\ufffd"},
     ord("\u2026"): "...",
+    # PDF WinAnsiEncoding also places the bullet at 0x7F (reportlab writes it there, so do
+    # other generators); pypdf hands it back as DEL. Read it as the bullet it is.
+    0x7F: "\u2022",
 }
 #: A bullet glyph at the start of a line becomes the plain marker "- ".
 _LEADING_BULLET_RE = re.compile(r"^[ \t]*[\u2022\u00b7][ \t]*", re.MULTILINE)
@@ -77,6 +80,27 @@ def extract_pdf_text(content: bytes) -> str:
     return _tidy("\n".join(pages))
 
 
+def _docx_paragraph_text(paragraph) -> str:  # noqa: ANN001 - python-docx Paragraph
+    """Paragraph text; a Word list item (bullet numbering) keeps a "- " marker.
+
+    Word draws list bullets from the numbering definition, so ``paragraph.text`` has no
+    marker and a bullet would read like a heading line. The parser needs to tell them apart.
+    """
+    text = paragraph.text
+    if not text.strip():
+        return text
+    try:
+        ppr = paragraph._p.pPr  # noqa: SLF001 - python-docx has no public accessor
+        is_list = ppr is not None and ppr.numPr is not None
+        style_name = (paragraph.style.name or "") if paragraph.style is not None else ""
+        is_list = is_list or style_name.lower().startswith("list bullet")
+    except Exception:  # noqa: BLE001 - never fail extraction over formatting details
+        is_list = False
+    if is_list and not re.match(r"^\s*(?:[-*•·]|\d+[.)])\s", text):
+        return f"- {text}"
+    return text
+
+
 def extract_docx_text(content: bytes) -> str:
     try:
         import docx  # python-docx
@@ -87,7 +111,7 @@ def extract_docx_text(content: bytes) -> str:
     except Exception as exc:  # noqa: BLE001 - python-docx raises many error types
         raise ExtractionError(f"Could not read the DOCX file: {exc}") from exc
 
-    parts: list[str] = [paragraph.text for paragraph in document.paragraphs]
+    parts: list[str] = [_docx_paragraph_text(paragraph) for paragraph in document.paragraphs]
     for table in document.tables:
         for row in table.rows:
             cells = [cell.text.strip() for cell in row.cells]

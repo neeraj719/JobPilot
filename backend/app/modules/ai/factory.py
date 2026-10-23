@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODELS: dict[str, str] = {
     "mock": MockLLMProvider.model,
     "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4-5",
+    "anthropic": "claude-sonnet-5-5",
     "ollama": "qwen2.5:3b-instruct",
+    "gemini": "gemini-2.5-flash",
 }
 
 _provider: LLMProvider | None = None
@@ -42,6 +43,10 @@ def _build_provider(name: str) -> LLMProvider:
         from app.modules.ai.providers.ollama import OllamaProvider
 
         return OllamaProvider()
+    if key == "gemini":
+        from app.modules.ai.providers.gemini import GeminiProvider
+
+        return GeminiProvider()
     if key != "mock":
         logger.warning("Unknown LLM_PROVIDER %r; falling back to the mock provider", name)
     return MockLLMProvider()
@@ -75,7 +80,11 @@ def get_mock_provider() -> MockLLMProvider:
 
 
 def api_key_for(name: str) -> str | None:
-    return {"openai": settings.OPENAI_API_KEY, "anthropic": settings.ANTHROPIC_API_KEY}.get(name.lower())
+    return {
+        "openai": settings.OPENAI_API_KEY,
+        "anthropic": settings.ANTHROPIC_API_KEY,
+        "gemini": settings.GOOGLE_API_KEY,
+    }.get(name.lower())
 
 
 def provider_status() -> dict[str, Any]:

@@ -28,6 +28,7 @@ from app.models.enums import (
 )
 from app.models.interview import Interview
 from app.models.job import Job, JobMatch
+from app.modules.automation.limits import DEFAULT_TIMEZONE, day_bounds
 from app.models.profile import JobPreference
 from app.models.user import User
 from app.modules.dashboard import service as dashboard
@@ -82,8 +83,14 @@ def world(db, user):
         )
     db.flush()
 
+    # "Applied N days ago" must land on the Nth *local* day back. The dashboard counts days in the
+    # user's timezone (Asia/Kolkata by default), so a fixed "two hours ago" fell on yesterday for
+    # the first two hours after local midnight. Stay a little before now, but inside today.
+    local_day_start, _ = day_bounds(DEFAULT_TIMEZONE, now)
+    earlier_today = min(timedelta(hours=2), (now - local_day_start) / 2)
+
     def make(job: Job, status: ApplicationStatus, *, days_ago: int, responded: bool, source: JobSourceType) -> Application:
-        applied_at = now - timedelta(days=days_ago, hours=2)
+        applied_at = now - timedelta(days=days_ago) - earlier_today
         application = Application(
             user_id=user.id,
             job_id=job.id,

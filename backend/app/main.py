@@ -133,6 +133,8 @@ def _include_routers(app: FastAPI) -> None:
     app.include_router(audit_router, prefix=f"{p}/audit", tags=["audit"])
     app.include_router(ai_router, prefix=f"{p}/ai", tags=["ai"])
     app.include_router(browser_router, prefix=f"{p}/browser", tags=["browser"])
+    from app.modules.ats.router import router as ats_router  # ats stream (resume studio)
+    app.include_router(ats_router, prefix=f"{p}/ats", tags=["ats"])
 
 
 def _mount_demo_ats(app: FastAPI) -> None:

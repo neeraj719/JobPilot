@@ -75,15 +75,33 @@ _PREFERENCE_FLAT_ATTRS: tuple[str, ...] = ("desired_salary", "min_salary", "noti
 # --------------------------------------------------------------------------- plumbing
 
 
+def _prepare(task_name: str):  # noqa: ANN202 - runtime.Prepared
+    """The current user's provider for ``task_name`` (``ai.runtime``); the server default is
+    looked up through this module's ``get_llm_provider`` so tests can substitute it."""
+    from app.modules.ai import runtime
+
+    return runtime.prepare(task_name, server_default_factory=lambda: get_llm_provider())
+
+
 def _run(task_name: str, payload: dict[str, Any], schema: type[BaseModel]) -> dict[str, Any]:
-    """Run a task on the configured provider, with a deterministic safety net."""
-    provider = get_llm_provider()
+    """Run a task on the provider the current user chose for it (``ai.runtime``), with a
+    deterministic safety net. The mock still short-circuits before any prompt is built."""
+    from app.modules.ai import runtime
+
+    try:
+        prepared = _prepare(task_name)
+    except Exception as exc:  # noqa: BLE001 - e.g. the chosen provider has no key: use the rules
+        logger.warning("AI task %s: provider unavailable (%s); using the deterministic implementation", task_name, exc)
+        return get_mock_provider().run_task(task_name, payload)
+    provider = prepared.provider
     if provider.supports_task(task_name):
         return provider.run_task(task_name, payload)
 
     prompt = build_prompt(task_name, payload, schema=schema)
     try:
-        data = provider.complete_json(prompt, schema=schema, system=build_system_prompt(task_name))
+        data = runtime.complete_json(
+            task_name, prompt, schema=schema, system=build_system_prompt(task_name), prepared=prepared
+        )
         if isinstance(data, dict) and data:
             return data
         raise ValueError("provider returned an empty JSON object")
@@ -244,7 +262,11 @@ def parse_resume(text: str) -> ParsedResume:
     rule = add_listed_skills(
         ParsedResume.model_validate(get_mock_provider().run_task("parse_resume", payload)), payload["text"]
     )
-    if getattr(get_llm_provider(), "name", "mock") == "mock":
+    try:
+        provider_name = getattr(_prepare("parse_resume").provider, "name", "mock")
+    except Exception:  # noqa: BLE001 - the chosen provider is unusable: the rules answer
+        provider_name = "mock"
+    if provider_name == "mock":
         return rule
     try:
         llm = _run_validated("parse_resume", payload, ParsedResume)
@@ -542,7 +564,91 @@ def polish_resume_recommendations(
     return PolishedRecommendations(items=kept)
 
 
+# --------------------------------------------------------------------------- resume writing
+# (resume-builder stream, append-only.) Model calls for the editor's writing help. Each
+# returns raw model text (or nothing): the deterministic rules and guards live in
+# ``app.modules.resumes.writing``, which decides what — if anything — reaches the user.
+# With the mock provider these return nothing and the rules alone answer, so tests stay
+# deterministic.
+
+
+def _writing_call(task: str, prompt: str, schema: dict[str, Any], *, max_tokens: int) -> dict[str, Any] | None:
+    from app.modules.ai.prompts import RESUME_WRITING_SYSTEM
+    from app.modules.resumes import llm as resume_llm  # lazy: resumes depends on ai, not the reverse
+
+    if resume_llm.provider_is_mock(task):
+        return None
+    try:
+        data = resume_llm.llm_json(task, prompt, schema=schema, system=RESUME_WRITING_SYSTEM, max_tokens=max_tokens)
+    except Exception as exc:  # noqa: BLE001 - the rules always answer
+        logger.info("Resume writing task %s fell back to the rules: %s", task, exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def rewrite_bullet_texts(bullet: str, *, role: str | None = None, company: str | None = None) -> list[str]:
+    """Up to three model rewrites of one bullet (unchecked)."""
+    from app.modules.ai.prompts import REWRITE_BULLET_PROMPT
+    from app.modules.resumes.llm import TASK_REWRITE_BULLET, wrap_untrusted
+
+    context = " ".join(p for p in (f"Role: {role}." if role else "", f"Company: {company}." if company else "") if p)
+    prompt = REWRITE_BULLET_PROMPT.format(
+        context=wrap_untrusted("role", context, max_chars=300) if context else "",
+        bullet=wrap_untrusted("bullet", bullet, max_chars=600),
+    )
+    schema = {
+        "type": "object",
+        "properties": {"candidates": {"type": "array", "items": {"type": "string"}, "maxItems": 3}},
+        "required": ["candidates"],
+    }
+    data = _writing_call(TASK_REWRITE_BULLET, prompt, schema, max_tokens=300) or {}
+    raw = data.get("candidates")
+    if isinstance(raw, str):
+        raw = [raw]
+    return [" ".join(str(item).split()) for item in (raw or []) if isinstance(item, (str, int, float)) and str(item).strip()][:3]
+
+
+def improve_text(text: str, *, field: str) -> str | None:
+    """A grammar/clarity pass over ``text`` (unchecked)."""
+    from app.modules.ai.prompts import IMPROVE_TEXT_PROMPT
+    from app.modules.resumes.llm import TASK_IMPROVE_GRAMMAR, wrap_untrusted
+
+    prompt = IMPROVE_TEXT_PROMPT.format(field=field.replace("_", " "), text=wrap_untrusted(field, text, max_chars=3000))
+    schema = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+    data = _writing_call(TASK_IMPROVE_GRAMMAR, prompt, schema, max_tokens=700) or {}
+    value = data.get("text")
+    return str(value).strip() if isinstance(value, str) and value.strip() else None
+
+
+def polish_summary(summary: str) -> str | None:
+    """A smoother wording of a fact-built summary (unchecked)."""
+    from app.modules.ai.prompts import DRAFT_SUMMARY_PROMPT
+    from app.modules.resumes.llm import TASK_DRAFT_SUMMARY, wrap_untrusted
+
+    prompt = DRAFT_SUMMARY_PROMPT.format(summary=wrap_untrusted("summary", summary, max_chars=1200))
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+    data = _writing_call(TASK_DRAFT_SUMMARY, prompt, schema, max_tokens=250) or {}
+    value = data.get("summary")
+    return " ".join(value.split()) if isinstance(value, str) and value.strip() else None
+
+
+def achievement_bullet(text: str) -> str | None:
+    """An achievement-oriented rewrite with a ``[result]`` placeholder (unchecked)."""
+    from app.modules.ai.prompts import ACHIEVEMENT_BULLET_PROMPT
+    from app.modules.resumes.llm import TASK_GENERATE_SECTION, wrap_untrusted
+
+    prompt = ACHIEVEMENT_BULLET_PROMPT.format(text=wrap_untrusted("responsibility", text, max_chars=600))
+    schema = {"type": "object", "properties": {"bullet": {"type": "string"}}, "required": ["bullet"]}
+    data = _writing_call(TASK_GENERATE_SECTION, prompt, schema, max_tokens=200) or {}
+    value = data.get("bullet")
+    return " ".join(value.split()) if isinstance(value, str) and value.strip() else None
+
+
 __all__ = [
+    "achievement_bullet",
+    "improve_text",
+    "polish_summary",
+    "rewrite_bullet_texts",
     "candidate_payload",
     "classify_email",
     "explain_match",

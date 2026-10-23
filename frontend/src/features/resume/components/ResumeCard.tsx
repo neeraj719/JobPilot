@@ -190,8 +190,8 @@ export function ResumeCard({
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <div className="col-span-2 truncate">
             <dt className="sr-only">Original file</dt>
-            <dd className="truncate" title={resume.original_filename}>
-              {resume.original_filename}
+            <dd className="truncate" title={resume.original_filename ?? undefined}>
+              {resume.original_filename ?? (resume.kind === 'TAILORED' ? 'Tailored copy' : 'Built in the editor')}
             </dd>
           </div>
           <div>

@@ -160,4 +160,45 @@ def parse_task_envelope(prompt: str) -> tuple[str, dict[str, Any]] | None:
     return match.group("task"), payload
 
 
+# --------------------------------------------------------------------------- resume writing
+# (resume-builder stream, append-only.) Short prompts on purpose: the default model is a
+# 3B local model. Every answer is re-checked by the deterministic guards in
+# ``app.modules.resumes.writing`` before a user sees it.
+
+RESUME_WRITING_SYSTEM = (
+    "You edit resume text for a candidate. Work only from the text you are given. Never add numbers, "
+    "percentages, dates, employers, job titles, degrees, certifications, tools, technologies or claims "
+    "(led, managed, award, scale) that are not already in the text. Answer with one JSON object only."
+)
+
+REWRITE_BULLET_PROMPT = (
+    "Rewrite this resume bullet in up to 3 different ways. Each version keeps every fact and technology, "
+    "starts with a strong past-tense verb of the same meaning, is one sentence of at most 30 words and has "
+    "no brackets.\n{context}\nBullet:\n{bullet}\n"
+    'Return JSON: {{"candidates": ["...", "..."]}}'
+)
+
+IMPROVE_TEXT_PROMPT = (
+    "Fix grammar, spelling, punctuation and clarity in this resume {field}. Keep the meaning, the facts, "
+    "every number and every name exactly. Do not add anything new. Keep roughly the same length.\n"
+    "Text:\n{text}\n"
+    'Return JSON: {{"text": "..."}}'
+)
+
+DRAFT_SUMMARY_PROMPT = (
+    "Polish this resume summary so it reads naturally, in 2-3 sentences and under 60 words. Use only the "
+    "facts it already states: no new numbers, skills, employers or claims.\n"
+    "Summary:\n{summary}\n"
+    'Return JSON: {{"summary": "..."}}'
+)
+
+ACHIEVEMENT_BULLET_PROMPT = (
+    "Rewrite this responsibility as one achievement-oriented resume bullet: strong past-tense verb, what was "
+    "done, and the result. If the text states no measurable result, end with the literal placeholder "
+    "[result] instead of inventing one. Never write a number that is not in the text.\n"
+    "Responsibility:\n{text}\n"
+    'Return JSON: {{"bullet": "..."}}'
+)
+
+
 __all__ = ["BASE_SYSTEM", "build_prompt", "build_system_prompt", "parse_task_envelope"]

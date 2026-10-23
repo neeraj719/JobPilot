@@ -1,0 +1,537 @@
+import {
+  Archive,
+  ArrowLeft,
+  Briefcase,
+  ExternalLink,
+  FileDown,
+  GitCompare,
+  History,
+  PencilLine,
+  RefreshCw,
+  ScanSearch,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
+import * as React from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ErrorState } from '@/components/common/ErrorState'
+import { LoadingState } from '@/components/common/LoadingState'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { toast } from '@/components/ui/toaster'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { errorMessage } from '@/lib/api'
+import { formatDate, formatDateTime, formatRelative, humanizeEnum } from '@/lib/utils'
+import { useResumes } from '@/features/resume/api'
+import {
+  downloadResumeExport,
+  useAddSnapshot,
+  useDeleteTarget,
+  useRefreshTarget,
+  useTailor,
+  useTarget,
+  useUpdateTarget,
+  useUploadSnapshot,
+} from '@/features/ats/api'
+import { CompareView } from '@/features/ats/components/CompareView'
+import { ScoreRing } from '@/features/ats/components/ScoreRing'
+import { StructuredJdView } from '@/features/ats/components/StructuredJdView'
+import { TargetDueBadges, TargetStatusBadge } from '@/features/ats/components/TargetBadges'
+import { JD_SOURCE_LABELS, TARGET_STATUS_LABELS } from '@/features/ats/labels'
+import { JOB_TARGET_STATUSES, type JobTargetDetail, type JobTargetStatus } from '@/features/ats/types'
+
+const NONE = '__none__'
+
+function dateInput(value: string | null): string {
+  return value ? value.slice(0, 10) : ''
+}
+
+function toIso(date: string): string | null {
+  return date ? new Date(`${date}T09:00:00`).toISOString() : null
+}
+
+function JdCard({ target }: { target: JobTargetDetail }) {
+  const refresh = useRefreshTarget(target.id)
+  const addSnapshot = useAddSnapshot(target.id)
+  const upload = useUploadSnapshot(target.id)
+  const [editing, setEditing] = React.useState(false)
+  const [text, setText] = React.useState('')
+  const snapshot = target.latest_snapshot
+  const fileRef = React.useRef<HTMLInputElement>(null)
+
+  const report = (created: boolean, changed: boolean) => {
+    if (!created) toast.info('No change', { description: 'The job description is the same as the saved one.' })
+    else if (changed) toast.success('Job description updated', { description: 'Changed requirements are highlighted. Re-run the analysis to see the new estimate.' })
+    else toast.success('Job description saved')
+  }
+
+  const doRefresh = async () => {
+    try {
+      const result = await refresh.mutateAsync()
+      report(result.created, result.snapshot.changed_from_previous)
+    } catch (error) {
+      toast.error('Could not refresh', { description: errorMessage(error) })
+    }
+  }
+
+  const savePasted = async () => {
+    try {
+      const result = await addSnapshot.mutateAsync({ source: 'PASTED', text })
+      setEditing(false)
+      setText('')
+      report(result.created, result.snapshot.changed_from_previous)
+    } catch (error) {
+      toast.error('Could not save the job description', { description: errorMessage(error) })
+    }
+  }
+
+  const onFile = async (file: File) => {
+    try {
+      const result = await upload.mutateAsync(file)
+      report(result.created, result.snapshot.changed_from_previous)
+    } catch (error) {
+      toast.error('Could not read the file', { description: errorMessage(error) })
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
+        <div className="space-y-1">
+          <CardTitle>Job description</CardTitle>
+          <CardDescription>
+            {snapshot
+              ? `${JD_SOURCE_LABELS[snapshot.source]} · saved ${formatRelative(snapshot.created_at)}${target.snapshots.length > 1 ? ` · ${target.snapshots.length} versions` : ''}`
+              : 'Not added yet: paste it, upload it or read it from the posting URL.'}
+          </CardDescription>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {target.job_url ? (
+            <Button size="sm" variant="outline" onClick={() => void doRefresh()} loading={refresh.isPending}>
+              <RefreshCw aria-hidden />
+              Refresh from URL
+            </Button>
+          ) : null}
+          <Button size="sm" variant="outline" onClick={() => setEditing((value) => !value)}>
+            <PencilLine aria-hidden />
+            {snapshot ? 'Paste update' : 'Paste'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => fileRef.current?.click()} loading={upload.isPending}>
+            Upload
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.docx,.txt"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void onFile(file)
+              e.target.value = ''
+            }}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {editing ? (
+          <div className="space-y-2">
+            <Textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the current job description" aria-label="Job description text" />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => void savePasted()} disabled={text.trim().length < 120} loading={addSnapshot.isPending}>
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {snapshot ? (
+          <>
+            {snapshot.changed_from_previous ? (
+              <p className="rounded-md bg-warning/10 px-3 py-2 text-xs">This version changed the requirements compared with the previous one.</p>
+            ) : null}
+            <StructuredJdView structured={snapshot.structured} changes={snapshot.changed_from_previous ? snapshot.changes : undefined} />
+            <details>
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">Full text</summary>
+              <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 font-sans text-xs">{snapshot.raw_text}</pre>
+            </details>
+          </>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function TailorCard({ target }: { target: JobTargetDetail }) {
+  const resumes = useResumes()
+  const tailor = useTailor(target.id)
+  const [sourceId, setSourceId] = React.useState(target.source_resume?.id ?? NONE)
+  const [comparing, setComparing] = React.useState(false)
+  const tailored = target.tailored_resume
+  const options = (resumes.data ?? []).filter((r) => !r.archived_at && r.kind !== 'TAILORED')
+
+  const run = async () => {
+    try {
+      const result = await tailor.mutateAsync({ source_resume_id: sourceId === NONE ? undefined : sourceId })
+      toast.success(`Created “${result.resume.name}”`, {
+        description: `Estimate ${result.source_score ?? '—'} → ${result.analysis.overall_score ?? '—'} with ${result.explanations.length} safe changes. The original is unchanged.`,
+      })
+      setComparing(true)
+    } catch (error) {
+      toast.error('Could not tailor the resume', { description: errorMessage(error) })
+    }
+  }
+
+  const exportAs = (format: 'pdf' | 'docx') => {
+    if (!tailored) return
+    void downloadResumeExport(tailored, format).catch((error) => toast.error('Export failed', { description: errorMessage(error) }))
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Tailored resume</CardTitle>
+        <CardDescription>
+          A separate resume generated from your chosen resume with only safe, fact-preserving changes. Your original is never overwritten.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {tailored ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="truncate font-medium">{tailored.name}</p>
+              <p className="text-xs text-muted-foreground">
+                Version {tailored.current_version}
+                {target.source_resume ? ` · from ${target.source_resume.name}` : ''}
+                {target.submitted_resume_version ? ` · v${target.submitted_resume_version} was sent` : ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link to={`/resume/my/${tailored.id}/edit`}>
+                  <PencilLine aria-hidden />
+                  Open in editor
+                </Link>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => exportAs('pdf')}>
+                <FileDown aria-hidden />
+                PDF
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => exportAs('docx')}>
+                <FileDown aria-hidden />
+                DOCX
+              </Button>
+              <Button size="sm" variant={comparing ? 'secondary' : 'ghost'} onClick={() => setComparing((value) => !value)} aria-pressed={comparing}>
+                <GitCompare aria-hidden />
+                Compare
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label>Tailor from</Label>
+            <Select value={sourceId} onValueChange={setSourceId}>
+              <SelectTrigger aria-label="Resume to tailor from">
+                <SelectValue placeholder="Your default resume" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>Your default resume</SelectItem>
+                {options.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name} · v{r.current_version}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => void run()} disabled={!target.latest_snapshot || tailor.isPending} loading={tailor.isPending}>
+            <Sparkles aria-hidden />
+            {tailored ? 'Tailor again' : 'Tailor resume'}
+          </Button>
+        </div>
+        {!target.latest_snapshot ? <p className="text-xs text-muted-foreground">Add the job description first.</p> : null}
+        {tailor.isPending ? <p className="text-sm text-muted-foreground" role="status">Analysing and applying safe changes…</p> : null}
+        {tailored && comparing ? <CompareView targetId={target.id} /> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DetailsCard({ target }: { target: JobTargetDetail }) {
+  const update = useUpdateTarget(target.id)
+  const [notes, setNotes] = React.useState(target.notes ?? '')
+  const [deadline, setDeadline] = React.useState(dateInput(target.deadline))
+  const [followUp, setFollowUp] = React.useState(dateInput(target.follow_up_at))
+  React.useEffect(() => {
+    setNotes(target.notes ?? '')
+    setDeadline(dateInput(target.deadline))
+    setFollowUp(dateInput(target.follow_up_at))
+  }, [target.notes, target.deadline, target.follow_up_at])
+  const dirty = notes !== (target.notes ?? '') || deadline !== dateInput(target.deadline) || followUp !== dateInput(target.follow_up_at)
+
+  const save = async () => {
+    try {
+      await update.mutateAsync({ notes: notes || null, deadline: toIso(deadline), follow_up_at: toIso(followUp) })
+      toast.success('Saved')
+    } catch (error) {
+      toast.error('Could not save', { description: errorMessage(error) })
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Details and notes</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt className="text-muted-foreground">Location</dt>
+          <dd>{target.location ?? '—'}</dd>
+          <dt className="text-muted-foreground">Work mode</dt>
+          <dd>{target.work_mode ? humanizeEnum(target.work_mode) : '—'}</dd>
+          <dt className="text-muted-foreground">Saved</dt>
+          <dd>{formatDate(target.created_at)}</dd>
+        </dl>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="detail-deadline">Deadline</Label>
+            <Input id="detail-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="detail-follow">Follow up on</Label>
+            <Input id="detail-follow" type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="detail-notes">Notes</Label>
+          <Textarea id="detail-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+        <Button size="sm" onClick={() => void save()} disabled={!dirty || update.isPending} loading={update.isPending}>
+          Save details
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** `/resume/targets/:id` — one company and role: JD, estimate, tailored resume, activity. */
+export default function JobTargetDetailPage() {
+  const { id = '' } = useParams()
+  const navigate = useNavigate()
+  const query = useTarget(id)
+  const update = useUpdateTarget(id)
+  const remove = useDeleteTarget()
+  const [confirm, setConfirm] = React.useState<'delete' | 'archive' | null>(null)
+  const target = query.data
+  useDocumentTitle(target ? `${target.role_title} · ${target.company_name}` : 'Job target')
+
+  if (query.isLoading) {
+    return (
+      <PageContainer>
+        <LoadingState rows={4} />
+      </PageContainer>
+    )
+  }
+  if (query.error || !target) {
+    return (
+      <PageContainer>
+        <PageHeader title="Job target" eyebrow={<Link to="/resume/targets">← Job-specific resumes</Link>} />
+        <ErrorState error={query.error} title="This job target could not be loaded" onRetry={() => void query.refetch()} />
+      </PageContainer>
+    )
+  }
+
+  const setStatus = async (status: JobTargetStatus) => {
+    try {
+      const next = await update.mutateAsync({ status })
+      toast.success(`Moved to ${TARGET_STATUS_LABELS[status]}`, {
+        description: status === 'APPLIED' && next.submitted_resume_version ? `Recorded that resume version ${next.submitted_resume_version} was sent.` : undefined,
+      })
+    } catch (error) {
+      toast.error('Could not change the status', { description: errorMessage(error) })
+    }
+  }
+
+  const analysis = target.last_analysis
+  const optimizerLink = `/resume/ats?target=${target.id}${target.tailored_resume ? `&resume=${target.tailored_resume.id}` : target.source_resume ? `&resume=${target.source_resume.id}` : ''}`
+
+  return (
+    <PageContainer>
+      <PageHeader
+        eyebrow={
+          <Link to="/resume/targets" className="inline-flex items-center gap-1 hover:text-foreground">
+            <ArrowLeft className="size-3.5" aria-hidden />
+            Job-specific resumes
+          </Link>
+        }
+        title={target.role_title}
+        description={
+          <span className="flex flex-wrap items-center gap-2">
+            {target.company_name}
+            <TargetStatusBadge status={target.status} />
+            <TargetDueBadges target={target} />
+          </span>
+        }
+        actions={
+          <>
+            <Select value={target.status} onValueChange={(value) => void setStatus(value as JobTargetStatus)}>
+              <SelectTrigger className="w-44" aria-label="Status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {JOB_TARGET_STATUSES.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {TARGET_STATUS_LABELS[status]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {target.job_url ? (
+              <Button variant="outline" size="icon" asChild title="Open the posting">
+                <a href={target.job_url} target="_blank" rel="noreferrer noopener" aria-label="Open the posting">
+                  <ExternalLink />
+                </a>
+              </Button>
+            ) : null}
+            {target.job_id ? (
+              <Button variant="outline" size="icon" asChild title="Open in Jobs">
+                <Link to={`/jobs?q=${encodeURIComponent(target.role_title)}`} aria-label="Find this job in Jobs">
+                  <Briefcase />
+                </Link>
+              </Button>
+            ) : null}
+            {target.status !== 'ARCHIVED' ? (
+              <Button variant="ghost" size="icon" onClick={() => setConfirm('archive')} title="Archive" aria-label="Archive">
+                <Archive />
+              </Button>
+            ) : null}
+            <Button variant="ghost" size="icon" onClick={() => setConfirm('delete')} title="Delete" aria-label="Delete">
+              <Trash2 />
+            </Button>
+          </>
+        }
+      />
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
+        <div className="min-w-0 space-y-6">
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
+              <div className="space-y-1">
+                <CardTitle>ATS estimate</CardTitle>
+                <CardDescription>
+                  {analysis
+                    ? `${analysis.resume_name} v${analysis.resume_version} · ${formatRelative(analysis.created_at)}. An estimate, not the employer's ATS result.`
+                    : 'Not analysed yet.'}
+                </CardDescription>
+              </div>
+              <Button size="sm" variant="outline" asChild>
+                <Link to={analysis ? `/resume/ats?analysis=${analysis.id}&resume=${analysis.resume_id}` : optimizerLink}>
+                  <ScanSearch aria-hidden />
+                  {analysis ? 'Open in ATS Optimizer' : 'Analyse'}
+                </Link>
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {analysis ? (
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <ScoreRing score={analysis.overall_score} size={104} />
+                  <div className="min-w-0 space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Missing requirements</p>
+                    {target.missing_requirements.length ? (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {target.missing_requirements.map((skill) => (
+                          <li key={skill} className="rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-0.5 text-xs">
+                            {skill}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Every required skill of the posting is on the resume.</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <EmptyState
+                  size="sm"
+                  icon={ScanSearch}
+                  title="No estimate yet"
+                  description={target.latest_snapshot ? 'Analyse a resume against this job description.' : 'Add the job description first.'}
+                />
+              )}
+            </CardContent>
+          </Card>
+          <TailorCard target={target} />
+          <JdCard target={target} />
+        </div>
+
+        <div className="space-y-6">
+          <DetailsCard target={target} />
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2">
+                <History className="size-4" aria-hidden />
+                Activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ol className="space-y-3 border-l border-border pl-4">
+                {target.activity.map((item, index) => (
+                  <li key={`${item.at}-${index}`} className="relative text-sm">
+                    <span className="absolute -left-[21px] top-1.5 size-2 rounded-full bg-primary/70" aria-hidden />
+                    <p>{item.message}</p>
+                    <p className="text-xs text-muted-foreground" title={formatDateTime(item.at)}>
+                      {formatRelative(item.at)}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+              {target.application_id ? (
+                <Badge variant="outline" className="mt-3">
+                  Linked to a JobPilot application
+                </Badge>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirm === 'delete'}
+        onOpenChange={(open) => setConfirm(open ? 'delete' : null)}
+        title="Delete this job target?"
+        description="The target, its job descriptions and its link to the tailored resume are removed. The tailored resume itself stays in My Resumes."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          try {
+            await remove.mutateAsync(target.id)
+            toast.success('Job target deleted')
+            navigate('/resume/targets')
+          } catch (error) {
+            toast.error('Could not delete', { description: errorMessage(error) })
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={confirm === 'archive'}
+        onOpenChange={(open) => setConfirm(open ? 'archive' : null)}
+        title="Archive this job target?"
+        description="It moves to the Archived column. You can change its status back at any time."
+        confirmLabel="Archive"
+        onConfirm={() => setStatus('ARCHIVED')}
+      />
+    </PageContainer>
+  )
+}

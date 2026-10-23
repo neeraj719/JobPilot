@@ -35,7 +35,7 @@ TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 #: one server never drop each other's migration database mid-run.
 MIGRATION_DATABASE = f"{make_url(TEST_DATABASE_URL).database}_migration_check"
 
-#: The 28 tables of the JobPilot AI schema, as ``schema.table``.
+#: The 35 tables of the JobPilot AI schema, as ``schema.table``.
 EXPECTED_TABLES = {
     "master.users",
     "master.roles",
@@ -51,12 +51,18 @@ EXPECTED_TABLES = {
     "master.connected_accounts",
     "master.browser_sessions",
     "master.standing_answers",
+    "master.ai_provider_settings",
+    "master.ai_provider_credentials",
     "unified.jobs",
     "unified.job_sources",
     "unified.job_matches",
     "media.resumes",
     "media.resume_versions",
     "media.application_documents",
+    "media.job_targets",
+    "media.job_description_snapshots",
+    "media.ats_analyses",
+    "media.optimization_suggestions",
     "transaction.applications",
     "transaction.application_answers",
     "transaction.application_events",
@@ -64,6 +70,7 @@ EXPECTED_TABLES = {
     "transaction.email_messages",
     "transaction.automation_runs",
     "transaction.notifications",
+    "transaction.ai_usage_events",
     "audit.audit_logs",
 }
 
@@ -123,7 +130,7 @@ def test_upgrade_creates_every_table(migrated: str) -> None:
     finally:
         engine.dispose()
     assert tables == EXPECTED_TABLES
-    assert len(EXPECTED_TABLES) == 28
+    assert len(EXPECTED_TABLES) == 35
     # Only Alembic's own bookkeeping is left behind in ``public``.
     assert public == {"alembic_version"}
 

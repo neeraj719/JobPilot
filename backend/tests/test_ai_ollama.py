@@ -129,7 +129,10 @@ def test_strict_schema_requires_non_nullable_keys_without_touching_the_original(
     original = ParsedResume.model_json_schema()
     strict = ollama.strict_schema(original)
     assert "required" not in original  # pydantic marks defaulted fields optional
-    assert strict["required"] == ["skills", "experience", "education", "projects", "certifications", "links"]
+    assert strict["required"] == [
+        "skills", "experience", "education", "projects", "certifications", "links",
+        "achievements", "languages", "section_order",
+    ]
     assert strict["$defs"]["ExperienceEntry"]["required"] == ["technologies"]
     assert strict["properties"] == original["properties"]  # only "required" changes
 
@@ -377,7 +380,9 @@ def test_provider_status_is_not_configured_without_the_model(ollama_selected: Re
 def test_status_endpoint_shows_ollama(ollama_selected: Recorder, api: TestClient) -> None:
     response = api.get("/api/v1/ai/status")
     assert response.status_code == 200, response.text
-    assert response.json() == {"provider": "ollama", "model": "qwen2.5:3b-instruct", "configured": True}
+    body = response.json()
+    body.pop("effective", None)  # the signed-in user's setup (AI Model Settings)
+    assert body == {"provider": "ollama", "model": "qwen2.5:3b-instruct", "configured": True}
 
 
 def test_mock_status_ignores_llm_model(monkeypatch: pytest.MonkeyPatch) -> None:

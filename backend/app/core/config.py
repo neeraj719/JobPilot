@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 10
 
     # --- AI ---
-    LLM_PROVIDER: Literal["mock", "openai", "anthropic", "ollama"] = "mock"
+    LLM_PROVIDER: Literal["mock", "openai", "anthropic", "ollama", "gemini"] = "mock"
     #: Unset means the provider's own default (``qwen2.5:3b-instruct`` for ollama).
     LLM_MODEL: str | None = None
     OPENAI_API_KEY: str | None = None
@@ -114,6 +114,24 @@ class Settings(BaseSettings):
     #: similarity. Any failure falls back to the deterministic selection.
     EMBEDDINGS_ENABLED: bool = True
     EMBEDDING_MODEL: str = "embeddinggemma"
+    # --- Per-user AI providers (AI Model Settings, ``app.modules.ai.runtime``) ---
+    #: Server-level Gemini key, used only when ``LLM_PROVIDER=gemini`` (users bring their own).
+    GOOGLE_API_KEY: str | None = None
+    #: Let users route their resume text to hosted APIs (OpenAI, Gemini, Anthropic, remote
+    #: OpenAI-compatible gateways). Off = local models and built-in rules only.
+    AI_ALLOW_HOSTED_PROVIDERS: bool = True
+    #: Let users point Ollama / an OpenAI-compatible server at a loopback or private-network
+    #: address over plain http (LM Studio on localhost, a GPU box on the LAN). The server then
+    #: makes requests to an address the user typed: turn off on a multi-tenant deployment.
+    #: Link-local / cloud-metadata addresses are always refused.
+    AI_ALLOW_LOCAL_BASE_URLS: bool = True
+    #: Calls per user per day on hosted providers when the user set no limit of their own.
+    #: 0 = unlimited. Local models are never limited by this default.
+    AI_DEFAULT_DAILY_CALL_LIMIT: int | None = 500
+    #: Usage events older than this are pruned by the worker (``ai.usage.prune_usage_events``).
+    AI_USAGE_RETENTION_DAYS: int = 400
+    #: Test-connection / model-list requests per user per minute.
+    AI_TEST_RATE_LIMIT_PER_MINUTE: int = 10
 
     # --- Gmail OAuth (least privilege: gmail.readonly only) ---
     GOOGLE_CLIENT_ID: str | None = None

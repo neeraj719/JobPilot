@@ -545,3 +545,89 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
   EEO boilerplate). Word counts and keyword presence use `Resume.text_content` for the current
   parsed data only. Company priority for the projection comes from the stored `JobMatch` (then
   `Application.priority`) instead of reloading `Company` rows.
+
+## 16. AI providers (Resume Studio)
+
+* **Runtime** `app.modules.ai.runtime`: `complete_json(task, prompt, *, schema, system=None, max_tokens=1500) -> dict`,
+  `complete(task, prompt, *, system=None, max_tokens=800, temperature=0.2) -> str`; helpers `model_available(task)`,
+  `model_info(task)`, `provider_is_mock(task)`, `last_call()` (incl. `fallback_used`). Resolution: workflow override >
+  user default > server default (`LLM_PROVIDER`). Errors: `ai.errors.AIProviderError` (subclass of
+  `ExternalServiceError`), `code` in `provider_not_configured | invalid_credentials | quota_exceeded | model_unavailable |
+  provider_timeout | budget_exceeded | provider_error`. Fallback only when the user enabled it. `ai.tasks._run` goes
+  through it; the mock still short-circuits.
+* **Context** `app.modules.ai.context.ai_user(user_id)` for background work; the request user is bound by
+  `get_current_user`; `actor_context` users are picked up too.
+* **Untrusted text** `app.modules.ai.safety.wrap_untrusted(label, text, *, max_chars)`, `UNTRUSTED_RULES` (prepended to
+  every system prompt by the runtime), `redact_for_logs`.
+* **Endpoints** `/api/v1/ai`: `GET /providers`, `GET|PUT /settings`, `PUT|DELETE /credentials/{provider}` (recent auth),
+  `POST /credentials/{provider}/test`, `GET /providers/{provider}/models?live=&refresh=`, `GET /usage?range=7d|30d|month`,
+  `GET /status` (+ `effective`). No response contains a stored key (`masked_key` only).
+* **Tables** (migration `c7e9b1d3f5a7`): `master.ai_provider_settings`, `master.ai_provider_credentials`,
+  `transaction.ai_usage_events`.
+
+## 17. Resume Studio — builder, editor, export, versions (`/api/v1/resumes`)
+
+Design: `notes/resume-studio-plan.md`. Migration `a9c3e5b7d1f0` (base) adds to `media.resumes`
+`kind` (`UPLOADED | CREATED | TAILORED`), `template`, `source_resume_id`, `archived_at`,
+`draft_data`, `draft_saved_at`, and makes the file columns nullable; `media.resume_versions`
+gains `change_source` (`USER | AI | SYSTEM`). `ResumeRead` gains `kind, template,
+source_resume_id, archived_at, draft_saved_at, has_file`; the file fields may be `null`.
+
+* **Create / import**: `POST /build {name, target_role?, template?, parsed_data, set_default?}`;
+  `GET /prefill` (a `ParsedResume` from `UserProfile` + `JobPreference`, nothing derived);
+  `POST /import/text {text, name?, target_role?}`; `POST /import/linkedin` (LinkedIn data-export
+  ZIP or its CSVs, read in memory, size-capped, zip-slip safe). Upload stays `POST /`.
+* **Edit**: `GET|PUT|DELETE /{id}/draft` (autosave, no version); `PUT /{id}/parsed-data`
+  takes optional `note` and `change_source` (`USER | AI`; `SYSTEM` → 422) and clears the draft;
+  `PATCH /{id}` takes `template`; `POST /{id}/duplicate {name?}`; `POST /{id}/archive`,
+  `/unarchive` (archived resumes are never default, hidden from `GET /` unless
+  `?include_archived=true`, and never used by matching).
+* **Templates / export**: `GET /templates` (data definitions `classic | modern | compact`);
+  `GET /{id}/export?format=pdf|docx&template=&version=` renders `parsed_data` on the server
+  (single column, real headings and lists — the output round-trips through the parser);
+  `GET /{id}/download` renders a DOCX when the resume has no uploaded file.
+* **Versions**: `GET /{id}/versions/{n}`; `GET /{id}/versions/{n}/diff?against=m`;
+  `GET /{id}/diff?against=<resume_id>` → `{fields[{path, before, after, kind}], summary{added,
+  removed, changed}, description, before_label, after_label}`; `POST /{id}/versions/{n}/restore`
+  (new version, `SYSTEM`); `GET /history?limit=&cursor=&resume_id=&change_source=`;
+  `GET /summary` (dashboard counts).
+* **AI writing help** (rate-limited 30/min/user, deterministic with the mock):
+  `POST /{id}/ai/rewrite-bullet`, `/ai/responsibility-to-achievement` (adds a `[result]`
+  placeholder, never a number), `/ai/improve-text`, `/ai/draft-summary`. Candidates carry
+  `checks {kept_details, no_new_numbers, no_new_claims}`; anything that adds a number, skill,
+  employer or claim is rejected. Model calls go through `resumes.llm` → `ai.runtime`.
+* Service: `create_resume_from_parsed(db, user_id, parsed, *, name, kind, target_role, template,
+  source_resume_id, set_default, note, change_source)`, `update_parsed_data(..., note,
+  change_source)`, `duplicate_resume`, `restore_version`, `plain_text_of(parsed)`.
+
+## 18. ATS optimizer and job targets (`/api/v1/ats`)
+
+Migration `b4d6f8a0c2e4`: `media.job_targets`, `media.job_description_snapshots`,
+`media.ats_analyses`, `media.optimization_suggestions`. Scores are **estimates**, never an
+employer's ATS result.
+
+* **Methodology**: `GET /methodology` → categories, weights (`ats.scoring.ATS_WEIGHTS`, version
+  `METHODOLOGY_VERSION`), disclaimer. Categories: keyword_coverage 0.20, required_vs_preferred
+  0.15, technical_skills 0.12, experience_relevance 0.13, title_alignment 0.10,
+  achievement_quality 0.10, section_completeness 0.08, readability_format 0.06, parse_risk 0.06.
+  Each returns `evidence[]`; `weights` may be overridden per analysis within bounds.
+* **Job descriptions**: `POST /jd/parse {text}`, `POST /jd/upload` (PDF/DOCX/TXT),
+  `POST /jd/fetch {url}` (Greenhouse / Lever / Ashby / SmartRecruiters APIs first, else an
+  SSRF-guarded page fetch preferring JSON-LD `JobPosting`; 422 `jd_unreadable` → paste the text).
+  Rules extract skills and required vs preferred; the model may only re-classify text that occurs.
+* **Company lookup**: `GET /companies/lookup?name=` → the public board's open roles; several
+  matches are returned for the user to choose, never guessed.
+* **Analyses**: `POST /analyses {resume_id, jd, weights?}` (deterministic, synchronous; optional
+  model polish in the background — poll `GET /analyses/{id}`); `GET /analyses?resume_id=&job_target_id=`;
+  `POST /analyses/{id}/apply {suggestion_ids, edits}` (validated server-side, new resume version
+  with `change_source` AI — or USER when edited — then re-analysed; 409 `stale_resume`);
+  `/ignore`; `/undo`; `/polish` (retry); `/auto-optimize {mode: new_resume|new_version, name?}`
+  (applies only `safe` suggestions; `new_resume` creates a TAILORED resume linked to its source).
+  Suggestions that need the user's confirmation (a skill not shown anywhere) are never `safe`.
+* **Targets**: `GET|POST /targets`, `GET|PATCH|DELETE /targets/{id}` (statuses `SAVED, PREPARING,
+  READY, APPLIED, INTERVIEW, OFFER, REJECTED, ARCHIVED`; APPLIED records
+  `submitted_resume_version`); `POST /targets/{id}/snapshot` / `/snapshot/upload` (new snapshot,
+  change detection by text hash); `/refresh` (re-fetch the stored URL); `/tailor {source_resume_id}`;
+  `GET /targets/{id}/compare` (source vs tailored with the explanation per change); `GET /summary`.
+* Model calls go through `ats.llm` → `ai.runtime`; JD and resume text is always fenced with
+  `ai.safety.wrap_untrusted`; background polish runs inside `ai.context.ai_user(user_id)`.

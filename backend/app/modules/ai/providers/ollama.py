@@ -21,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
 from app.core.exceptions import ExternalServiceError
-from app.modules.ai.provider import LLMProvider, extract_json, schema_to_dict
+from app.modules.ai.provider import LLMProvider, extract_json, report_usage, schema_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,8 @@ class OllamaProvider(LLMProvider):
         message = data.get("message") if isinstance(data, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         done_reason = data.get("done_reason") if isinstance(data, dict) else None
+        if isinstance(data, dict):
+            report_usage(data.get("prompt_eval_count"), data.get("eval_count"))
         return (content or "").strip(), done_reason
 
     @staticmethod
@@ -328,6 +330,53 @@ class OllamaProvider(LLMProvider):
 
     def status(self) -> dict[str, Any]:
         return check_server(self.base_url, self.model, client=self._probe_client)
+
+    def list_models(self) -> list[dict[str, Any]] | None:
+        """Models pulled on this server (``GET /api/tags``)."""
+        try:
+            response = self._probe_client.get("/api/tags")
+            response.raise_for_status()
+            entries = response.json().get("models") or []
+        except httpx.ConnectError as exc:
+            raise ExternalServiceError(
+                f"Ollama is not running at {self.base_url} (connection refused); start it with: ollama serve",
+                code="llm_unavailable",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise ExternalServiceError(f"Ollama at {self.base_url} did not answer in time", code="llm_timeout") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ExternalServiceError(f"Ollama at {self.base_url} returned an unexpected response", code="llm_request_failed") from exc
+        models = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or entry.get("model") or "")
+            if name and "embed" not in name:
+                models.append({"id": name, "size_bytes": entry.get("size")})
+        return models
+
+    def test_connection(self) -> dict[str, Any]:
+        """The same cheap probe as ``/ai/status``: server up and model pulled (no generation)."""
+        import time
+
+        started = time.perf_counter()
+        probe = self.status()
+        latency = int((time.perf_counter() - started) * 1000)
+        ok = bool(probe["reachable"] and probe["model_pulled"])
+        code = None
+        if not probe["reachable"]:
+            code = "provider_not_configured"
+        elif not probe["model_pulled"]:
+            code = "model_unavailable"
+        return {
+            "ok": ok,
+            "latency_ms": latency,
+            "model": self.model,
+            "model_available": probe["model_pulled"] if probe["reachable"] else None,
+            "error_code": code,
+            "error": probe["error"],
+            "version": probe["version"],
+        }
 
     @property
     def is_configured(self) -> bool:

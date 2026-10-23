@@ -19,8 +19,16 @@ import NotFoundPage from '@/pages/NotFound'
 import ProfilePage from '@/pages/Profile'
 import QueuePage from '@/pages/Queue'
 import RegisterPage from '@/pages/Register'
-import ResumePage from '@/pages/Resume'
 import SettingsPage from '@/pages/Settings'
+import AiModelSettingsPage from '@/pages/resume/AiModelSettings'
+import AtsOptimizerPage from '@/pages/resume/AtsOptimizer'
+import CreateResumePage from '@/pages/resume/CreateResume'
+import JobTargetDetailPage from '@/pages/resume/JobTargetDetail'
+import JobTargetsPage from '@/pages/resume/JobTargets'
+import MyResumesPage from '@/pages/resume/MyResumes'
+import ResumeDashboardPage from '@/pages/resume/ResumeDashboard'
+import ResumeEditorPage from '@/pages/resume/ResumeEditor'
+import VersionHistoryPage from '@/pages/resume/VersionHistory'
 
 function FullPageSpinner() {
   return (
@@ -110,7 +118,17 @@ export function AppRoutes() {
         <Route path="/applications" element={<ApplicationsPage />} />
         <Route path="/applications/:id" element={<ApplicationDetailPage />} />
         <Route path="/companies" element={<CompaniesPage />} />
-        <Route path="/resume" element={<ResumePage />} />
+        {/* Resume workspace — one sidebar group, see notes/resume-studio-plan.md */}
+        <Route path="/resume" element={<ResumeDashboardPage />} />
+        <Route path="/resume/my" element={<MyResumesPage />} />
+        <Route path="/resume/my/:id" element={<MyResumesPage />} />
+        <Route path="/resume/my/:id/edit" element={<ResumeEditorPage />} />
+        <Route path="/resume/new" element={<CreateResumePage />} />
+        <Route path="/resume/ats" element={<AtsOptimizerPage />} />
+        <Route path="/resume/targets" element={<JobTargetsPage />} />
+        <Route path="/resume/targets/:id" element={<JobTargetDetailPage />} />
+        <Route path="/resume/ai-settings" element={<AiModelSettingsPage />} />
+        <Route path="/resume/history" element={<VersionHistoryPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/automation" element={<AutomationPage />} />
         <Route path="/emails" element={<EmailsPage />} />

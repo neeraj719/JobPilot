@@ -57,7 +57,7 @@ def api(client: TestClient, user: User) -> TestClient:
 
 def test_every_table_has_id_is_active_and_deleted_at() -> None:
     tables = Base.metadata.sorted_tables
-    assert len(tables) == 28
+    assert len(tables) == 35
     for table in tables:
         assert "id" in table.c, f"{table.fullname} has no id"
         assert isinstance(table.c.id.type, Uuid), f"{table.fullname}.id is not a uuid"
@@ -499,7 +499,7 @@ def test_the_function_and_every_trigger_are_live(db: Session) -> None:
 
     assert function == 1, "public.set_updated_at() is missing"
     expected = {trigger_name(table.name) for table in Base.metadata.sorted_tables}
-    assert len(expected) == 28
+    assert len(expected) == 35
     assert expected <= triggers
 
 

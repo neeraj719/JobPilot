@@ -1,7 +1,8 @@
-import { ChevronLeft } from 'lucide-react'
+import { ChevronDown, ChevronLeft } from 'lucide-react'
+import * as React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { NAV_SECTIONS, isNavItemActive } from '@/components/layout/navigation'
+import { NAV_SECTIONS, activeNavChild, isNavGroupActive, isNavItemActive, type NavItem } from '@/components/layout/navigation'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SimpleTooltip } from '@/components/ui/tooltip'
 import { SIDEBAR_SHORTCUT_LABEL } from '@/lib/shortcuts'
@@ -101,6 +102,137 @@ function SidebarRail({ collapsed }: { collapsed: boolean }) {
   )
 }
 
+interface NavRowProps {
+  item: NavItem
+  pathname: string
+  isCollapsed: boolean
+  onNavigate?: () => void
+  /** Nested rows are a little shorter and smaller. */
+  depth?: 0 | 1
+  /** Overrides the item's own active test (groups decide which row carries the highlight). */
+  active?: boolean
+}
+
+function NavRow({ item, pathname, isCollapsed, onNavigate, depth = 0, active }: NavRowProps) {
+  const isActive = active ?? isNavItemActive(item, pathname)
+  const Icon = item.icon
+  return (
+    <SimpleTooltip label={item.label} side="right" disabled={!isCollapsed}>
+      <Link
+        to={item.to}
+        onClick={onNavigate}
+        aria-current={isActive ? 'page' : undefined}
+        aria-label={isCollapsed ? item.label : undefined}
+        className={cn(
+          'group relative flex items-center gap-3 overflow-hidden rounded-md px-3 font-medium',
+          depth === 0 ? 'h-9 text-sm' : 'h-8 text-[13px]',
+          'transition-colors duration-150 motion-reduce:transition-none',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          isActive
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
+        )}
+      >
+        {/* Active indicator: a short accent bar on the leading edge. */}
+        <span
+          className={cn(
+            'absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary transition-all duration-200',
+            isActive ? 'opacity-100' : 'h-0 opacity-0',
+          )}
+          aria-hidden
+        />
+        <Icon
+          className={cn(
+            'shrink-0 transition-colors',
+            depth === 0 ? 'size-4' : 'size-3.5',
+            isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground',
+          )}
+          aria-hidden
+        />
+        <span className={cn('truncate', LABEL_FADE, isCollapsed ? 'w-0 -translate-x-1 opacity-0' : 'opacity-100')}>
+          {item.label}
+        </span>
+      </Link>
+    </SimpleTooltip>
+  )
+}
+
+/**
+ * A nav item with children: the parent row is the group's landing page, a chevron folds
+ * the children, and the group opens itself whenever the route moves inside it. In the
+ * collapsed rail only the parent icon shows (highlighted when any child is active).
+ */
+function NavGroup({ item, pathname, isCollapsed, onNavigate }: Omit<NavRowProps, 'depth' | 'active'>) {
+  const groupActive = isNavGroupActive(item, pathname)
+  const activeChild = activeNavChild(item, pathname)
+  const [open, setOpen] = React.useState(groupActive)
+  React.useEffect(() => {
+    if (groupActive) setOpen(true)
+  }, [groupActive])
+
+  const expanded = open && !isCollapsed
+  const listId = `nav-group-${item.to.replace(/\W+/g, '-')}`
+  return (
+    <div>
+      <div className="relative">
+        {/* The parent carries the highlight only while its children are hidden. */}
+        <NavRow
+          item={item}
+          pathname={pathname}
+          isCollapsed={isCollapsed}
+          onNavigate={onNavigate}
+          active={isCollapsed ? groupActive : groupActive && !expanded}
+        />
+        {!isCollapsed ? (
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-label={open ? `Collapse ${item.label}` : `Expand ${item.label}`}
+            className={cn(
+              'absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground',
+              'transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+          >
+            <ChevronDown
+              className={cn('size-3.5 transition-transform duration-200 motion-reduce:transition-none', open && 'rotate-180')}
+              aria-hidden
+            />
+          </button>
+        ) : null}
+      </div>
+      <div
+        id={listId}
+        className={cn(
+          'grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none',
+          expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+        )}
+        aria-hidden={!expanded}
+      >
+        <div className="overflow-hidden">
+          {/* The guide line sits under the parent icon's centre (12px padding + 8px half icon). */}
+          <ul className="ml-[1.1875rem] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2.5">
+            {(item.children ?? []).map((child) => (
+              <li key={`${child.to}:${child.label}`}>
+                <NavRow
+                  item={child}
+                  pathname={pathname}
+                  isCollapsed={false}
+                  onNavigate={onNavigate}
+                  depth={1}
+                  active={activeChild?.to === child.to && activeChild?.label === child.label}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** Left navigation. Rendered as a fixed rail at `lg`+ and inside a Sheet on mobile. */
 export function Sidebar({ collapsed = false, onNavigate, className }: SidebarProps) {
   const { pathname } = useLocation()
@@ -137,47 +269,13 @@ export function Sidebar({ collapsed = false, onNavigate, className }: SidebarPro
                 />
               </div>
 
-              {section.items.map((item) => {
-                const active = isNavItemActive(item, pathname)
-                const Icon = item.icon
-                return (
-                  <SimpleTooltip key={item.to} label={item.label} side="right" disabled={!isCollapsed}>
-                    <Link
-                      to={item.to}
-                      onClick={onNavigate}
-                      aria-current={active ? 'page' : undefined}
-                      aria-label={isCollapsed ? item.label : undefined}
-                      className={cn(
-                        'group relative flex h-9 items-center gap-3 overflow-hidden rounded-md px-3 text-sm font-medium',
-                        'transition-colors duration-150 motion-reduce:transition-none',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        active
-                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                          : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
-                      )}
-                    >
-                      {/* Active indicator: a short accent bar on the leading edge. */}
-                      <span
-                        className={cn(
-                          'absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary transition-all duration-200',
-                          active ? 'opacity-100' : 'h-0 opacity-0',
-                        )}
-                        aria-hidden
-                      />
-                      <Icon
-                        className={cn(
-                          'size-4 shrink-0 transition-colors',
-                          active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground',
-                        )}
-                        aria-hidden
-                      />
-                      <span className={cn('truncate', LABEL_FADE, isCollapsed ? 'w-0 -translate-x-1 opacity-0' : 'opacity-100')}>
-                        {item.label}
-                      </span>
-                    </Link>
-                  </SimpleTooltip>
-                )
-              })}
+              {section.items.map((item) =>
+                item.children?.length ? (
+                  <NavGroup key={item.to} item={item} pathname={pathname} isCollapsed={isCollapsed} onNavigate={onNavigate} />
+                ) : (
+                  <NavRow key={item.to} item={item} pathname={pathname} isCollapsed={isCollapsed} onNavigate={onNavigate} />
+                ),
+              )}
             </div>
           ))}
         </nav>

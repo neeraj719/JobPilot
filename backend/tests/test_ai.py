@@ -156,7 +156,9 @@ def test_status_endpoint(api: TestClient) -> None:
     response = api.get("/api/v1/ai/status")
     assert response.status_code == 200, response.text
     body = response.json()
+    effective = body.pop("effective")  # the signed-in user's setup (AI Model Settings)
     assert body == {"provider": "mock", "model": "mock-deterministic-v1", "configured": True}
+    assert effective["provider"] == "mock" and effective["source"] == "server_default"
     assert provider_status()["configured"] is True
 
 

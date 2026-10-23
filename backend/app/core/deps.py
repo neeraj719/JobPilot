@@ -27,6 +27,7 @@ from app.core.rate_limit import client_ip, rate_limiter
 from app.core.security import decode_access_token, verify_password
 from app.models.enums import Actor, AuditLevel
 from app.models.user import User, UserRole
+from app.modules.ai.context import AiUserSlot, bind_request_user, request_ai_context
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
+    ai_slot: AiUserSlot = Depends(request_ai_context),
 ) -> User:
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing credentials")
@@ -76,6 +78,8 @@ def get_current_user(
     # The session rather than a ContextVar because a ContextVar set here would be
     # discarded — Starlette runs sync dependencies in a copy of the request's context.
     set_session_actor(db, user.id)
+    # Whose AI provider settings apply to this request (``app.modules.ai.context``).
+    bind_request_user(ai_slot, user.id)
     return user
 
 

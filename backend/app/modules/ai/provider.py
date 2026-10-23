@@ -18,6 +18,9 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from pydantic import BaseModel
@@ -67,6 +70,45 @@ class LLMProvider(ABC):
         :meth:`supports_task` returned True."""
         raise NotImplementedError(f"{self.name} provider cannot run task {task_name!r}")
 
+    # -- discovery / health (AI Model Settings) -----------------------------
+
+    def list_models(self) -> list[dict[str, Any]] | None:
+        """Models this key/server can use, live from the provider: ``[{"id", "display_name"?,
+        "context_window"?}]``. ``None`` when the provider has no listing endpoint."""
+        return None
+
+    def test_connection(self) -> dict[str, Any]:
+        """One cheap call proving the key and the model work.
+
+        Returns ``{"ok", "latency_ms", "model", "model_available", "error_code", "error"}`` and
+        never raises. The default lists the models (free on every hosted API) and checks the
+        chosen one is among them; without a listing it makes one tiny completion.
+        """
+        import time
+
+        from app.modules.ai.errors import map_exception
+
+        started = time.perf_counter()
+        result: dict[str, Any] = {"ok": False, "latency_ms": None, "model": self.model or None,
+                                  "model_available": None, "error_code": None, "error": None}
+        try:
+            models = self.list_models()
+            if models is None:
+                self.complete("Reply with the single word: ok", max_tokens=16, temperature=0.0)
+                result["model_available"] = True
+            else:
+                ids = {str(m.get("id")) for m in models}
+                result["model_available"] = (not self.model) or self.model in ids
+            result["ok"] = True
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            err = map_exception(self.name, exc, model=self.model)
+            result["error_code"], result["error"] = err.code, err.message
+        result["latency_ms"] = int((time.perf_counter() - started) * 1000)
+        if result["ok"] and result["model_available"] is False:
+            result["error_code"] = "model_unavailable"
+            result["error"] = f"The key works, but model {self.model!r} is not available to it. Pick another model."
+        return result
+
     # -- introspection ------------------------------------------------------
 
     @property
@@ -78,6 +120,38 @@ class LLMProvider(ABC):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<{type(self).__name__} model={self.model!r}>"
+
+
+# --------------------------------------------------------------------------- usage capture
+#
+# Providers are cached and shared between threads, so per-call token counts cannot live on
+# ``self``. A provider reports what the SDK returned with :func:`report_usage`; the runtime
+# reads it back inside :func:`usage_capture`. ContextVars are per thread / per task, and the
+# provider call runs in the runtime's own thread, so concurrent calls never mix.
+
+_usage: ContextVar[dict[str, int] | None] = ContextVar("jobpilot_llm_usage", default=None)
+
+
+def report_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+    """Add one SDK response's token counts to the current capture (no-op outside one)."""
+    bucket = _usage.get()
+    if bucket is None:
+        return
+    if isinstance(input_tokens, int):
+        bucket["input_tokens"] = bucket.get("input_tokens", 0) + max(0, input_tokens)
+    if isinstance(output_tokens, int):
+        bucket["output_tokens"] = bucket.get("output_tokens", 0) + max(0, output_tokens)
+    bucket["reports"] = bucket.get("reports", 0) + 1
+
+
+@contextmanager
+def usage_capture() -> Iterator[dict[str, int]]:
+    bucket: dict[str, int] = {}
+    token = _usage.set(bucket)
+    try:
+        yield bucket
+    finally:
+        _usage.reset(token)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -142,7 +216,9 @@ __all__ = [
     "extract_json",
     "get_llm_provider",
     "provider_status",
+    "report_usage",
     "reset_llm_provider",
     "schema_to_dict",
     "strip_code_fences",
+    "usage_capture",
 ]

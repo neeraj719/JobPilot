@@ -43,6 +43,7 @@ backend/smoke_uploads/
 *.sqlite3
 backend/playwright-screenshots/
 playwright-screenshots/
+notes/screenshots/
 test-results/
 playwright-report/
 playwright/.cache/

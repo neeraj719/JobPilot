@@ -1,4 +1,6 @@
 """Import every model so ``Base.metadata`` is complete for Alembic and tests."""
+import app.models.ai_settings  # noqa: F401  - registers the AI provider tables (filled by the ai-providers stream)
+import app.models.ats  # noqa: F401  - registers the ATS optimizer tables (filled by the ats stream)
 from app.models.application import Application, ApplicationAnswer, ApplicationDocument, ApplicationEvent
 from app.models.audit import AuditLog
 from app.models.automation import AutomationConfig, AutomationRun, BrowserSession, ConnectedAccount
