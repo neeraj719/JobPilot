@@ -82,13 +82,23 @@ def _scheduled_today(config: AutomationConfig, now: datetime) -> datetime:
 
 
 def due_users(db: Session, now: datetime | None = None) -> list[uuid.UUID]:
-    """Users whose scheduled automation should start right now."""
+    """Users whose scheduled automation should start right now.
+
+    The daily automation belongs to the Job Apply workspace module: a user for whom ``apply``
+    is unavailable (switched off platform-wide, or for that account, or above their role) is
+    skipped, exactly as the ``automation`` API refuses them with ``403 module_disabled``.
+    """
+    from app.modules.workspace.service import module_available
+
     now = now or utcnow()
     due: list[uuid.UUID] = []
     for config in db.scalars(select(AutomationConfig).where(AutomationConfig.enabled.is_(True))):
         if _already_ran_today(config, now):
             continue
         if now < _scheduled_today(config, now):
+            continue
+        if not module_available(db, config.user_id, "apply"):
+            logger.info("Skipping scheduled automation for user %s: the Job Apply module is off", config.user_id)
             continue
         due.append(config.user_id)
     return due

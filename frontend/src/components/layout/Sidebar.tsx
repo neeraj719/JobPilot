@@ -2,11 +2,14 @@ import { ChevronDown, ChevronLeft } from 'lucide-react'
 import * as React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { NAV_SECTIONS, activeNavChild, isNavGroupActive, isNavItemActive, type NavItem } from '@/components/layout/navigation'
+import { activeNavChild, isNavGroupActive, isNavItemActive, type NavItem } from '@/components/layout/navigation'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Skeleton } from '@/components/ui/skeleton'
 import { SimpleTooltip } from '@/components/ui/tooltip'
 import { SIDEBAR_SHORTCUT_LABEL } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
+import { ModuleSwitcher } from '@/modules/ModuleSwitcher'
+import { useActiveModule } from '@/modules/useActiveModule'
 import { useUiStore } from '@/stores/ui'
 
 export interface SidebarProps {
@@ -25,23 +28,31 @@ export interface SidebarProps {
  */
 const LABEL_FADE = 'whitespace-nowrap transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none'
 
-export function SidebarBrand({ collapsed = false }: { collapsed?: boolean }) {
+/** The JobPilot mark. Always links to the launcher ("All modules"). */
+export function BrandMark({ withName = false, className }: { withName?: boolean; className?: string }) {
   return (
-    <Link
-      to="/dashboard"
-      className="flex min-w-0 items-center gap-2.5 rounded-md px-1 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
-        <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
-          <path d="M20.3 3.9 5.6 9.8c-.9.4-.9 1.6 0 2l5.1 2.2 2.3 5.2c.4.9 1.6.8 2-.1l5.9-14.3c.3-.8-.4-1.5-1.2-1.2Z" />
-        </svg>
-      </span>
-      <span className={cn('min-w-0', LABEL_FADE, collapsed ? 'pointer-events-none -translate-x-1 opacity-0' : 'opacity-100')} aria-hidden={collapsed}>
-        <span className="block truncate text-sm font-semibold leading-tight text-foreground">JobPilot AI</span>
-        <span className="block truncate text-[11px] leading-tight text-muted-foreground">Application copilot</span>
-      </span>
-      <span className="sr-only">JobPilot AI — go to dashboard</span>
-    </Link>
+    <SimpleTooltip label="All modules" side="bottom" disabled={withName}>
+      <Link
+        to="/home"
+        className={cn(
+          'flex shrink-0 items-center gap-2.5 rounded-md p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          className,
+        )}
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
+          <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
+            <path d="M20.3 3.9 5.6 9.8c-.9.4-.9 1.6 0 2l5.1 2.2 2.3 5.2c.4.9 1.6.8 2-.1l5.9-14.3c.3-.8-.4-1.5-1.2-1.2Z" />
+          </svg>
+        </span>
+        {withName ? (
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold leading-tight text-foreground">JobPilot AI</span>
+            <span className="block truncate text-[11px] leading-tight text-muted-foreground">All modules</span>
+          </span>
+        ) : null}
+        <span className="sr-only">JobPilot AI — all modules</span>
+      </Link>
+    </SimpleTooltip>
   )
 }
 
@@ -233,21 +244,43 @@ function NavGroup({ item, pathname, isCollapsed, onNavigate }: Omit<NavRowProps,
   )
 }
 
-/** Left navigation. Rendered as a fixed rail at `lg`+ and inside a Sheet on mobile. */
+/** Left navigation: the module switcher on top, then the active module's sections only. */
 export function Sidebar({ collapsed = false, onNavigate, className }: SidebarProps) {
   const { pathname } = useLocation()
   const isDrawer = Boolean(onNavigate)
   const isCollapsed = collapsed && !isDrawer
+  const active = useActiveModule()
+  const sections = active.definition?.navSections ?? []
 
   return (
     <div className={cn('relative flex h-full flex-col bg-sidebar text-sidebar-foreground', className)}>
-      <div className="flex h-16 shrink-0 items-center overflow-hidden border-b border-sidebar-border px-3">
-        <SidebarBrand collapsed={isCollapsed} />
+      <div
+        className={cn(
+          'flex h-16 shrink-0 items-center gap-1.5 overflow-hidden border-b border-sidebar-border',
+          isCollapsed ? 'justify-center px-3' : 'px-3',
+        )}
+      >
+        {!isCollapsed ? <BrandMark /> : null}
+        <ModuleSwitcher
+          definition={active.definition}
+          module={active.module}
+          modules={active.modules}
+          collapsed={isCollapsed}
+          onNavigate={onNavigate}
+          shortcutControlled={!isDrawer}
+        />
       </div>
 
       <ScrollArea className="flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
-        <nav className="space-y-5 px-3 py-4" aria-label="Main">
-          {NAV_SECTIONS.map((section) => (
+        <nav className="space-y-5 px-3 py-4" aria-label={active.definition ? `${active.module?.name ?? active.definition.name} navigation` : 'Main'}>
+          {active.isLoading && !active.definition ? (
+            <div className="space-y-2 px-3" aria-hidden>
+              {Array.from({ length: 6 }, (_, index) => (
+                <Skeleton key={index} className="h-7 w-full" />
+              ))}
+            </div>
+          ) : null}
+          {sections.map((section) => (
             <div key={section.title} className="space-y-0.5">
               <div className="relative flex h-6 items-center px-3">
                 <p

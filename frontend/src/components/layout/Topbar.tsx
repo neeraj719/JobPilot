@@ -2,6 +2,7 @@ import { Menu, Search } from 'lucide-react'
 import * as React from 'react'
 
 import { NotificationsBell } from '@/components/layout/NotificationsBell'
+import { BrandMark } from '@/components/layout/Sidebar'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { UserMenu } from '@/components/layout/UserMenu'
 import { Button } from '@/components/ui/button'
@@ -11,12 +12,14 @@ import { cn } from '@/lib/utils'
 export interface TopbarProps {
   /** Page title slot — defaults to the active nav item's label. */
   title?: React.ReactNode
-  /** Opens the mobile navigation drawer. */
+  /** Opens the mobile navigation drawer. Omit it where there is no sidebar (the launcher). */
   onOpenMenu?: () => void
+  /** Show the JobPilot mark on the left (the launcher has no sidebar to carry it). */
+  showBrand?: boolean
   className?: string
 }
 
-export function Topbar({ title, onOpenMenu, className }: TopbarProps) {
+export function Topbar({ title, onOpenMenu, showBrand = false, className }: TopbarProps) {
   return (
     <header
       className={cn(
@@ -25,11 +28,15 @@ export function Topbar({ title, onOpenMenu, className }: TopbarProps) {
       )}
     >
       {/* Mobile and tablet: open the slide-in drawer. */}
-      <Button variant="ghost" size="icon" className="-ml-2 shrink-0 lg:hidden" onClick={onOpenMenu} aria-label="Open navigation">
-        <Menu />
-      </Button>
+      {onOpenMenu ? (
+        <Button variant="ghost" size="icon" className="-ml-2 shrink-0 lg:hidden" onClick={onOpenMenu} aria-label="Open navigation">
+          <Menu />
+        </Button>
+      ) : null}
 
-      {title ? <h2 className="truncate text-sm font-semibold sm:text-base">{title}</h2> : null}
+      {showBrand ? <BrandMark withName className="-ml-1 mr-2" /> : null}
+
+      {title ? <h2 className="min-w-0 truncate text-sm font-semibold sm:text-base">{title}</h2> : null}
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <div className="relative hidden md:block">

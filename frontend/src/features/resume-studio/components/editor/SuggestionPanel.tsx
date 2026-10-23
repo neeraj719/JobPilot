@@ -31,10 +31,10 @@ export interface SuggestionPanelProps {
  */
 export function SuggestionPanel({ title, original, loading, error, candidates, note, onApply, onClose, onRetry }: SuggestionPanelProps) {
   return (
-    <div className="mt-2 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3" role="region" aria-label={title} aria-busy={loading}>
+    <div className="mt-2 rounded-lg border border-ai/25 bg-ai-soft/60 p-3" role="region" aria-label={title} aria-busy={loading}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-medium">
-          <Sparkles className="size-4 text-violet-600 dark:text-violet-300" aria-hidden />
+          <Sparkles className="size-4 text-ai" aria-hidden />
           {title}
         </p>
         <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close suggestions">
@@ -44,7 +44,7 @@ export function SuggestionPanel({ title, original, loading, error, candidates, n
       <div className="grid gap-3 2xl:grid-cols-2">
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Your text</p>
-          <p className="rounded-md border border-border bg-background p-2 text-sm">{original}</p>
+          <p className="rounded-md border border-border bg-card p-2 text-sm">{original}</p>
         </div>
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Suggestions</p>
@@ -70,7 +70,7 @@ export function SuggestionPanel({ title, original, loading, error, candidates, n
           ) : (
             <ul className="space-y-2">
               {candidates.map((candidate, index) => (
-                <li key={index} className="rounded-md border border-border bg-background p-2">
+                <li key={index} className="rounded-md border border-border bg-card p-2">
                   <p className="text-sm">
                     {candidate.text.split(/(\[[^\]]*\])/).map((part, i) =>
                       /^\[[^\]]*\]$/.test(part) ? (

@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
 
 import { isApiError } from '@/lib/api'
 
@@ -9,7 +9,21 @@ import { isApiError } from '@/lib/api'
  * one retry for transient/server failures (never for 4xx), and no refetch storm when the
  * user tabs back into the browser.
  */
+/**
+ * A `403 module_disabled` means the workspace module behind that endpoint was switched off
+ * for this user (or platform-wide) since the module list was fetched. Refetching the list is
+ * enough: the module route guard (`src/modules/ModuleRoute.tsx`) then sends the user to the
+ * launcher with an explanation.
+ */
+function refreshModulesOnModuleDisabled(error: unknown) {
+  if (isApiError(error) && error.status === 403 && error.code === 'module_disabled') {
+    void queryClient.invalidateQueries({ queryKey: qk.workspace.all })
+  }
+}
+
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: refreshModulesOnModuleDisabled }),
+  mutationCache: new MutationCache({ onError: refreshModulesOnModuleDisabled }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,
@@ -135,5 +149,14 @@ export const qk = {
   },
   audit: {
     list: (params: unknown) => ['audit', 'list', params] as const,
+  },
+  // Multi-module workspace: module list (with / without the launcher numbers), preferences, admin.
+  workspace: {
+    all: ['workspace'] as const,
+    modules: (withSummary: boolean) => ['workspace', 'modules', withSummary] as const,
+    preferences: ['workspace', 'preferences'] as const,
+    adminCatalog: ['workspace', 'admin', 'catalog'] as const,
+    adminUser: (email: string) => ['workspace', 'admin', 'user', email] as const,
+    adminUserModules: (userId: string) => ['workspace', 'admin', 'modules', userId] as const,
   },
 } as const

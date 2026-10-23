@@ -71,6 +71,12 @@ Core helpers: `backend/app/core/` (config, database, security, deps, exceptions,
 | dashboard | `/api/v1/dashboard` | automation+dashboard |
 | worker (`app/worker/`) | – | automation+dashboard |
 | seed (`app/seed.py`) | – | automation+dashboard |
+| workspace | `/api/v1/workspace` (module catalog, launcher, per-user module settings) | modules |
+
+Module guards (`app.core.deps.require_module`, one `dependencies=[...]` per `include_router`):
+`resume` → resumes, ats; `apply` → jobs, applications, automation, interviews, emails,
+companies, matching, dashboard. auth, profiles, notifications, audit, ai, browser,
+integrations, workspace and the demo ATS belong to no module. See §19.
 
 ---
 
@@ -631,3 +637,51 @@ employer's ATS result.
   `GET /targets/{id}/compare` (source vs tailored with the explanation per change); `GET /summary`.
 * Model calls go through `ats.llm` → `ai.runtime`; JD and resume text is always fenced with
   `ai.safety.wrap_untrusted`; background polish runs inside `ai.context.ai_user(user_id)`.
+
+## 19. Workspace modules (`/api/v1/workspace`)
+
+JobPilot is a suite of modules behind a launcher. The **server** decides which modules a user
+sees, in which order and whether each can be opened; the **client registry**
+(`frontend/src/modules/registry.ts`) decides how a module renders (icon, home route, the path
+prefixes it owns, its sidebar sections). URLs never moved.
+
+* Catalog `master.modules` (seeded by migration `f6b8d0c2e4a7`, insert-missing-only):
+  `resume` (Resume Studio, on), `apply` (Job Apply, AVAILABLE but **off platform-wide** until an
+  admin enables it), `insights` (COMING_SOON, no `home_path`).
+* Unavailable reasons, checked in this order (first match wins): `platform_disabled` (catalog
+  `is_enabled = false`, or the row is inactive/tombstoned) → `coming_soon` → `disabled_for_user`
+  (admin per-user switch) → `role_required` (`min_role` above the session's **active** role).
+  Modules above the role are not listed at all; tombstoned/inactive rows are not listed.
+* `require_module(code)` → `403 module_disabled`, message names the module,
+  `details = {module, module_name, reason}`. Authentication still runs first (no token = 401).
+  A code the catalog never had is allowed (unseeded DB never locks users out).
+* `GET /modules?summary=false` → `ModuleRead[]` in the user's order (pinned first, then the
+  user's `sort_order`, then the catalog's): `code, name, tagline, description, icon, home_path,
+  accent, status, min_role, available, unavailable_reason, is_pinned, sort_order,
+  last_opened_at, open_count, summary`. `summary=true` adds 2–3 `ModuleStat {key, label, value,
+  unit?, hint?}` per available module, computed by the owning services (`resumes.service.summary`,
+  `ats.service.list_analyses`, `dashboard.service.build_stats`).
+* `POST /modules/{code}/open` → `ModuleRead` (records `last_opened_at`, `open_count`, the last
+  module); 403 when unavailable, 404 when not visible. `PUT /modules/{code} {is_pinned?,
+  sort_order?}` → `ModuleRead` (the user's own; `extra="forbid"`).
+* `GET /preferences` / `PUT /preferences {landing?: LAUNCHER|LAST_MODULE, show_tips?}` →
+  `{landing, show_tips, last_module_code, last_module_home_path}` (the last module only while
+  it can still be opened).
+* Admin (`require_admin`, active ADMIN role):
+  `GET /admin/modules` → `AdminCatalogModule[]`; `PUT /admin/modules/{code} {is_enabled?,
+  status?, sort_order?}` — 409 `last_enabled_module` (the last module anybody can use cannot be
+  switched off or made COMING_SOON), 422 `home_path_required`, audited
+  `workspace.module_catalog_updated` (`meta.before/after`, `user_id` = the admin);
+  `GET /admin/users?email=` (exact, case-insensitive; 404 `user_not_found`);
+  `GET /admin/users/{user_id}/modules`, `PUT /admin/users/{user_id}/modules/{code} {is_enabled}`
+  (404 unknown user/module; audited `workspace.module_toggled`, `user_id` = the target,
+  `meta.admin_id`).
+* Background work: `workspace.service.module_available(db, user_id, code)` is the same rule
+  with the user's highest role; `app.worker.scheduler.due_users` skips users for whom `apply`
+  is unavailable.
+* Client: `/` and `/home` are the launcher (no sidebar). Login / ChooseRole / Register land on
+  `/home` (state `{entry: true}`) unless a deep link was saved; on entry `/home` forwards to the
+  last module when `landing = LAST_MODULE`; "All modules" in the switcher always shows the
+  launcher. A module route whose module is not returned or not available redirects to `/home`
+  with a toast; a `403 module_disabled` from any query refetches the module list.
+

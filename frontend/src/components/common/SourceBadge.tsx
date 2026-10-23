@@ -12,7 +12,7 @@ export function SourceBadge({ source, className }: SourceBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center whitespace-nowrap rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground',
+        'inline-flex items-center whitespace-nowrap rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground',
         className,
       )}
     >
@@ -41,7 +41,7 @@ export function SourceBadgeList({ sources, max = 3, className }: SourceBadgeList
       ))}
       {overflow > 0 ? (
         <span
-          className="inline-flex items-center rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+          className="inline-flex items-center rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground"
           title={sources.slice(max).map((s) => sourceLabel(s)).join(', ')}
         >
           +{overflow}

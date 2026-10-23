@@ -1486,6 +1486,12 @@ def seed_demo_data(db: Session, *, force: bool = False) -> SeedSummary:
     boards = configure_company_boards(db)
     if boards:
         summary.messages.append(f"Configured {boards} public job boards.")
+    # The workspace module catalog is reference data too (the migration inserts it; a
+    # database built from the models does not have it yet). Idempotent.
+    from app.modules.workspace.service import ensure_catalog
+
+    if ensure_catalog(db):
+        summary.messages.append("Created the workspace module catalog.")
 
     # Tombstones included: a soft-deleted demo account still owns the email address as
     # far as a rebuild is concerned, and --force has to find it to clear it out.

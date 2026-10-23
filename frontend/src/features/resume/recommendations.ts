@@ -6,6 +6,7 @@
  * not change because of it — so it lives in localStorage, keyed by resume id.
  */
 import * as React from 'react'
+import { SCORE_TEXT, scoreTone } from '@/lib/score'
 
 import type {
   Recommendation,
@@ -40,9 +41,7 @@ export const ACTION_LABELS: Record<RecommendationAction, string> = {
 
 /** Health score colour band: text class used by the gauge and the score figure. */
 export function healthColor(score: number): string {
-  if (score >= 80) return 'text-success'
-  if (score >= 60) return 'text-warning'
-  return 'text-destructive'
+  return SCORE_TEXT[scoreTone(score, 'quality')]
 }
 
 export function healthLabel(score: number): string {

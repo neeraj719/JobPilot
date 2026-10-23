@@ -26,6 +26,7 @@ from app.models.notification import Notification
 from app.models.profile import CompanyPreference, JobPreference, StandingAnswer, UserProfile
 from app.models.resume import Resume, ResumeVersion, Skill
 from app.models.user import DEFAULT_ROLES, RefreshToken, Role, User, UserRoleAssignment
+from app.models.workspace import DEFAULT_MODULES, UserModuleSetting, UserWorkspacePreference, WorkspaceModule
 
 __all__ = [
     "Base",
@@ -68,4 +69,8 @@ __all__ = [
     "BrowserSession",
     "AuditLog",
     "Notification",
+    "DEFAULT_MODULES",
+    "WorkspaceModule",
+    "UserModuleSetting",
+    "UserWorkspacePreference",
 ]

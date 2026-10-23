@@ -13,11 +13,12 @@ export function StatusBadge({ status, className, fallbackLabel = 'Not applied' }
   return (
     <span
       className={cn(
-        'inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium',
         statusColor(status),
         className,
       )}
     >
+      <span className="size-1.5 shrink-0 rounded-full bg-current opacity-80" aria-hidden />
       {statusLabel(status, fallbackLabel)}
     </span>
   )

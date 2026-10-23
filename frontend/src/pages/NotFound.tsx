@@ -17,7 +17,7 @@ export default function NotFoundPage() {
         description="That route does not exist. It may have been renamed, or the link is out of date."
         action={
           <Button asChild>
-            <Link to="/dashboard">Back to dashboard</Link>
+            <Link to="/home">Back to all modules</Link>
           </Button>
         }
         className="w-full"

@@ -130,7 +130,7 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="ghost" size="icon-sm" aria-label={`AI help for ${label.toLowerCase()} ${index + 1}`}>
-                      <Sparkles className="text-violet-600 dark:text-violet-300" aria-hidden />
+                      <Sparkles className="text-ai" aria-hidden />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64">

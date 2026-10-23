@@ -171,11 +171,11 @@ export default function VersionHistoryPage() {
                     <span
                       className={cn(
                         'absolute -left-[21px] top-4 size-2.5 rounded-full ring-4 ring-background',
-                        item.change_source === 'AI' ? 'bg-violet-500' : item.change_source === 'SYSTEM' ? 'bg-muted-foreground' : 'bg-primary',
+                        item.change_source === 'AI' ? 'bg-ai' : item.change_source === 'SYSTEM' ? 'bg-muted-foreground' : 'bg-primary',
                       )}
                       aria-hidden
                     />
-                    <Card className={cn(item.change_source === 'AI' && 'border-violet-500/30')}>
+                    <Card className={cn(item.change_source === 'AI' && 'border-ai/30')}>
                       <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-1.5">

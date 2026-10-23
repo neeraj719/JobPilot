@@ -41,8 +41,9 @@ export function StatCard({
   return (
     <Card
       className={cn(
-        'overflow-hidden transition-shadow',
-        onClick && 'cursor-pointer hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'overflow-hidden transition-[border-color,box-shadow] duration-150',
+        onClick &&
+          'cursor-pointer hover:border-input/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         className,
       )}
       onClick={onClick}
@@ -65,7 +66,7 @@ export function StatCard({
           {loading ? (
             <Skeleton className="h-8 w-20" />
           ) : (
-            <p className="text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
+            <p className="text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</p>
           )}
           {hasDelta && !loading ? (
             <p className="flex items-center gap-1 text-xs">
@@ -80,7 +81,7 @@ export function StatCard({
           {description && !hasDelta ? <p className="text-xs text-muted-foreground">{description}</p> : null}
         </div>
         {Icon ? (
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/10">
             <Icon className="size-4" aria-hidden />
           </span>
         ) : null}

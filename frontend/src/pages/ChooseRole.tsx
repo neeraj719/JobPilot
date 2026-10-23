@@ -11,6 +11,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage, isApiError } from '@/lib/api'
 import { roleDescription, roleLabel } from '@/lib/roles'
+import { isLauncherPath } from '@/modules/registry'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth'
 
@@ -33,7 +34,9 @@ export default function ChooseRolePage() {
   const [remember, setRemember] = React.useState(false)
   const [submitting, setSubmitting] = React.useState<string | null>(null)
 
-  const redirectTo = (location.state as { from?: string } | null)?.from ?? '/dashboard'
+  const from = (location.state as { from?: string } | null)?.from
+  const redirectTo = from && !isLauncherPath(from) ? from : '/home'
+  const redirectState = redirectTo === '/home' ? { entry: true } : undefined
 
   if (!pending) return null
   const { user, roles } = pending
@@ -43,7 +46,7 @@ export default function ChooseRolePage() {
     try {
       await selectRole(role, remember)
       toast.success(`Signed in as ${roleLabel(role)}`, { description: `Welcome back, ${user.full_name || user.email}` })
-      navigate(redirectTo, { replace: true })
+      navigate(redirectTo, { replace: true, state: redirectState })
     } catch (error) {
       if (isApiError(error) && error.status === 401) {
         toast.error('Please sign in again', { description: errorMessage(error) })

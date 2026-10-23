@@ -7,7 +7,7 @@
 #
 # The live database is only read (SELECT on alembic_version). The scratch database is dropped
 # on exit whether the check passes or fails.
-# Environment: BACKUP_DIR (default backups), EXPECTED_TABLES (default 35),
+# Environment: BACKUP_DIR (default backups), EXPECTED_TABLES (default 38),
 #              POSTGRES_USER / POSTGRES_DB (default jobpilot / jobpilot).
 set -eu
 
@@ -16,7 +16,7 @@ cd "$ROOT"
 
 SCRATCH=jobpilot_restore_check
 DIR=${BACKUP_DIR:-backups}
-EXPECTED_TABLES=${EXPECTED_TABLES:-35}
+EXPECTED_TABLES=${EXPECTED_TABLES:-38}
 EXPECTED_SCHEMAS=5
 DB_USER=${POSTGRES_USER:-jobpilot}
 LIVE_DB=${POSTGRES_DB:-jobpilot}

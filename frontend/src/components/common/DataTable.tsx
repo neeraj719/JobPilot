@@ -87,7 +87,7 @@ export function DataTable<T>({
   const showEmpty = !loading && rows.length === 0
 
   return (
-    <div className={cn('overflow-hidden rounded-lg border border-border bg-card', className)}>
+    <div className={cn('overflow-hidden rounded-xl border border-border bg-card shadow-xs', className)}>
       <Table>
         {caption ? <TableCaption>{caption}</TableCaption> : null}
         <TableHeader>

@@ -53,7 +53,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.core.db_triggers import create_updated_at_triggers, drop_updated_at_triggers, metadata_tables  # noqa: E402
-from app.models import DEFAULT_ROLES, SCHEMAS, Base  # noqa: E402
+from app.models import DEFAULT_MODULES, DEFAULT_ROLES, SCHEMAS, Base  # noqa: E402
 
 _SAFE_URL = make_url(TEST_DATABASE_URL).render_as_string(hide_password=True)
 UNREACHABLE = (
@@ -94,6 +94,38 @@ def _seed_roles(conn) -> None:
         )
 
 
+def _seed_modules(conn) -> None:
+    """Re-create the ``master.modules`` catalog (``resume``, ``apply``, ``insights``).
+
+    Reference data like the roles: the migration inserts it in production, the suite puts it
+    back after every truncate so the module guards (``app.core.deps.require_module``) run
+    their real path in every test instead of the "catalog never seeded" fallback.
+
+    Every module is seeded **enabled** here, unlike production (where ``apply`` starts
+    switched off): the suite exercises every module's API, and the workspace tests switch
+    modules off explicitly when that is what they test.
+    """
+    for code, name, tagline, description, icon, home_path, accent, sort_order, _enabled, status in DEFAULT_MODULES:
+        conn.execute(
+            text(
+                'INSERT INTO "master"."modules" (id, code, name, tagline, description, icon, home_path, accent, '
+                "sort_order, is_enabled, min_role, status, is_active) VALUES (gen_random_uuid(), :code, :name, "
+                ":tagline, :description, :icon, :home_path, :accent, :sort_order, true, 'USER', :status, true)"
+            ),
+            {
+                "code": code,
+                "name": name,
+                "tagline": tagline,
+                "description": description,
+                "icon": icon,
+                "home_path": home_path,
+                "accent": accent,
+                "sort_order": sort_order,
+                "status": status.value,
+            },
+        )
+
+
 def _ensure_database() -> None:
     """``CREATE DATABASE`` the test database if it is not there yet."""
     url = make_url(TEST_DATABASE_URL)
@@ -126,6 +158,7 @@ def _create_schema():
         # migration calls, so the two cannot drift.
         create_updated_at_triggers(conn, metadata_tables(Base.metadata))
         _seed_roles(conn)
+        _seed_modules(conn)
     yield
     with engine.begin() as conn:
         drop_updated_at_triggers(conn, metadata_tables(Base.metadata))
@@ -147,6 +180,7 @@ def _clean_tables():
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE TABLE {_ALL_TABLES} RESTART IDENTITY CASCADE"))
         _seed_roles(conn)
+        _seed_modules(conn)
 
 
 @pytest.fixture(autouse=True)

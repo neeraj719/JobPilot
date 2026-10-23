@@ -23,6 +23,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
 import { offerToSavePassword } from '@/lib/credentials'
 import { roleLabel } from '@/lib/roles'
+import { isLauncherPath } from '@/modules/registry'
 import { useAuthStore } from '@/stores/auth'
 
 const loginSchema = z.object({
@@ -41,7 +42,11 @@ export default function LoginPage() {
   const login = useAuthStore((state) => state.login)
   const [showPassword, setShowPassword] = React.useState(false)
 
-  const redirectTo = (location.state as { from?: string } | null)?.from ?? '/dashboard'
+  // A deep link the user was sent away from wins; otherwise the launcher, flagged as the
+  // post-sign-in entry so it can forward to the last module when the user chose that.
+  const from = (location.state as { from?: string } | null)?.from
+  const redirectTo = from && !isLauncherPath(from) ? from : '/home'
+  const redirectState = redirectTo === '/home' ? { entry: true } : undefined
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -57,7 +62,7 @@ export default function LoginPage() {
       form.resetField('password')
       if (outcome.status === 'role_selection') {
         // Several roles held: the session starts only once one is chosen.
-        navigate('/choose-role', { replace: true, state: { from: redirectTo } })
+        navigate('/choose-role', { replace: true, state: { from: from ?? undefined } })
         return
       }
       const { user } = outcome
@@ -70,7 +75,7 @@ export default function LoginPage() {
       } else {
         toast.success(`Welcome back, ${user.full_name || user.email}`)
       }
-      navigate(redirectTo, { replace: true })
+      navigate(redirectTo, { replace: true, state: redirectState })
     } catch (error) {
       toast.error('Could not sign in', { description: errorMessage(error, 'Check your email and password.') })
       form.setError('password', { message: 'Invalid email or password' })

@@ -26,14 +26,14 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card/40 text-center',
+        'flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface-2/60 text-center',
         size === 'md' ? 'gap-3 px-6 py-14' : 'gap-2 px-4 py-10',
         className,
       )}
     >
       <span
         className={cn(
-          'flex items-center justify-center rounded-full bg-muted text-muted-foreground',
+          'flex items-center justify-center rounded-full bg-card text-muted-foreground shadow-xs ring-1 ring-border',
           size === 'md' ? 'size-12' : 'size-10',
         )}
       >

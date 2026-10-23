@@ -37,7 +37,7 @@ export function TagInput({ id, value, onChange, placeholder, label, className }:
   }
 
   return (
-    <div className={cn('rounded-md border border-input bg-background p-1.5 focus-within:ring-2 focus-within:ring-ring', className)}>
+    <div className={cn('rounded-md border border-input bg-card p-1.5 shadow-xs focus-within:ring-2 focus-within:ring-ring', className)}>
       <ul className="flex flex-wrap gap-1.5" aria-label={label}>
         {value.map((item, index) => (
           <li key={`${item}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs">

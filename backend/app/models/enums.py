@@ -360,3 +360,17 @@ class SuggestionStatus(StrEnum):
     APPLIED = "APPLIED"
     IGNORED = "IGNORED"
     EDITED = "EDITED"  # applied with text the user edited
+
+
+class ModuleStatus(StrEnum):
+    """Lifecycle of a workspace module in the catalog (``master.modules``)."""
+
+    AVAILABLE = "AVAILABLE"
+    COMING_SOON = "COMING_SOON"  # shown on the launcher, cannot be opened, has no routes
+
+
+class WorkspaceLanding(StrEnum):
+    """Where ``/home`` sends the user after sign-in."""
+
+    LAUNCHER = "LAUNCHER"  # the module launcher (default)
+    LAST_MODULE = "LAST_MODULE"  # straight into the module opened last

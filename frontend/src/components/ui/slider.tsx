@@ -21,7 +21,7 @@ const Slider = React.forwardRef<
         <SliderPrimitive.Thumb
           key={index}
           className={cn(
-            'block size-4 rounded-full border border-primary/50 bg-background shadow transition-colors',
+            'block size-4 rounded-full border-2 border-primary bg-card shadow-sm transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
             'disabled:pointer-events-none disabled:opacity-50',
           )}

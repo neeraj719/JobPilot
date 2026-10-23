@@ -23,7 +23,7 @@ export function MatchScore({ score, className, showBar = false, size = 'md', lab
       <span
         className={cn(
           'inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold tabular-nums',
-          size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-0.5 text-xs',
+          size === 'sm' ? 'px-2 py-0.5 text-2xs' : 'px-2.5 py-0.5 text-xs',
           matchScoreColor(score),
         )}
         title={hasScore ? `Match score ${clamped} out of 100` : 'Not analyzed yet'}
@@ -32,7 +32,7 @@ export function MatchScore({ score, className, showBar = false, size = 'md', lab
         {label ? <span className="font-normal opacity-80">{label}</span> : null}
       </span>
       {showBar ? (
-        <span className="h-1 w-full min-w-16 overflow-hidden rounded-full bg-muted" aria-hidden>
+        <span className="h-1 w-full min-w-16 overflow-hidden rounded-full bg-surface-3" aria-hidden>
           <span
             className={cn('block h-full rounded-full transition-all', matchScoreBarColor(score))}
             style={{ width: `${clamped}%` }}

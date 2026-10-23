@@ -134,6 +134,25 @@ def require_roles(*roles: UserRole) -> Callable[..., User]:
 require_admin = require_roles(UserRole.ADMIN)
 
 
+def require_module(code: str) -> Callable[..., None]:
+    """Guard a whole router on a workspace module (``app.modules.workspace``).
+
+    Mounted once per router in ``app.main`` (``dependencies=[Depends(require_module("resume"))]``).
+    A module switched off platform-wide, switched off for this user by an admin, above the
+    session's active role, or not available yet answers ``403 module_disabled`` with the
+    module's name in the message and ``details.module`` / ``details.reason``. Authentication
+    still comes first: no token is ``401`` exactly as before.
+    """
+
+    def _guard(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> None:
+        from app.modules.workspace.service import ensure_module_access  # lazy: avoids an import cycle
+
+        ensure_module_access(db, user, code)
+
+    _guard.__name__ = f"require_module_{code}"
+    return _guard
+
+
 def _token_is_fresh(issued_at: object) -> bool:
     if isinstance(issued_at, bool) or not isinstance(issued_at, (int, float)):
         return False  # a token without ``iat`` is never fresh

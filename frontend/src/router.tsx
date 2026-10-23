@@ -1,34 +1,61 @@
 import * as React from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 
 import { AppShell } from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/spinner'
+import { ModuleRoute, PageLoading } from '@/modules/ModuleRoute'
 import { useAuthStore } from '@/stores/auth'
-import AnalyticsPage from '@/pages/Analytics'
-import ApplicationDetailPage from '@/pages/ApplicationDetail'
-import ApplicationsPage from '@/pages/Applications'
-import AutomationPage from '@/pages/Automation'
-import CompaniesPage from '@/pages/Companies'
-import DashboardPage from '@/pages/Dashboard'
-import EmailsPage from '@/pages/Emails'
-import InterviewsPage from '@/pages/Interviews'
-import JobsPage from '@/pages/Jobs'
 import ChooseRolePage from '@/pages/ChooseRole'
+import HomePage from '@/pages/Home'
 import LoginPage from '@/pages/Login'
 import NotFoundPage from '@/pages/NotFound'
-import ProfilePage from '@/pages/Profile'
-import QueuePage from '@/pages/Queue'
 import RegisterPage from '@/pages/Register'
-import SettingsPage from '@/pages/Settings'
-import AiModelSettingsPage from '@/pages/resume/AiModelSettings'
-import AtsOptimizerPage from '@/pages/resume/AtsOptimizer'
-import CreateResumePage from '@/pages/resume/CreateResume'
-import JobTargetDetailPage from '@/pages/resume/JobTargetDetail'
-import JobTargetsPage from '@/pages/resume/JobTargets'
-import MyResumesPage from '@/pages/resume/MyResumes'
-import ResumeDashboardPage from '@/pages/resume/ResumeDashboard'
-import ResumeEditorPage from '@/pages/resume/ResumeEditor'
-import VersionHistoryPage from '@/pages/resume/VersionHistory'
+
+/*
+ * Code-splitting: each workspace module's pages are one lazily loaded bundle
+ * (`src/modules/<code>/pages.ts`), and so are the account pages. The sign-in pages and the
+ * launcher stay in the main bundle so the first paint after login needs nothing else.
+ */
+const loadResume = () => import('@/modules/resume/pages')
+const loadApply = () => import('@/modules/apply/pages')
+const loadAccount = () => import('@/modules/account/pages')
+
+function lazyPage<M extends Record<string, unknown>, K extends keyof M & string>(load: () => Promise<M>, name: K) {
+  return React.lazy(async () => ({ default: (await load())[name] as React.ComponentType }))
+}
+
+const DashboardPage = lazyPage(loadApply, 'DashboardPage')
+const AnalyticsPage = lazyPage(loadApply, 'AnalyticsPage')
+const JobsPage = lazyPage(loadApply, 'JobsPage')
+const QueuePage = lazyPage(loadApply, 'QueuePage')
+const ApplicationsPage = lazyPage(loadApply, 'ApplicationsPage')
+const ApplicationDetailPage = lazyPage(loadApply, 'ApplicationDetailPage')
+const CompaniesPage = lazyPage(loadApply, 'CompaniesPage')
+const InterviewsPage = lazyPage(loadApply, 'InterviewsPage')
+const AutomationPage = lazyPage(loadApply, 'AutomationPage')
+const EmailsPage = lazyPage(loadApply, 'EmailsPage')
+
+const ResumeDashboardPage = lazyPage(loadResume, 'ResumeDashboardPage')
+const MyResumesPage = lazyPage(loadResume, 'MyResumesPage')
+const ResumeEditorPage = lazyPage(loadResume, 'ResumeEditorPage')
+const CreateResumePage = lazyPage(loadResume, 'CreateResumePage')
+const AtsOptimizerPage = lazyPage(loadResume, 'AtsOptimizerPage')
+const JobTargetsPage = lazyPage(loadResume, 'JobTargetsPage')
+const JobTargetDetailPage = lazyPage(loadResume, 'JobTargetDetailPage')
+const AiModelSettingsPage = lazyPage(loadResume, 'AiModelSettingsPage')
+const VersionHistoryPage = lazyPage(loadResume, 'VersionHistoryPage')
+
+const ProfilePage = lazyPage(loadAccount, 'ProfilePage')
+const SettingsPage = lazyPage(loadAccount, 'SettingsPage')
+
+/** Account pages belong to no module: they only need a Suspense boundary of their own. */
+function AccountRoute() {
+  return (
+    <React.Suspense fallback={<PageLoading />}>
+      <Outlet />
+    </React.Suspense>
+  )
+}
 
 function FullPageSpinner() {
   return (
@@ -61,7 +88,7 @@ function RoleSelectionRoute({ children }: { children: React.ReactNode }) {
   const pendingRoleSelection = useAuthStore((state) => state.pendingRoleSelection)
 
   if (!isBootstrapped) return <FullPageSpinner />
-  if (accessToken) return <Navigate to={(location.state as { from?: string } | null)?.from ?? '/dashboard'} replace />
+  if (accessToken) return <Navigate to={(location.state as { from?: string } | null)?.from ?? '/home'} replace />
   if (!pendingRoleSelection) return <Navigate to="/login" replace />
   return <>{children}</>
 }
@@ -72,7 +99,7 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const isBootstrapped = useAuthStore((state) => state.isBootstrapped)
 
   if (!isBootstrapped) return <FullPageSpinner />
-  if (accessToken) return <Navigate to="/dashboard" replace />
+  if (accessToken) return <Navigate to="/home" replace />
   return <>{children}</>
 }
 
@@ -111,30 +138,43 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/jobs" element={<JobsPage />} />
-        <Route path="/queue" element={<QueuePage />} />
-        <Route path="/applications" element={<ApplicationsPage />} />
-        <Route path="/applications/:id" element={<ApplicationDetailPage />} />
-        <Route path="/companies" element={<CompaniesPage />} />
-        {/* Resume workspace — one sidebar group, see notes/resume-studio-plan.md */}
-        <Route path="/resume" element={<ResumeDashboardPage />} />
-        <Route path="/resume/my" element={<MyResumesPage />} />
-        <Route path="/resume/my/:id" element={<MyResumesPage />} />
-        <Route path="/resume/my/:id/edit" element={<ResumeEditorPage />} />
-        <Route path="/resume/new" element={<CreateResumePage />} />
-        <Route path="/resume/ats" element={<AtsOptimizerPage />} />
-        <Route path="/resume/targets" element={<JobTargetsPage />} />
-        <Route path="/resume/targets/:id" element={<JobTargetDetailPage />} />
-        <Route path="/resume/ai-settings" element={<AiModelSettingsPage />} />
-        <Route path="/resume/history" element={<VersionHistoryPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/automation" element={<AutomationPage />} />
-        <Route path="/emails" element={<EmailsPage />} />
-        <Route path="/interviews" element={<InterviewsPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        {/* The module launcher. */}
+        <Route index element={<HomePage />} />
+        <Route path="/home" element={<HomePage />} />
+
+        {/* Job Apply. URLs are unchanged: notifications in the database link to them. */}
+        <Route element={<ModuleRoute code="apply" />}>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/queue" element={<QueuePage />} />
+          <Route path="/applications" element={<ApplicationsPage />} />
+          <Route path="/applications/:id" element={<ApplicationDetailPage />} />
+          <Route path="/companies" element={<CompaniesPage />} />
+          <Route path="/interviews" element={<InterviewsPage />} />
+          <Route path="/automation" element={<AutomationPage />} />
+          <Route path="/emails" element={<EmailsPage />} />
+        </Route>
+
+        {/* Resume Studio — see notes/resume-studio-plan.md */}
+        <Route element={<ModuleRoute code="resume" />}>
+          <Route path="/resume" element={<ResumeDashboardPage />} />
+          <Route path="/resume/my" element={<MyResumesPage />} />
+          <Route path="/resume/my/:id" element={<MyResumesPage />} />
+          <Route path="/resume/my/:id/edit" element={<ResumeEditorPage />} />
+          <Route path="/resume/new" element={<CreateResumePage />} />
+          <Route path="/resume/ats" element={<AtsOptimizerPage />} />
+          <Route path="/resume/targets" element={<JobTargetsPage />} />
+          <Route path="/resume/targets/:id" element={<JobTargetDetailPage />} />
+          <Route path="/resume/ai-settings" element={<AiModelSettingsPage />} />
+          <Route path="/resume/history" element={<VersionHistoryPage />} />
+        </Route>
+
+        {/* Account pages: in no module, reachable from the account menu everywhere. */}
+        <Route element={<AccountRoute />}>
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

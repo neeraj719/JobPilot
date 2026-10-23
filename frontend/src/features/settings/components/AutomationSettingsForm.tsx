@@ -76,7 +76,7 @@ function ApplyModeControl({
             className={cn(
               'rounded-[5px] px-2.5 py-1 font-medium transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              selected ? 'bg-card text-foreground shadow-sm dark:bg-surface-3' : 'text-muted-foreground hover:text-foreground',
               disabled && 'pointer-events-none',
             )}
           >

@@ -1,4 +1,4 @@
-import { Bell, Bot, Link2, Mail, ShieldCheck, SlidersHorizontal, UserCog, Users } from 'lucide-react'
+import { Bell, Bot, LayoutGrid, Link2, Mail, ShieldCheck, ShieldPlus, SlidersHorizontal, UserCog, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
+import { useAuth } from '@/hooks/useAuth'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { cn } from '@/lib/utils'
 import { AccountRolesCard } from '@/features/settings/components/AccountRolesCard'
@@ -18,22 +19,48 @@ import { EmailIntegrationCard } from '@/features/settings/components/EmailIntegr
 import { NotificationSettingsCard } from '@/features/settings/components/NotificationSettingsCard'
 import { SecurityCard } from '@/features/settings/components/SecurityCard'
 import { SettingsShortcuts } from '@/features/settings/components/SettingsShortcuts'
+import { useWorkspaceModules } from '@/features/workspace/api'
+import { AdminCatalogCard } from '@/features/workspace/components/AdminCatalogCard'
+import { AdminModulesCard } from '@/features/workspace/components/AdminModulesCard'
+import { WorkspaceSettingsCard } from '@/features/workspace/components/WorkspaceSettingsCard'
 
-type SettingsSection = 'general' | 'roles' | 'automation' | 'accounts' | 'email' | 'ai' | 'notifications' | 'security'
+type SettingsSection =
+  | 'general'
+  | 'workspace'
+  | 'roles'
+  | 'automation'
+  | 'accounts'
+  | 'email'
+  | 'ai'
+  | 'notifications'
+  | 'security'
+  | 'admin'
 
-const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
+interface SectionDef {
+  id: SettingsSection
+  label: string
+  icon: LucideIcon
+  /** Only for a session acting as ADMIN. */
+  adminOnly?: boolean
+  /** Hidden when this workspace module is not available to the user (its API refuses them). */
+  module?: string
+}
+
+const SECTIONS: SectionDef[] = [
   { id: 'general', label: 'Your data', icon: UserCog },
+  { id: 'workspace', label: 'Workspace', icon: LayoutGrid },
   { id: 'roles', label: 'Account roles', icon: Users },
-  { id: 'automation', label: 'Limits & schedule', icon: SlidersHorizontal },
+  { id: 'automation', label: 'Limits & schedule', icon: SlidersHorizontal, module: 'apply' },
   { id: 'accounts', label: 'Connected accounts', icon: Link2 },
   { id: 'email', label: 'Email integration', icon: Mail },
   { id: 'ai', label: 'AI & browser', icon: Bot },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'security', label: 'Security', icon: ShieldCheck },
+  { id: 'admin', label: 'Admin', icon: ShieldPlus, adminOnly: true },
 ]
 
-function isSection(value: string | null): value is SettingsSection {
-  return SECTIONS.some((section) => section.id === value)
+function isSection(sections: SectionDef[], value: string | null): value is SettingsSection {
+  return sections.some((section) => section.id === value)
 }
 
 /** Friendly copy for the `?error=` codes the Gmail OAuth callback can redirect with. */
@@ -47,9 +74,19 @@ const OAUTH_ERRORS: Record<string, string> = {
 export default function SettingsPage() {
   useDocumentTitle('Settings')
 
+  const { isAdmin } = useAuth()
+  const modules = useWorkspaceModules()
+  const sections = SECTIONS.filter((section) => {
+    if (section.adminOnly && !isAdmin) return false
+    // Until the module list loads (or if it fails) keep the section; its API still guards itself.
+    if (section.module && modules.data) {
+      return modules.data.some((module) => module.code === section.module && module.available)
+    }
+    return true
+  })
   const [searchParams, setSearchParams] = useSearchParams()
   const sectionParam = searchParams.get('section')
-  const activeSection: SettingsSection = isSection(sectionParam) ? sectionParam : 'general'
+  const activeSection: SettingsSection = isSection(sections, sectionParam) ? sectionParam : 'general'
 
   const setSection = React.useCallback(
     (section: string) => {
@@ -94,7 +131,7 @@ export default function SettingsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SECTIONS.map((section) => (
+                {sections.map((section) => (
                   <SelectItem key={section.id} value={section.id}>
                     {section.label}
                   </SelectItem>
@@ -104,7 +141,7 @@ export default function SettingsPage() {
           </div>
 
           <ul className="hidden space-y-1 lg:block">
-            {SECTIONS.map((section) => {
+            {sections.map((section) => {
               const Icon = section.icon
               const active = section.id === activeSection
               return (
@@ -132,6 +169,13 @@ export default function SettingsPage() {
 
         <div className="min-w-0">
           {activeSection === 'general' ? <SettingsShortcuts /> : null}
+          {activeSection === 'workspace' ? <WorkspaceSettingsCard /> : null}
+          {activeSection === 'admin' ? (
+            <div className="space-y-6">
+              <AdminCatalogCard />
+              <AdminModulesCard />
+            </div>
+          ) : null}
           {activeSection === 'roles' ? <AccountRolesCard /> : null}
           {activeSection === 'automation' ? <AutomationSettingsForm /> : null}
           {activeSection === 'accounts' ? <ConnectedAccountsCard /> : null}

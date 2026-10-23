@@ -268,7 +268,7 @@ export function AutomationConfigSheet({ open, onOpenChange, config, saving = fal
               ) : null}
             </div>
 
-            <SheetFooter className="sticky bottom-0 border-t border-border bg-background">
+            <SheetFooter className="sticky bottom-0 border-t border-border bg-card">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
                 Cancel
               </Button>

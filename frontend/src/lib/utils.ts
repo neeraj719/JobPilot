@@ -2,6 +2,8 @@ import { type ClassValue, clsx } from 'clsx'
 import { format, formatDistanceToNowStrict, isValid, parseISO } from 'date-fns'
 import { twMerge } from 'tailwind-merge'
 
+import { SCORE_BAR, SCORE_PILL, scoreTone } from '@/lib/score'
+
 import type {
   AnswerStatus,
   ApplicationStatus,
@@ -239,16 +241,16 @@ export const APPLICATION_STATUS_LABELS: Record<ApplicationStatus, string> = {
 
 const APPLICATION_STATUS_CLASSES: Record<ApplicationStatus, string> = {
   DISCOVERED: 'bg-muted text-muted-foreground border-transparent',
-  QUEUED: 'bg-info/10 text-info border-info/20',
+  QUEUED: 'bg-info-soft text-info-soft-foreground border-info/20',
   IN_PROGRESS: 'bg-primary/10 text-primary border-primary/20',
   APPLIED: 'bg-primary/10 text-primary border-primary/20',
-  APPLICATION_RECEIVED: 'bg-info/10 text-info border-info/20',
-  ASSESSMENT: 'bg-warning/15 text-warning border-warning/25',
-  INTERVIEW: 'bg-success/10 text-success border-success/20',
-  RECRUITER_CONTACTED: 'bg-info/10 text-info border-info/20',
-  REJECTED: 'bg-destructive/10 text-destructive border-destructive/20',
+  APPLICATION_RECEIVED: 'bg-info-soft text-info-soft-foreground border-info/20',
+  ASSESSMENT: 'bg-warning-soft text-warning-soft-foreground border-warning/25',
+  INTERVIEW: 'bg-success-soft text-success-soft-foreground border-success/20',
+  RECRUITER_CONTACTED: 'bg-info-soft text-info-soft-foreground border-info/20',
+  REJECTED: 'bg-destructive-soft text-destructive-soft-foreground border-destructive/20',
   WITHDRAWN: 'bg-muted text-muted-foreground border-transparent',
-  OFFER: 'bg-success/15 text-success border-success/30',
+  OFFER: 'bg-success-soft text-success-soft-foreground border-success/30',
   NO_RESPONSE: 'bg-muted text-muted-foreground border-transparent',
   SKIPPED: 'bg-muted text-muted-foreground border-transparent',
 }
@@ -280,13 +282,13 @@ export function automationStateColor(state: AutomationState | null | undefined):
     case 'RETRYING':
       return 'bg-primary/10 text-primary border-primary/20'
     case 'SUCCESS':
-      return 'bg-success/10 text-success border-success/20'
+      return 'bg-success-soft text-success-soft-foreground border-success/20'
     case 'FAILED':
-      return 'bg-destructive/10 text-destructive border-destructive/20'
+      return 'bg-destructive-soft text-destructive-soft-foreground border-destructive/20'
     case 'REQUIRES_USER':
-      return 'bg-warning/15 text-warning border-warning/25'
+      return 'bg-warning-soft text-warning-soft-foreground border-warning/25'
     case 'PAUSED':
-      return 'bg-info/10 text-info border-info/20'
+      return 'bg-info-soft text-info-soft-foreground border-info/20'
     default:
       return 'bg-muted text-muted-foreground border-transparent'
   }
@@ -304,11 +306,11 @@ export function priorityColor(priority: CompanyPriority | null | undefined): str
     case 'P1':
       return 'bg-primary/10 text-primary border-primary/25'
     case 'P2':
-      return 'bg-info/10 text-info border-info/20'
+      return 'bg-info-soft text-info-soft-foreground border-info/20'
     case 'P3':
       return 'bg-muted text-muted-foreground border-transparent'
     case 'AVOID':
-      return 'bg-destructive/10 text-destructive border-destructive/25'
+      return 'bg-destructive-soft text-destructive-soft-foreground border-destructive/25'
     default:
       return 'bg-muted text-muted-foreground border-transparent'
   }
@@ -316,18 +318,12 @@ export function priorityColor(priority: CompanyPriority | null | undefined): str
 
 /** Colour bands for a 0–100 match score: 85+ green, 70+ amber, else muted. */
 export function matchScoreColor(score: number | null | undefined): string {
-  if (score === null || score === undefined) return 'bg-muted text-muted-foreground border-transparent'
-  if (score >= 85) return 'bg-success/10 text-success border-success/25'
-  if (score >= 70) return 'bg-warning/15 text-warning border-warning/25'
-  return 'bg-muted text-muted-foreground border-transparent'
+  return SCORE_PILL[scoreTone(score, 'match')]
 }
 
 /** Bar/segment fill colour matching `matchScoreColor`'s bands. */
 export function matchScoreBarColor(score: number | null | undefined): string {
-  if (score === null || score === undefined) return 'bg-muted-foreground/40'
-  if (score >= 85) return 'bg-success'
-  if (score >= 70) return 'bg-warning'
-  return 'bg-muted-foreground/50'
+  return SCORE_BAR[scoreTone(score, 'match')]
 }
 
 export const SOURCE_LABELS: Record<JobSourceType, string> = {
@@ -377,9 +373,9 @@ export const ANSWER_STATUS_LABELS: Record<AnswerStatus, string> = {
 export function answerStatusColor(status: AnswerStatus | null | undefined): string {
   switch (status) {
     case 'ANSWERED':
-      return 'bg-success/10 text-success border-success/20'
+      return 'bg-success-soft text-success-soft-foreground border-success/20'
     case 'NEEDS_USER_INPUT':
-      return 'bg-warning/15 text-warning border-warning/25'
+      return 'bg-warning-soft text-warning-soft-foreground border-warning/25'
     default:
       return 'bg-muted text-muted-foreground border-transparent'
   }
@@ -399,14 +395,14 @@ export function emailClassificationColor(classification: EmailClassification | n
   switch (classification) {
     case 'INTERVIEW':
     case 'OFFER':
-      return 'bg-success/10 text-success border-success/20'
+      return 'bg-success-soft text-success-soft-foreground border-success/20'
     case 'ASSESSMENT':
-      return 'bg-warning/15 text-warning border-warning/25'
+      return 'bg-warning-soft text-warning-soft-foreground border-warning/25'
     case 'REJECTION':
-      return 'bg-destructive/10 text-destructive border-destructive/20'
+      return 'bg-destructive-soft text-destructive-soft-foreground border-destructive/20'
     case 'RECRUITER_MESSAGE':
     case 'APPLICATION_RECEIVED':
-      return 'bg-info/10 text-info border-info/20'
+      return 'bg-info-soft text-info-soft-foreground border-info/20'
     default:
       return 'bg-muted text-muted-foreground border-transparent'
   }

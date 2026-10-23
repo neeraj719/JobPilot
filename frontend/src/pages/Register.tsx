@@ -53,7 +53,7 @@ export default function RegisterPage() {
       }
       const { user } = outcome
       toast.success('Account created', { description: `Welcome aboard, ${user.full_name || user.email}.` })
-      navigate('/dashboard', { replace: true })
+      navigate('/home', { replace: true, state: { entry: true } })
     } catch (error) {
       toast.error('Could not create your account', { description: errorMessage(error) })
       form.setError('email', { message: errorMessage(error, 'Registration failed') })

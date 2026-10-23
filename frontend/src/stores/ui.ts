@@ -8,11 +8,20 @@ interface UiState {
   /** Resolved value actually applied to `<html>` (never 'system'). */
   resolvedTheme: 'light' | 'dark'
   sidebarCollapsed: boolean
+  /**
+   * The workspace module the user was last in. Account pages (Profile, Settings) belong to
+   * no module, so they keep showing this module's sidebar instead of an empty one.
+   */
+  lastModuleCode: string | null
+  /** The sidebar's module switcher menu (opened with Ctrl+Shift+M). Not persisted. */
+  moduleSwitcherOpen: boolean
 
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setSidebarCollapsed: (collapsed: boolean) => void
   toggleSidebar: () => void
+  setLastModuleCode: (code: string | null) => void
+  setModuleSwitcherOpen: (open: boolean) => void
   /** Applies the persisted theme to `<html>` and starts watching the OS preference. */
   initTheme: () => () => void
 }
@@ -44,6 +53,8 @@ export const useUiStore = create<UiState>()(
       theme: 'system',
       resolvedTheme: 'light',
       sidebarCollapsed: false,
+      lastModuleCode: null,
+      moduleSwitcherOpen: false,
 
       setTheme: (theme) => set({ theme, resolvedTheme: applyTheme(theme) }),
 
@@ -54,6 +65,8 @@ export const useUiStore = create<UiState>()(
 
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      setLastModuleCode: (lastModuleCode) => set({ lastModuleCode }),
+      setModuleSwitcherOpen: (moduleSwitcherOpen) => set({ moduleSwitcherOpen }),
 
       initTheme: () => {
         set({ resolvedTheme: applyTheme(get().theme) })
@@ -69,7 +82,11 @@ export const useUiStore = create<UiState>()(
     {
       name: STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ theme: state.theme, sidebarCollapsed: state.sidebarCollapsed }),
+      partialize: (state) => ({
+        theme: state.theme,
+        sidebarCollapsed: state.sidebarCollapsed,
+        lastModuleCode: state.lastModuleCode,
+      }),
       onRehydrateStorage: () => (state) => {
         // Re-apply as soon as the persisted value lands, to avoid a light-mode flash.
         if (state) state.resolvedTheme = applyTheme(state.theme)

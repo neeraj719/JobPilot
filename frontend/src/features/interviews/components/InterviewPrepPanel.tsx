@@ -75,7 +75,7 @@ function PrepSectionBlock({
             <span className="block truncate text-sm font-medium">{title}</span>
             <span className="block truncate text-xs text-muted-foreground">{description}</span>
           </span>
-          <span className="shrink-0 rounded-full bg-background px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
             {questions.length}
           </span>
         </button>

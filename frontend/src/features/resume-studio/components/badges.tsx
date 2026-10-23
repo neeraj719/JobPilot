@@ -43,7 +43,7 @@ const SOURCE: Record<ResumeChangeSource, { label: string; hint: string; Icon: ty
     label: 'AI',
     hint: 'Made by AI (a suggestion you applied, or AI tailoring). Review it before you send it anywhere.',
     Icon: Sparkles,
-    className: 'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+    className: 'border-ai/30 bg-ai-soft text-ai-soft-foreground',
   },
   SYSTEM: {
     label: 'System',

@@ -80,7 +80,7 @@ export function TagInput({
     <div className={cn('space-y-2', className)}>
       <div
         className={cn(
-          'flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-input bg-background p-1.5',
+          'flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-input bg-card p-1.5 shadow-xs',
           'focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background',
           disabled && 'pointer-events-none opacity-60',
         )}

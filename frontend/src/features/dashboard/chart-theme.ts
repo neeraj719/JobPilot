@@ -4,15 +4,17 @@
  * Two kinds of colour live here and they must not be mixed:
  *
  *  - **Categorical series colours** (`series`) identify *who* a mark is (a source, a
- *    series in a multi-series chart). The five slots below are a validated categorical
+ *    series in a multi-series chart). The six slots are a validated categorical
  *    palette: every adjacent pair clears the colour-vision separation gate (ΔE >= 8,
  *    OKLab x100) and the normal-vision floor (ΔE >= 15) in **both** modes, measured
- *    against this app's surfaces (#ffffff light / #0f1524 dark). The dark column is the
- *    same five hues re-stepped for the dark surface — never an automatic flip. Three
- *    light slots sit below 3:1 contrast on white by design, so every chart using them
- *    ships a legend plus direct labels (the "relief" rule); do not remove those. Slots
- *    are assigned in a fixed order and never cycled — a sixth category folds into a
- *    neutral "Other".
+ *    against this app's card surfaces (#ffffff light / #181b22 dark, re-validated for
+ *    the 2026-10 theme). The values live in `index.css` as `--chart-1…6` (so legends and
+ *    swatches can use `bg-chart-N`); the hex below is only the SSR / test fallback and
+ *    must stay identical. The dark column is the same hues re-stepped for the dark
+ *    surface — never an automatic flip. Three light slots sit below 3:1 contrast on
+ *    white by design, so every chart using them ships a legend plus direct labels (the
+ *    "relief" rule); do not remove those. Slots are assigned in a fixed order and never
+ *    cycled — a seventh category folds into a neutral "Other".
  *
  *  - **Semantic colours** (`success` / `warning` / `destructive` / `info` / `neutral`)
  *    say whether something is *good or bad*. They are read straight off the app's CSS
@@ -26,6 +28,7 @@
  */
 import * as React from 'react'
 
+import { scoreTone } from '@/lib/score'
 import { sourceLabel } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui'
 import type { ApplicationStatus, JobSourceType } from '@/types/api'
@@ -35,10 +38,10 @@ import type { ApplicationStatus, JobSourceType } from '@/types/api'
 /* ------------------------------------------------------------------ */
 
 /** Slot order is the colour-vision safety mechanism — do not re-order. */
-const CATEGORICAL_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'] as const
-const CATEGORICAL_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'] as const
+const CATEGORICAL_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'] as const
+const CATEGORICAL_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300'] as const
 
-/** Everything past the fifth slot collapses here rather than inventing a sixth hue. */
+/** Everything past the sixth slot collapses here rather than inventing a seventh hue. */
 const OTHER_LIGHT = '#8a8f98'
 const OTHER_DARK = '#7b8493'
 
@@ -48,7 +51,7 @@ export type ChartMode = 'light' | 'dark'
 
 export interface ChartTheme {
   mode: ChartMode
-  /** Five categorical slots, in fixed order. */
+  /** Six categorical slots, in fixed order. */
   series: readonly string[]
   /** Neutral used for the folded "Other" bucket. */
   other: string
@@ -85,23 +88,25 @@ export function useChartTheme(): ChartTheme {
 
   return React.useMemo<ChartTheme>(() => {
     const dark = mode === 'dark'
-    const border = cssVar('--border', dark ? 'hsl(222 24% 20%)' : 'hsl(220 13% 91%)')
-    const muted = cssVar('--muted-foreground', dark ? 'hsl(218 11% 65%)' : 'hsl(220 9% 46%)')
+    const border = cssVar('--border', dark ? 'hsl(220 11.1% 20.5%)' : 'hsl(220 12.1% 90%)')
+    const muted = cssVar('--muted-foreground', dark ? 'hsl(220 12% 74.2%)' : 'hsl(220 8.4% 40.7%)')
+    const fallback = dark ? CATEGORICAL_DARK : CATEGORICAL_LIGHT
+    const series = fallback.map((hex, index) => cssVar(`--chart-${index + 1}`, hex))
     return {
       mode,
-      series: dark ? CATEGORICAL_DARK : CATEGORICAL_LIGHT,
+      series,
       other: dark ? OTHER_DARK : OTHER_LIGHT,
-      primarySeries: (dark ? CATEGORICAL_DARK : CATEGORICAL_LIGHT)[0],
+      primarySeries: series[0] ?? fallback[0],
       grid: border,
       axis: border,
       tick: muted,
-      surface: cssVar('--card', dark ? 'hsl(224 42% 10%)' : 'hsl(0 0% 100%)'),
+      surface: cssVar('--card', dark ? 'hsl(221 17% 11.5%)' : 'hsl(0 0% 100%)'),
       border,
       mutedText: muted,
-      success: cssVar('--success', dark ? 'hsl(142 62% 45%)' : 'hsl(142 71% 36%)'),
-      warning: cssVar('--warning', dark ? 'hsl(38 92% 55%)' : 'hsl(38 92% 45%)'),
-      destructive: cssVar('--destructive', dark ? 'hsl(0 63% 55%)' : 'hsl(0 72% 51%)'),
-      info: cssVar('--info', dark ? 'hsl(199 89% 55%)' : 'hsl(199 89% 44%)'),
+      success: cssVar('--success', dark ? 'hsl(139 54.2% 61.1%)' : 'hsl(143 56.5% 27.7%)'),
+      warning: cssVar('--warning', dark ? 'hsl(38 86.8% 61.9%)' : 'hsl(33 95.9% 29.2%)'),
+      destructive: cssVar('--destructive', dark ? 'hsl(4 97% 73.8%)' : 'hsl(356 72.8% 42.3%)'),
+      info: cssVar('--info', dark ? 'hsl(203 87.6% 69.8%)' : 'hsl(199 97.4% 29.8%)'),
       neutral: dark ? OTHER_DARK : OTHER_LIGHT,
     }
   }, [mode])
@@ -121,7 +126,7 @@ export interface SourceSlice {
 }
 
 /**
- * Fold `by_source` into at most five coloured slices plus a neutral "Other".
+ * Fold `by_source` into at most six coloured slices plus a neutral "Other".
  *
  * The mapping is derived once per payload and shared by every chart and table on the
  * page, so a platform keeps the same colour wherever it appears. Ties break on the
@@ -191,12 +196,13 @@ export function statusChartColor(status: ApplicationStatus | string, theme: Char
   }
 }
 
-/** Match-score bands, matching the `<MatchScore />` pill: 85+ strong, 70+ decent. */
+/** Match-score bands via the shared `scoreTone(_, 'match')`, so bars match `<MatchScore />`. */
 export function matchBucketColor(bucket: string, theme: ChartTheme): string {
   const floor = Number.parseInt(bucket, 10)
   if (Number.isNaN(floor)) return theme.neutral
-  if (floor >= 85) return theme.success
-  if (floor >= 70) return theme.warning
+  const tone = scoreTone(floor, 'match')
+  if (tone === 'success') return theme.success
+  if (tone === 'warning') return theme.warning
   return theme.neutral
 }
 
@@ -207,6 +213,11 @@ export function matchBucketColor(bucket: string, theme: ChartTheme): string {
 /** Hairline, solid, one step off the surface — never dashed. */
 export function gridProps(theme: ChartTheme) {
   return { stroke: theme.grid, strokeWidth: 1, vertical: false } as const
+}
+
+/** Hover cursor behind bars: a faint wash of the grid colour, never a solid block. */
+export function cursorProps(theme: ChartTheme) {
+  return { fill: theme.grid, fillOpacity: 0.35 } as const
 }
 
 export function axisProps(theme: ChartTheme) {

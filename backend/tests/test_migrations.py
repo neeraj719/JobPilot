@@ -35,7 +35,7 @@ TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 #: one server never drop each other's migration database mid-run.
 MIGRATION_DATABASE = f"{make_url(TEST_DATABASE_URL).database}_migration_check"
 
-#: The 35 tables of the JobPilot AI schema, as ``schema.table``.
+#: The 38 tables of the JobPilot AI schema, as ``schema.table``.
 EXPECTED_TABLES = {
     "master.users",
     "master.roles",
@@ -53,6 +53,9 @@ EXPECTED_TABLES = {
     "master.standing_answers",
     "master.ai_provider_settings",
     "master.ai_provider_credentials",
+    "master.modules",
+    "master.user_module_settings",
+    "master.user_workspace_preferences",
     "unified.jobs",
     "unified.job_sources",
     "unified.job_matches",
@@ -130,7 +133,7 @@ def test_upgrade_creates_every_table(migrated: str) -> None:
     finally:
         engine.dispose()
     assert tables == EXPECTED_TABLES
-    assert len(EXPECTED_TABLES) == 35
+    assert len(EXPECTED_TABLES) == 38
     # Only Alembic's own bookkeeping is left behind in ``public``.
     assert public == {"alembic_version"}
 
@@ -155,6 +158,23 @@ def test_migration_matches_models(migrated: str) -> None:
         engine.dispose()
     unexpected = [d for d in diffs if _diff_kind(d) not in ALLOWED_DIFF_KINDS]
     assert unexpected == [], f"schema drift between the migration and the models: {unexpected}"
+
+
+def test_the_module_catalog_is_seeded_with_job_apply_off(migrated: str) -> None:
+    """Migration ``f6b8d0c2e4a7`` seeds the workspace catalog; Job Apply starts switched off."""
+    engine = create_engine(migrated, poolclass=NullPool)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text('SELECT code, is_enabled, status, home_path FROM "master"."modules" ORDER BY sort_order')
+            ).all()
+    finally:
+        engine.dispose()
+    assert [tuple(row) for row in rows] == [
+        ("resume", True, "AVAILABLE", "/resume"),
+        ("apply", False, "AVAILABLE", "/dashboard"),
+        ("insights", True, "COMING_SOON", None),
+    ]
 
 
 def test_indexes_and_unique_constraints(migrated: str) -> None:

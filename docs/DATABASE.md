@@ -2,7 +2,7 @@
 
 PostgreSQL 18 in production and in the test suite, SQLite for the no-Docker local run (all
 column types are portable: `Uuid`, `JSON`, `DateTime(timezone=True)`, string-backed enums).
-35 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
+38 tables in five named schemas (`master`, `unified`, `transaction`, `media`, `audit`).
 Migrations: Alembic (`backend/alembic/versions`). Models: `backend/app/models/*.py`.
 Enums: `backend/app/models/enums.py`.
 
@@ -81,7 +81,7 @@ index there would cost a scan and buy nothing.
 
 ### 4. Every link is a uuid foreign key
 
-35 uuid primary keys, 58 uuid foreign keys (plus the `created_by` / `updated_by` pair on every table), no natural or composite keys between tables.
+38 uuid primary keys, 62 uuid foreign keys (plus the `created_by` / `updated_by` pair on every table), no natural or composite keys between tables.
 
 **One junction table per many-to-many relationship, named after both sides**
 (`user_roles`). **One-to-many keys live on the owning row**, not in a shared table: a future
@@ -205,6 +205,8 @@ users ──N:M── roles   (through user_roles)
   │ ──1:1── ai_provider_settings
   │ ──1:N── ai_provider_credentials (one live row per provider)
   │ ──1:N── ai_usage_events
+  │ ──1:N── user_module_settings ──N:1── modules (workspace catalog)
+  │ ──1:1── user_workspace_preferences ──N:1── modules (last_module_id?)
   │ ──1:N── connected_accounts
   │ ──1:N── browser_sessions
   │ ──1:N── notifications
@@ -224,8 +226,8 @@ skills (taxonomy)
 
 ## Tables
 
-All 35 carry the seven standard columns — `id` / `created_at` / `updated_at` /
-`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 35 carry the
+All 38 carry the seven standard columns — `id` / `created_at` / `updated_at` /
+`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 38 carry the
 `trg_<table>_updated_at` trigger; only what is *extra* is listed.
 
 | Table | Purpose | Notable columns / constraints |
@@ -250,6 +252,9 @@ All 35 carry the seven standard columns — `id` / `created_at` / `updated_at` /
 | `ai_provider_settings` | the user's AI provider, per-workflow models, fallback, limits | partial-unique `user_id`; `workflow_models` JSON, `fallback_enabled` (default off), `daily_call_limit`, `monthly_budget_usd` — migration `c7e9b1d3f5a7` |
 | `ai_provider_credentials` | the user's own API keys | partial-unique `(user_id, provider)`; `encrypted_api_key` (Fernet), `key_hint`, `base_url`, `credential_version`, last test status; deleting tombstones the row **and** wipes the ciphertext |
 | `ai_usage_events` | one row per real model call (append-only) | `provider`, `model`, `task`, `workflow`, tokens (`tokens_estimated`), `estimated_cost_usd`, `duration_ms`, `status`; never holds prompt or response text |
+| `modules` | workspace module catalog (Resume Studio, Job Apply, …) | `code` partial-unique, `name`, `tagline`, `description`, `icon` (lucide name), `home_path` (null = no pages yet), `accent` (design-token name), `sort_order`, `is_enabled` (platform-wide switch), `min_role` (`USER` / `ADMIN`), `status` (`AVAILABLE` / `COMING_SOON`); seeded by migration `f6b8d0c2e4a7` (resume on, apply **off**, insights coming soon), insert-missing-only, changed by admins via `/workspace/admin/modules` |
+| `user_module_settings` | one user's settings for one module | partial-unique `(user_id, module_id)`; `is_enabled` (admin per-user switch), `is_pinned`, `sort_order` (null = catalog order), `last_opened_at`, `open_count`; created on first write |
+| `user_workspace_preferences` | workspace-wide preferences | partial-unique `user_id`; `landing` (`LAUNCHER` / `LAST_MODULE`), `last_module_id` (FK → `modules`, SET NULL), `show_tips` |
 | `skills` | taxonomy with aliases | `normalized_name` unique |
 | `applications` | the tracked application | unique `(user_id, job_id)`; `status` (13 states), `automation_state` (IDLE/RUNNING/SUCCESS/FAILED/PAUSED/REQUIRES_USER/RETRYING), `pause_reason`, `form_snapshot` (detected fields + values shown in the Approval Center), `applied_at`, `external_application_id`, `next_action` |
 | `application_answers` | one row per form question | `question_key` (canonical), `status` ANSWERED/NEEDS_USER_INPUT/SKIPPED, `answer_source`, `is_sensitive`, `rationale` |
@@ -335,7 +340,7 @@ make db-restore-check              # or: sh backend/scripts/db_restore_check.sh
 ```
 
 Restores the newest `backups/jobpilot-*.dump` into `jobpilot_restore_check` (dropped first
-if a previous run left it), then asserts it has **35 base tables across the five schemas**
+if a previous run left it), then asserts it has **38 base tables across the five schemas**
 and the **same `alembic_version` as the live `jobpilot` database**. The scratch database is
 dropped on exit whether the check passes or fails. The live database is only read
 (`SELECT version_num FROM alembic_version`). Exit code 0 means PASS. If a migration adds or

@@ -34,9 +34,24 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          charts: ['recharts'],
+        // A function, not the object form: `charts: ['recharts']` also claims every package
+        // recharts depends on (clsx among them, which `cn()` uses everywhere), so the main
+        // bundle imported the whole charts chunk and the launcher downloaded recharts it never
+        // renders. Only chart-specific packages go to `charts`; shared ones stay shared.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (/node_modules[\/](react|react-dom|react-router|react-router-dom|@remix-run[\/]router|scheduler)[\/]/.test(id)) {
+            return 'react'
+          }
+          if (/node_modules[\/](recharts|recharts-scale|victory-vendor|d3-[^\/]+|internmap|decimal\.js-light)[\/]/.test(id)) {
+            return 'charts'
+          }
+          // Shared with recharts but used by every component through `cn()`: named explicitly,
+          // or Rollup folds them into `charts` and the main bundle imports that chunk again.
+          if (/node_modules[\/](clsx|tailwind-merge|class-variance-authority)[\/]/.test(id)) {
+            return 'ui'
+          }
+          return undefined
         },
       },
     },

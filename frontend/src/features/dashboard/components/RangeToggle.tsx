@@ -77,7 +77,7 @@ export function RangeToggle({
             onClick={() => onChange(option.value)}
             className={cn(
               'rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              active ? 'bg-card text-foreground shadow-sm dark:bg-surface-3' : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {option.label}

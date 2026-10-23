@@ -10,12 +10,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.actor import ActorMiddleware
 from app.core.config import settings
+from app.core.deps import require_module
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.rate_limit import RateLimitMiddleware
@@ -115,26 +116,34 @@ def _include_routers(app: FastAPI) -> None:
     from app.modules.notifications.router import router as notifications_router
     from app.modules.profiles.router import router as profiles_router
     from app.modules.resumes.router import router as resumes_router
+    from app.modules.workspace.router import router as workspace_router
+
+    # Workspace modules (``app.modules.workspace``): a router that belongs to a module is
+    # refused with ``403 module_disabled`` when that module is off for the caller. Auth,
+    # profile, settings-type routers and the demo ATS belong to no module.
+    resume_module = [Depends(require_module("resume"))]
+    apply_module = [Depends(require_module("apply"))]
 
     p = settings.API_PREFIX
     app.include_router(auth_router, prefix=f"{p}/auth", tags=["auth"])
     app.include_router(profiles_router, prefix=f"{p}", tags=["profile"])  # /profile, /preferences/job
-    app.include_router(resumes_router, prefix=f"{p}/resumes", tags=["resumes"])
-    app.include_router(companies_router, prefix=f"{p}/companies", tags=["companies"])
-    app.include_router(jobs_router, prefix=f"{p}/jobs", tags=["jobs"])
-    app.include_router(matching_router, prefix=f"{p}/matching", tags=["matching"])
-    app.include_router(applications_router, prefix=f"{p}/applications", tags=["applications"])
-    app.include_router(automation_router, prefix=f"{p}/automation", tags=["automation"])
-    app.include_router(emails_router, prefix=f"{p}/emails", tags=["emails"])
+    app.include_router(resumes_router, prefix=f"{p}/resumes", tags=["resumes"], dependencies=resume_module)
+    app.include_router(companies_router, prefix=f"{p}/companies", tags=["companies"], dependencies=apply_module)
+    app.include_router(jobs_router, prefix=f"{p}/jobs", tags=["jobs"], dependencies=apply_module)
+    app.include_router(matching_router, prefix=f"{p}/matching", tags=["matching"], dependencies=apply_module)
+    app.include_router(applications_router, prefix=f"{p}/applications", tags=["applications"], dependencies=apply_module)
+    app.include_router(automation_router, prefix=f"{p}/automation", tags=["automation"], dependencies=apply_module)
+    app.include_router(emails_router, prefix=f"{p}/emails", tags=["emails"], dependencies=apply_module)
     app.include_router(integrations_router, prefix=f"{p}/integrations", tags=["integrations"])
-    app.include_router(dashboard_router, prefix=f"{p}/dashboard", tags=["dashboard"])
-    app.include_router(interviews_router, prefix=f"{p}/interviews", tags=["interviews"])
+    app.include_router(dashboard_router, prefix=f"{p}/dashboard", tags=["dashboard"], dependencies=apply_module)
+    app.include_router(interviews_router, prefix=f"{p}/interviews", tags=["interviews"], dependencies=apply_module)
     app.include_router(notifications_router, prefix=f"{p}/notifications", tags=["notifications"])
     app.include_router(audit_router, prefix=f"{p}/audit", tags=["audit"])
     app.include_router(ai_router, prefix=f"{p}/ai", tags=["ai"])
     app.include_router(browser_router, prefix=f"{p}/browser", tags=["browser"])
     from app.modules.ats.router import router as ats_router  # ats stream (resume studio)
-    app.include_router(ats_router, prefix=f"{p}/ats", tags=["ats"])
+    app.include_router(ats_router, prefix=f"{p}/ats", tags=["ats"], dependencies=resume_module)
+    app.include_router(workspace_router, prefix=f"{p}/workspace", tags=["workspace"])
 
 
 def _mount_demo_ats(app: FastAPI) -> None:
