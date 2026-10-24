@@ -4,7 +4,6 @@ import * as React from 'react'
 import { Controller, useForm } from 'react-hook-form'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,6 +30,7 @@ import {
   type AutomationValues,
 } from '@/features/settings/schema'
 import type { AdapterInfo, SourceApplyMode } from '@/types/api'
+import { AutomationSettingsSkeleton, SourceCheckboxesSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 const FORM_ID = 'automation-settings-form'
 
@@ -198,7 +198,7 @@ function AdapterNotice({
   emptyLabel: string
   onRetry: () => void
 }) {
-  if (status === 'loading') return <p className="text-xs text-muted-foreground">Loading the adapter list…</p>
+  if (status === 'loading') return <SourceCheckboxesSkeleton />
   if (status === 'error') {
     return (
       <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
@@ -310,7 +310,7 @@ export function AutomationSettingsForm() {
     }
   })
 
-  if (configQuery.isLoading) return <LoadingState variant="cards" rows={2} />
+  if (configQuery.isLoading) return <AutomationSettingsSkeleton />
   if (configQuery.error) {
     return (
       <ErrorState

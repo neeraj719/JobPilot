@@ -23,8 +23,11 @@ from app.core.exceptions import NotFoundError, RateLimitedError, ValidationFaile
 from app.core.rate_limit import rate_limiter
 from app.models.enums import Actor, ResumeChangeSource
 from app.models.user import User
+from app.modules.ai import runtime as ai_runtime
+from app.modules.ai.choice import apply_choice, form_target
 from app.modules.resumes import apply, importers, service, storage, templates, writing
 from app.modules.resumes.schemas import (
+    AiRunBody,
     AchievementRequest,
     ApplyPlan,
     ApplyRequest,
@@ -68,6 +71,23 @@ def _limit(user: User, bucket: str, per_minute: int) -> None:
         raise RateLimitedError("Too many requests for this feature. Try again in a minute.")
 
 
+def _with_model(result, task: str, before=None):  # noqa: ANN001, ANN202 - BulletSuggestions | ImprovedText | SummaryDraft
+    """Name the model behind an AI-made result; rules-only results stay ``None``.
+
+    ``ai.runtime.last_call`` when a call went through the runtime during this request (it
+    differs from ``before``, the value captured before the work), else what ``task`` resolves
+    to now (the per-run choice, or the routing)."""
+    if not (getattr(result, "ai_used", False) or getattr(result, "source", None) == "ai"):
+        return result
+    info = ai_runtime.last_call()
+    if info is before:
+        info = None
+    provider, model = (info.provider, info.model) if info is not None else ai_runtime.model_info(task)
+    if provider and provider != "mock":
+        result.ai_provider, result.ai_model = provider, model
+    return result
+
+
 def _draft_read(resume) -> ResumeDraftRead:  # noqa: ANN001
     return ResumeDraftRead(
         resume_id=resume.id,
@@ -102,11 +122,15 @@ def upload_resume(
     name: str | None = Form(default=None),
     target_role: str | None = Form(default=None),
     set_default: bool = Form(default=False),
+    ai_provider: str | None = Form(default=None, max_length=30),
+    ai_model: str | None = Form(default=None, max_length=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ResumeRead:
     """Store, extract and parse a resume. Parsing failures still return 201 with
-    ``parse_status=FAILED`` so the user can edit the data by hand."""
+    ``parse_status=FAILED`` so the user can edit the data by hand. ``ai_provider`` /
+    ``ai_model``: the model picked for the parse (``ai.choice``)."""
+    apply_choice(db, user, form_target(ai_provider, ai_model))
     # Streamed with a hard cap: reading the whole body first would let one request
     # pin an unbounded amount of memory before the size check ever runs.
     content = storage.read_within_limit(file.file)
@@ -192,6 +216,7 @@ def import_text(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ResumeRead:
+    apply_choice(db, user, payload.ai)
     _limit(user, "import", AI_HELP_PER_MINUTE)
     resume = importers.import_text(
         db, user.id, payload.text, name=payload.name, target_role=payload.target_role, template=payload.template
@@ -323,9 +348,12 @@ def unarchive_resume(resume_id: uuid.UUID, db: Session = Depends(get_db), user: 
 @router.post("/{resume_id}/reparse", response_model=ResumeRead, summary="Re-run extraction and parsing")
 def reparse_resume(
     resume_id: uuid.UUID,
+    payload: AiRunBody | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ResumeRead:
+    """Optional body ``{ai: {provider, model}}``: the model picked for this re-parse."""
+    apply_choice(db, user, payload.ai if payload else None)
     return service.resume_to_read(service.reparse(db, user.id, resume_id))
 
 
@@ -478,7 +506,9 @@ def ai_rewrite_bullet(
     """Up to three rewrites that keep the bullet's facts; each carries its checks. Nothing is saved."""
     _limit(user, "ai", AI_HELP_PER_MINUTE)
     resume = service.get_resume(db, user.id, resume_id)
-    return writing.rewrite_bullet(db, user.id, resume, payload.text, role=payload.role, company=payload.company)
+    apply_choice(db, user, payload.ai)
+    before = ai_runtime.last_call()
+    return _with_model(writing.rewrite_bullet(db, user.id, resume, payload.text, role=payload.role, company=payload.company), "rewrite_bullet", before)
 
 
 @router.post(
@@ -495,7 +525,9 @@ def ai_achievement(
     """Ends in a ``[result]`` placeholder when the text states no result — never a made-up number."""
     _limit(user, "ai", AI_HELP_PER_MINUTE)
     resume = service.get_resume(db, user.id, resume_id)
-    return writing.responsibility_to_achievement(db, user.id, resume, payload.text)
+    apply_choice(db, user, payload.ai)
+    before = ai_runtime.last_call()
+    return _with_model(writing.responsibility_to_achievement(db, user.id, resume, payload.text), "rewrite_bullet", before)
 
 
 @router.post("/{resume_id}/ai/improve-text", response_model=ImprovedText, summary="Fix grammar and clarity")
@@ -508,7 +540,9 @@ def ai_improve_text(
     """Grammar, clarity and tone only; a version that adds numbers, skills, names or dates is refused."""
     _limit(user, "ai", AI_HELP_PER_MINUTE)
     service.get_resume(db, user.id, resume_id)
-    return writing.improve_text(payload.text, payload.field)
+    apply_choice(db, user, payload.ai)
+    before = ai_runtime.last_call()
+    return _with_model(writing.improve_text(payload.text, payload.field), "improve_grammar", before)
 
 
 @router.post("/{resume_id}/ai/draft-summary", response_model=SummaryDraft, summary="Draft a summary from your facts")
@@ -520,7 +554,9 @@ def ai_draft_summary(
 ) -> SummaryDraft:
     _limit(user, "ai", AI_HELP_PER_MINUTE)
     resume = service.get_resume(db, user.id, resume_id)
-    return writing.draft_summary(db, user.id, resume, payload.parsed_data if payload else None)
+    apply_choice(db, user, payload.ai if payload else None)
+    before = ai_runtime.last_call()
+    return _with_model(writing.draft_summary(db, user.id, resume, payload.parsed_data if payload else None), "draft_summary", before)
 
 
 # --------------------------------------------------------------------------- file

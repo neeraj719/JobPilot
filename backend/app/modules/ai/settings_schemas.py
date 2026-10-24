@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ProviderId = Literal["mock", "ollama", "openai", "gemini", "anthropic", "openai_compatible"]
 WorkflowId = Literal["generation", "analysis", "rewriting", "jd_analysis", "review", "general"]
 
+ModelPromptMode = Literal["ask", "default"]
+ChoiceSource = Literal["workflow_default", "user_default", "server_default", "credential", "local"]
+
 _KEY_RE = re.compile(r"^[\x21-\x7e]+$")  # printable ASCII, no spaces
 
 
@@ -125,6 +128,9 @@ class SettingsRead(BaseModel):
     daily_call_limit: int | None = None
     monthly_budget_usd: float | None = None
     data_residency_ack: bool = False
+    #: ``ask`` = ask which model to use before each AI run when two or more are usable;
+    #: ``default`` = always use the routing without asking.
+    model_prompt_mode: ModelPromptMode = "ask"
     #: What each workflow resolves to right now (and whether it can be used).
     effective: dict[str, EffectiveTarget] = Field(default_factory=dict)
     fallback: EffectiveTarget | None = None
@@ -152,6 +158,8 @@ class SettingsUpdate(BaseModel):
     daily_call_limit: int | None = Field(default=None, ge=1, le=100_000)
     monthly_budget_usd: Decimal | None = Field(default=None, ge=0, le=100_000, max_digits=10, decimal_places=2)
     data_residency_ack: bool = False
+    #: ``None`` keeps the stored value (older clients send a full replacement without it).
+    model_prompt_mode: ModelPromptMode | None = None
 
     @field_validator("default_model", "fallback_model")
     @classmethod
@@ -159,6 +167,73 @@ class SettingsUpdate(BaseModel):
         if value is None:
             return None
         return value.strip() or None
+
+
+class RememberChoice(BaseModel):
+    """Make a per-run choice the workflow's model (``workflow_models[workflow]``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow: WorkflowId
+    provider: ProviderId
+    model: str = Field(min_length=1, max_length=200)
+
+    @field_validator("model")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("model cannot be empty")
+        return value
+
+
+class SettingsPatch(BaseModel):
+    """Partial update (``PATCH /ai/settings``): the two things the model picker changes.
+
+    Everything not sent is kept. ``remember`` validates like ``PUT`` (provider usable, model
+    known, hosted data acknowledgement) and replaces only that workflow's entry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_prompt_mode: ModelPromptMode | None = None
+    remember: RememberChoice | None = None
+
+
+class AiChoice(BaseModel):
+    """One model the user can pick for a run (``GET /ai/choices``)."""
+
+    #: ``"<provider>:<model>"``.
+    id: str
+    provider: str
+    provider_name: str
+    model: str
+    label: str
+    source: ChoiceSource
+    #: This is what the run uses when the user does not pick (the task's routing).
+    is_default: bool = False
+    hosted: bool
+    privacy_note: str
+    #: ``"free, local"`` | ``"≈ $x per 1k tokens"`` (registry estimate) | ``"unknown"``.
+    cost_hint: str
+    available: bool
+    unavailable_reason: str | None = None
+    last_used_at: datetime | None = None
+
+
+class AiChoicesResponse(BaseModel):
+    task: str
+    workflow: str
+    workflow_label: str
+    #: ``ask`` | ``default`` (``AiProviderSettings.model_prompt_mode``).
+    mode: ModelPromptMode
+    #: Id of the candidate the run uses without a pick.
+    default: str
+    candidates: list[AiChoice]
+    #: Candidates with ``available: true``; the UI asks only when this is 2 or more.
+    usable_count: int
+    #: The UI should ask: ``mode == "ask"`` and ``usable_count >= 2``.
+    should_ask: bool
 
 
 class ModelRow(BaseModel):
@@ -250,6 +325,10 @@ class UsageResponse(BaseModel):
 
 
 __all__ = [
+    "AiChoice",
+    "AiChoicesResponse",
+    "RememberChoice",
+    "SettingsPatch",
     "CredentialRead",
     "CredentialWrite",
     "EffectiveTarget",

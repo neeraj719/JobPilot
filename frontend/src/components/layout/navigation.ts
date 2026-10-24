@@ -6,6 +6,13 @@ import { BrainCircuit, Crosshair, FilePlus2, Files, Gauge, History, ScanSearch, 
  * renders only the active module's.
  */
 
+/** Tooltips that belong to the rail share its colours (both themes). */
+export const RAIL_TOOLTIP =
+  'border border-sidebar-border bg-sidebar-raised text-sidebar-accent-foreground dark:border-sidebar-border dark:bg-sidebar-raised dark:text-sidebar-accent-foreground'
+
+/** Focus on the rail: the bright rail ring with its gap in the rail colour. */
+export const RAIL_FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar'
+
 export interface NavItem {
   label: string
   /** Shorter label used in the collapsed rail tooltip. */
@@ -28,7 +35,7 @@ export interface NavSection {
 
 /** The Resume destinations (`notes/resume-studio-plan.md`); the `resume` module's sections. */
 export const RESUME_NAV_CHILDREN: NavItem[] = [
-  { label: 'Resume Dashboard', to: '/resume', icon: Gauge, description: 'Your resumes, analyses and targets at a glance' },
+  { label: 'Dashboard', to: '/resume', icon: Gauge, description: 'Your resumes, analyses and targets at a glance' },
   { label: 'My Resumes', to: '/resume/my', icon: Files, matchPrefix: true, description: 'Every resume, its versions and parsed data' },
   { label: 'Create Resume', to: '/resume/new', icon: FilePlus2, description: 'Build from scratch or import' },
   { label: 'ATS Optimizer', to: '/resume/ats', icon: ScanSearch, matchPrefix: true, description: 'Score a resume against a job description' },

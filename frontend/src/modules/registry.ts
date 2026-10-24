@@ -45,6 +45,8 @@ export interface ModuleDefinition {
   accent: string
   /** Fetches the module's page bundle ahead of navigation (hover / focus on a card). */
   preload?: () => Promise<unknown>
+  /** Warms the react-query cache for the module's first screen (hover / focus intent). */
+  prefetchData?: () => Promise<unknown>
 }
 
 function resumeItem(to: string): NavItem {
@@ -98,6 +100,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     navSections: RESUME_SECTIONS,
     accent: 'primary',
     preload: () => import('@/modules/resume/pages'),
+    prefetchData: () => import('@/modules/resume/prefetchData').then((m) => m.prefetchResumePath('/resume')),
   },
   {
     code: 'apply',

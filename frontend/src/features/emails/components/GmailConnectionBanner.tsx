@@ -2,6 +2,7 @@ import { Mail, Plug, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { SkeletonLine } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatApiDateTime, formatApiRelative } from '@/features/automation/datetime'
@@ -30,14 +31,15 @@ export function GmailConnectionBanner({
 }: GmailConnectionBannerProps) {
   if (loading) {
     return (
-      <Card>
-        <CardContent className="flex items-center gap-4 p-4">
+      <Card role="status" aria-busy="true">
+        <span className="sr-only">Loading the Gmail connection</span>
+        <CardContent className="flex items-center gap-4 p-4" aria-hidden>
           <Skeleton className="size-10 shrink-0 rounded-lg" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-3 w-72" />
+          <div className="min-w-0 flex-1 space-y-1">
+            <SkeletonLine size="sm" className="w-48" />
+            <SkeletonLine size="xs" className="w-72 max-w-full" />
           </div>
-          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-28 shrink-0 rounded-lg" />
         </CardContent>
       </Card>
     )

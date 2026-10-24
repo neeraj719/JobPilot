@@ -4,7 +4,7 @@ import {
   CircleAlert,
   CheckCircle2,
   GitCompareArrows,
-  Loader2,
+  CloudUpload,
   Maximize2,
   Minus,
   Plus,
@@ -18,11 +18,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { SECTION_ICONS } from '@/features/resume-studio/components/editor/sectionIcons'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +55,7 @@ import { KindBadge } from '@/features/resume-studio/components/badges'
 import { CompareDialog } from '@/features/resume-studio/components/CompareDialog'
 import { ExportMenu } from '@/features/resume-studio/components/ExportMenu'
 import { PAGE_WIDTH_PX, ResumePreview } from '@/features/resume-studio/components/ResumePreview'
+import { ResumeEditorSkeleton } from '@/features/resume-studio/components/editor/ResumeEditorSkeleton'
 import { SectionList, type EditorPanel } from '@/features/resume-studio/components/editor/SectionList'
 import {
   AchievementFields,
@@ -67,6 +68,7 @@ import {
   TagsField,
 } from '@/features/resume-studio/components/editor/SectionForms'
 import { useAutosave, useMediaQuery, useUnsavedGuard } from '@/features/resume-studio/hooks'
+import { useDebounce } from '@/hooks/useDebounce'
 import { effectiveOrder } from '@/features/resume-studio/layout'
 import { editorSchema, toEditorValues, toStudioResume, type EditorValues } from '@/features/resume-studio/schema'
 import {
@@ -89,7 +91,7 @@ export default function ResumeEditorPage() {
   if (resume.isLoading || draft.isLoading || templates.isLoading) {
     return (
       <PageContainer width="wide">
-        <LoadingState variant="cards" rows={2} />
+        <ResumeEditorSkeleton />
       </PageContainer>
     )
   }
@@ -122,6 +124,68 @@ export default function ResumeEditorPage() {
   }
   return <Editor key={resume.data.id} resume={resume.data} draft={draft.data ?? null} templates={templates.data} />
 }
+
+interface PreviewPaneProps {
+  data: StudioResume
+  template: ResumeTemplate
+  templates: ResumeTemplate[]
+  templateId: string
+  scale: number | 'fit'
+  effectiveScale: number
+  onScale: (scale: number | 'fit') => void
+  onTemplateChange: (id: string) => void
+  boxRef: (node: HTMLDivElement | null) => void
+}
+
+/**
+ * Template picker, zoom and the print preview. Memoised: it re-renders when the (debounced,
+ * deferred) resume data, the template or the zoom change — not on each keystroke.
+ */
+const PreviewPane = React.memo(function PreviewPane({
+  data,
+  template,
+  templates,
+  templateId,
+  scale,
+  effectiveScale,
+  onScale,
+  onTemplateChange,
+  boxRef,
+}: PreviewPaneProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Select value={templateId} onValueChange={onTemplateChange}>
+          <SelectTrigger className="h-8 w-44" aria-label="Template">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {templates.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-1" role="group" aria-label="Zoom">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => onScale(Math.max(0.35, Math.round((effectiveScale - 0.1) * 10) / 10))}>
+            <Minus aria-hidden />
+          </Button>
+          <span className="w-12 text-center text-xs tabular-nums text-muted-foreground">{Math.round(effectiveScale * 100)}%</span>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Zoom in" onClick={() => onScale(Math.min(1.5, Math.round((effectiveScale + 0.1) * 10) / 10))}>
+            <Plus aria-hidden />
+          </Button>
+          <Button type="button" variant={scale === 'fit' ? 'secondary' : 'ghost'} size="icon-sm" aria-label="Fit to width" onClick={() => onScale('fit')}>
+            <Maximize2 aria-hidden />
+          </Button>
+        </div>
+      </div>
+      <div ref={boxRef} className="overflow-auto rounded-lg border border-border bg-muted/50 p-3 pb-8">
+        <ResumePreview data={data} template={template} scale={effectiveScale} />
+      </div>
+    </div>
+  )
+})
 
 function countOf(values: StudioResume, key: SectionKey): number {
   switch (key) {
@@ -191,8 +255,19 @@ function Editor({ resume, draft, templates }: { resume: StudioResumeRead; draft:
   useUnsavedGuard(autosave.status === 'pending' || autosave.status === 'saving' || autosave.status === 'error')
 
   const hasChanges = JSON.stringify(studio) !== baseline
-  const order = effectiveOrder(studio.section_order, template)
-  const counts = Object.fromEntries(order.concat(['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements', 'languages'] as SectionKey[]).map((k) => [k, countOf(studio, k)]))
+  // Stable references for the memoised section list: they change only when the section order
+  // or an entry count changes — not on every keystroke inside a field.
+  const orderKey = (studio.section_order ?? []).join('|')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const order = React.useMemo(() => effectiveOrder(studio.section_order, template), [orderKey, template])
+  const rawCounts = Object.fromEntries(order.concat(['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements', 'languages'] as SectionKey[]).map((k) => [k, countOf(studio, k)]))
+  const countsKey = JSON.stringify(rawCounts)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const counts = React.useMemo(() => rawCounts, [countsKey])
+  // The live preview renders from a debounced, deferred copy: typing never waits for the page
+  // re-layout, and the preview catches up 150 ms after the last keystroke.
+  const debouncedStudio = useDebounce(studio, 150)
+  const previewData = React.useDeferredValue(debouncedStudio)
 
   React.useLayoutEffect(() => {
     const node = previewBox
@@ -205,7 +280,10 @@ function Editor({ resume, draft, templates }: { resume: StudioResumeRead; draft:
   }, [previewBox])
   const effectiveScale = scale === 'fit' ? fitScale : scale
 
-  const setOrder = (next: SectionKey[]) => form.setValue('section_order', next, { shouldDirty: true })
+  const setOrder = React.useCallback(
+    (next: SectionKey[]) => form.setValue('section_order', next, { shouldDirty: true }),
+    [form],
+  )
 
   const changeTemplate = async (next: string) => {
     const previous = templateId
@@ -217,6 +295,10 @@ function Editor({ resume, draft, templates }: { resume: StudioResumeRead; draft:
       toast.error('Could not switch the template', { description: errorMessage(error) })
     }
   }
+
+  const changeTemplateRef = React.useRef(changeTemplate)
+  changeTemplateRef.current = changeTemplate
+  const onTemplateChange = React.useCallback((next: string) => void changeTemplateRef.current(next), [])
 
   const doSaveVersion = async (versionNote: string) => {
     const valid = await form.trigger()
@@ -300,7 +382,7 @@ function Editor({ resume, draft, templates }: { resume: StudioResumeRead; draft:
       case 'saving':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden /> Saving draft…
+            <CloudUpload className="size-3.5 animate-pulse motion-reduce:animate-none" aria-hidden /> Saving draft…
           </span>
         )
       case 'error':
@@ -356,71 +438,77 @@ function Editor({ resume, draft, templates }: { resume: StudioResumeRead; draft:
 
   const versionNumbers = (versions.data ?? []).map((v) => v.version_number)
 
+  const onRemoveSection = React.useCallback(
+    (key: SectionKey) => {
+      setOrder(order.filter((k) => k !== key))
+      setPanel((current) => (current === key ? 'header' : current))
+      toast(`${SECTION_LABELS[key]} hidden from the resume`, {
+        description: 'Its content is kept. Add the section again to show it.',
+        action: { label: 'Undo', onClick: () => setOrder(order) },
+      })
+    },
+    [order, setOrder],
+  )
+  const onAddSection = React.useCallback(
+    (key: SectionKey) => {
+      setOrder([...order, key])
+      setPanel(key)
+    },
+    [order, setOrder],
+  )
+
+  const PanelIcon = SECTION_ICONS[panel]
+
   const editPane = (
-    <div className="grid gap-4 xl:grid-cols-[11rem_minmax(0,1fr)]">
+    <div className="grid gap-4 xl:grid-cols-[12.5rem_minmax(0,1fr)]">
+      {/* Sticky on xl so the section list stays in reach while a long form scrolls. */}
+      <div className="min-w-0 xl:sticky xl:top-20 xl:self-start">
       <SectionList
         order={order}
         counts={counts}
         active={panel}
         onSelect={setPanel}
         onReorder={setOrder}
-        onRemove={(key) => {
-          setOrder(order.filter((k) => k !== key))
-          if (panel === key) setPanel('header')
-          toast(`${SECTION_LABELS[key]} hidden from the resume`, {
-            description: 'Its content is kept. Add the section again to show it.',
-            action: { label: 'Undo', onClick: () => setOrder(order) },
-          })
-        }}
-        onAdd={(key) => {
-          setOrder([...order, key])
-          setPanel(key)
-        }}
+        onRemove={onRemoveSection}
+        onAdd={onAddSection}
       />
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{panel === 'header' ? 'Name & contact' : SECTION_LABELS[panel]}</CardTitle>
-          {panel !== 'header' && !order.includes(panel) ? (
-            <CardDescription>This section is hidden from the resume.</CardDescription>
-          ) : null}
+      </div>
+      <Card className="overflow-hidden">
+        {/* Section header: icon chip + display title + what it holds. */}
+        <CardHeader className="flex-row items-center gap-3 space-y-0 border-b border-border bg-gradient-brand-soft px-6 py-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-brand text-gradient-foreground shadow-glow" aria-hidden>
+            <PanelIcon className="size-[1.125rem]" />
+          </span>
+          <div className="min-w-0">
+            <CardTitle className="text-lg">{panel === 'header' ? 'Name & contact' : SECTION_LABELS[panel]}</CardTitle>
+            <CardDescription>
+              {panel === 'header'
+                ? 'How employers reach you. Printed at the top of every template.'
+                : !order.includes(panel)
+                  ? 'This section is hidden from the resume.'
+                  : counts[panel]
+                    ? `${counts[panel]} ${counts[panel] === 1 ? 'entry' : 'entries'} on the resume`
+                    : 'Empty — add what is true for you.'}
+            </CardDescription>
+          </div>
         </CardHeader>
-        <CardContent>{sectionForm}</CardContent>
+        <CardContent className="p-6">{sectionForm}</CardContent>
       </Card>
     </div>
   )
 
   const previewPane = (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Select value={templateId} onValueChange={(v) => void changeTemplate(v)}>
-          <SelectTrigger className="h-8 w-44" aria-label="Template">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {templates.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-1" role="group" aria-label="Zoom">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => setScale(Math.max(0.35, Math.round((effectiveScale - 0.1) * 10) / 10))}>
-            <Minus aria-hidden />
-          </Button>
-          <span className="w-12 text-center text-xs tabular-nums text-muted-foreground">{Math.round(effectiveScale * 100)}%</span>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Zoom in" onClick={() => setScale(Math.min(1.5, Math.round((effectiveScale + 0.1) * 10) / 10))}>
-            <Plus aria-hidden />
-          </Button>
-          <Button type="button" variant={scale === 'fit' ? 'secondary' : 'ghost'} size="icon-sm" aria-label="Fit to width" onClick={() => setScale('fit')}>
-            <Maximize2 aria-hidden />
-          </Button>
-        </div>
-      </div>
-      <div ref={setPreviewBox} className="overflow-auto rounded-lg border border-border bg-muted/50 p-3 pb-8">
-        <ResumePreview data={studio} template={template} scale={effectiveScale} />
-      </div>
-    </div>
+    <PreviewPane
+      data={previewData}
+      template={template}
+      templates={templates}
+      templateId={templateId}
+      scale={scale}
+      effectiveScale={effectiveScale}
+      onScale={setScale}
+      onTemplateChange={onTemplateChange}
+      boxRef={setPreviewBox}
+    />
   )
 
   return (

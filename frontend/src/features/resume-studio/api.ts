@@ -9,6 +9,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClie
 import { api, saveBlob } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
 import type { ResumeRead } from '@/types/api'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
 
 import type {
   BulletSuggestions,
@@ -47,10 +48,7 @@ export function useTemplates() {
 }
 
 export function useStudioResumes(includeArchived: boolean) {
-  return useQuery({
-    queryKey: qk.resumeStudio.list(includeArchived),
-    queryFn: () => api.get<StudioResumeRead[]>('/resumes', { params: { include_archived: includeArchived } }),
-  })
+  return useQuery(studioResumesQuery(includeArchived))
 }
 
 export function useStudioResume(id: string | undefined) {
@@ -61,11 +59,19 @@ export function useStudioResume(id: string | undefined) {
   })
 }
 
+/** Query options shared by the hook and the hover prefetch (same key, same fetcher). */
+export const resumeSummaryQuery = () => ({
+  queryKey: qk.resumeStudio.dashboard,
+  queryFn: () => api.get<ResumeSummary>('/resumes/summary'),
+})
+
+export const studioResumesQuery = (includeArchived: boolean) => ({
+  queryKey: qk.resumeStudio.list(includeArchived),
+  queryFn: () => api.get<StudioResumeRead[]>('/resumes', { params: { include_archived: includeArchived } }),
+})
+
 export function useResumeSummary() {
-  return useQuery({
-    queryKey: qk.resumeStudio.dashboard,
-    queryFn: () => api.get<ResumeSummary>('/resumes/summary'),
-  })
+  return useQuery(resumeSummaryQuery())
 }
 
 export function usePrefill(enabled: boolean) {
@@ -139,7 +145,7 @@ export function useBuildResume() {
 export function useImportText() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: { text: string; name?: string; target_role?: string | null; template?: string }) =>
+    mutationFn: (body: { text: string; name?: string; target_role?: string | null; template?: string; ai?: WorkflowTarget }) =>
       api.post<StudioResumeRead>('/resumes/import/text', body),
     onSuccess: (resume) => invalidateResumeCaches(queryClient, resume.id),
   })
@@ -271,27 +277,27 @@ export async function exportResume(
 
 export function useRewriteBullet(id: string) {
   return useMutation({
-    mutationFn: (body: { text: string; role?: string | null; company?: string | null }) =>
+    mutationFn: (body: { text: string; role?: string | null; company?: string | null; ai?: WorkflowTarget }) =>
       api.post<BulletSuggestions>(`/resumes/${id}/ai/rewrite-bullet`, body),
   })
 }
 
 export function useAchievementBullet(id: string) {
   return useMutation({
-    mutationFn: (body: { text: string }) =>
+    mutationFn: (body: { text: string; ai?: WorkflowTarget }) =>
       api.post<BulletSuggestions>(`/resumes/${id}/ai/responsibility-to-achievement`, body),
   })
 }
 
 export function useImproveText(id: string) {
   return useMutation({
-    mutationFn: (body: { text: string; field: WritingField }) => api.post<ImprovedText>(`/resumes/${id}/ai/improve-text`, body),
+    mutationFn: (body: { text: string; field: WritingField; ai?: WorkflowTarget }) => api.post<ImprovedText>(`/resumes/${id}/ai/improve-text`, body),
   })
 }
 
 export function useDraftSummary(id: string) {
   return useMutation({
-    mutationFn: (parsed: StudioResume | null) =>
-      api.post<SummaryDraft>(`/resumes/${id}/ai/draft-summary`, parsed ? { parsed_data: parsed } : {}),
+    mutationFn: ({ parsed, ai }: { parsed: StudioResume | null; ai?: WorkflowTarget }) =>
+      api.post<SummaryDraft>(`/resumes/${id}/ai/draft-summary`, { ...(parsed ? { parsed_data: parsed } : {}), ...(ai ? { ai } : {}) }),
   })
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleDashed, HelpCircle, Loader2, PauseCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, CircleDashed, HelpCircle, PauseCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { automationStateColor, cn, humanizeEnum } from '@/lib/utils'
@@ -62,7 +62,7 @@ export function automationSummary(
       return {
         label: state === 'RETRYING' ? 'Retrying' : 'In progress',
         detail: 'The browser is filling the application form right now.',
-        icon: Loader2,
+        icon: Activity,
         className,
         spinning: true,
         needsUser: false,
@@ -141,7 +141,7 @@ export function AutomationBadge({ application, className, showDetail = false }: 
         )}
         title={summary.detail}
       >
-        <Icon className={cn('size-3', summary.spinning && 'animate-spin')} aria-hidden />
+        <Icon className={cn('size-3', summary.spinning && 'animate-pulse motion-reduce:animate-none')} aria-hidden />
         {summary.label}
       </span>
       {showDetail ? <span className="text-xs text-muted-foreground">{summary.detail}</span> : null}

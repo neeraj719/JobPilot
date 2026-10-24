@@ -8,7 +8,6 @@ import {
   Files,
   PencilLine,
   ScanSearch,
-  Sparkles,
   Upload,
   type LucideIcon,
 } from 'lucide-react'
@@ -16,7 +15,7 @@ import { Link } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { StatCard } from '@/components/common/StatCard'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -28,8 +27,13 @@ import { TARGET_STATUS_CLASSES, TARGET_STATUS_LABELS, TONE_TEXT, scoreTone } fro
 import { JOB_TARGET_STATUSES } from '@/features/ats/types'
 import { useResumeSummary } from '@/features/resume-studio/api'
 import { KindBadge } from '@/features/resume-studio/components/badges'
+import { OriginalFileBadge } from '@/features/resume-upload/components/OriginalFileBadge'
+import { PageFileDrop } from '@/features/resume-upload/PageFileDrop'
+import { useUploadSheet } from '@/features/resume-upload/UploadResumeSheet'
+import { DividedRowsSkeleton, TargetSummarySkeleton, UpcomingSkeleton } from '@/features/resume/components/ResumeSkeletons'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { cn } from '@/lib/utils'
+import { AiPromptModeNote } from '@/features/ai-providers/components/ModelPromptCard'
 
 function ago(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -49,21 +53,22 @@ interface QuickAction {
 
 const QUICK_ACTIONS: QuickAction[] = [
   { label: 'Create a resume', description: 'From your profile or from scratch', to: '/resume/new', icon: FilePlus2 },
-  { label: 'Import a resume', description: 'PDF, DOCX, pasted text or LinkedIn export', to: '/resume/new', icon: Upload },
+  { label: 'Upload my resume', description: 'PDF or DOCX, kept as the original', to: '/resume/new?mode=upload', icon: Upload },
   { label: 'Check against a job', description: 'Estimated ATS score and safe fixes', to: '/resume/ats', icon: ScanSearch },
-  { label: 'Tailor for a company', description: 'Save a job target and tailor a copy', to: '/resume/targets', icon: Crosshair },
+  { label: 'Optimize for a job', description: 'Paste a JD, pick a resume', to: '/resume/targets/new', icon: Crosshair },
 ]
 
 /**
- * `/resume` — the Resume Dashboard. Composes the three summaries the Resume Studio streams
+ * `/resume` — the Resume Studio dashboard (shown as "Dashboard"). Composes the three summaries the Resume Studio streams
  * expose (`GET /resumes/summary`, `GET /ats/summary`, `GET /ai/settings`); each card loads and
  * fails on its own, so one slow endpoint never blanks the page.
  */
 export default function ResumeDashboardPage() {
-  useDocumentTitle('Resume Dashboard')
+  useDocumentTitle('Dashboard')
   const resumes = useResumeSummary()
   const ats = useAtsSummary()
   const ai = useAiSettings()
+  const upload = useUploadSheet()
 
   const resumeData = resumes.data
   const atsData = ats.data
@@ -78,38 +83,66 @@ export default function ResumeDashboardPage() {
     <PageContainer>
       <PageHeader
         eyebrow="Resume"
-        title="Resume Dashboard"
+        title="Dashboard"
         description="Your resumes, how they score against real job descriptions, and the jobs you are tailoring them for."
         actions={
-          <Button asChild>
-            <Link to="/resume/new">
-              <FilePlus2 aria-hidden />
-              New resume
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => upload.openSheet()} data-upload-resume>
+              <Upload aria-hidden />
+              Upload resume
+            </Button>
+            <Button asChild>
+              <Link to="/resume/new">
+                <FilePlus2 aria-hidden />
+                New resume
+              </Link>
+            </Button>
+          </>
         }
       />
+      <PageFileDrop onFile={(file) => upload.openSheet(file)} disabled={upload.open} />
+      {upload.element}
+
 
       {isFirstVisit ? (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-              <Sparkles className="size-5" aria-hidden />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold">Start with one resume</p>
+        // First visit: the start card takes the KPI row's place (all zeros would say nothing).
+        // Its height (min 122 px + border) equals a StatCard tile, so skeleton → card does not shift.
+        <Card variant="soft" data-dashboard-hero className="relative min-w-0 overflow-hidden">
+          <CardContent className="grid min-h-[7.625rem] items-center gap-4 p-5 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-6">
+            {/* 3D illustration (CC0 3dicons, public/3d/LICENSES.md) — decorative. */}
+            <img
+              src="/3d/empty-rocket-240.webp"
+              srcSet="/3d/empty-rocket-240.webp 240w, /3d/empty-rocket.webp 480w"
+              sizes="80px"
+              width={80}
+              height={80}
+              alt=""
+              aria-hidden
+              className="h-16 w-auto max-w-full object-contain motion-safe:animate-float sm:h-20"
+            />
+            <div className="min-w-0">
+              <p className="font-display text-lg font-semibold tracking-tight">Start with one resume</p>
               <p className="text-sm text-muted-foreground">
-                Import the resume you already have or build one from your profile. Then paste a job description to see an
-                estimated ATS score and the changes that are safe to make. Nothing is added to your resume without your OK.
+                Upload the resume you already have — we keep the file exactly as it is — or build one from your profile. Then
+                paste a job description to see an estimated ATS score and the changes that are safe to make. Nothing is added to
+                your resume without your OK.
               </p>
             </div>
-            <Button asChild>
-              <Link to="/resume/new">Get started</Link>
-            </Button>
+            <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:grid-cols-1 sm:justify-self-end">
+              <Button variant="outline" onClick={() => upload.openSheet()} data-start-upload>
+                <Upload aria-hidden />
+                Upload my resume
+              </Button>
+              <Button variant="outline" asChild>
+                <Link to="/resume/new?mode=profile">
+                  <FilePlus2 aria-hidden />
+                  Build from my profile
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
-      ) : null}
-
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Resumes"
@@ -146,6 +179,7 @@ export default function ResumeDashboardPage() {
           description={latestScore !== null ? 'Estimate, not an employer score' : 'No analysis yet'}
         />
       </div>
+      )}
 
       <section aria-labelledby="quick-actions" className="space-y-3">
         <h2 id="quick-actions" className="text-sm font-semibold text-muted-foreground">
@@ -184,7 +218,7 @@ export default function ResumeDashboardPage() {
           </CardHeader>
           <CardContent>
             {resumes.isLoading ? (
-              <LoadingState rows={3} />
+              <DividedRowsSkeleton rows={3} trailing label="Loading your resumes" />
             ) : resumes.isError ? (
               <ErrorState title="Could not load your resumes" error={resumes.error} onRetry={() => resumes.refetch()} />
             ) : !resumeData?.recently_edited.length ? (
@@ -209,7 +243,10 @@ export default function ResumeDashboardPage() {
                           {resume.has_draft ? ' · unsaved draft' : ''}
                         </p>
                       </div>
-                      <KindBadge kind={resume.kind} />
+                      <span className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                        <KindBadge kind={resume.kind} />
+                        {resume.kind === 'UPLOADED' ? <OriginalFileBadge className="max-sm:hidden" /> : null}
+                      </span>
                     </Link>
                   </li>
                 ))}
@@ -230,7 +267,7 @@ export default function ResumeDashboardPage() {
           </CardHeader>
           <CardContent>
             {ats.isLoading ? (
-              <LoadingState rows={3} />
+              <DividedRowsSkeleton rows={3} leading label="Loading analyses" />
             ) : ats.isError ? (
               <ErrorState title="Could not load your analyses" error={ats.error} onRetry={() => ats.refetch()} />
             ) : !atsData?.recent_analyses.length ? (
@@ -286,7 +323,7 @@ export default function ResumeDashboardPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {ats.isLoading ? (
-              <LoadingState rows={2} />
+              <TargetSummarySkeleton />
             ) : ats.isError ? null : !atsData?.total_targets ? (
               <EmptyState
                 size="sm"
@@ -349,7 +386,7 @@ export default function ResumeDashboardPage() {
             </CardHeader>
             <CardContent>
               {ats.isLoading ? (
-                <LoadingState rows={2} />
+                <UpcomingSkeleton />
               ) : !atsData?.upcoming.length ? (
                 <p className="text-sm text-muted-foreground">Nothing scheduled.</p>
               ) : (
@@ -381,12 +418,13 @@ export default function ResumeDashboardPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {ai.isLoading ? (
-                <LoadingState rows={1} />
+                <SkeletonRegion label="Loading AI settings"><SkeletonLine size="sm" className="w-3/4" /></SkeletonRegion>
               ) : ai.isError ? (
                 <p className="text-sm text-muted-foreground">Could not read your AI settings.</p>
               ) : (
                 <>
                   <p className="text-sm">{ai.data?.summary}</p>
+                  <AiPromptModeNote mode={ai.data?.model_prompt_mode} />
                   {ai.data?.status.problem ? <p className="text-xs text-destructive">{ai.data.status.problem}</p> : null}
                 </>
               )}

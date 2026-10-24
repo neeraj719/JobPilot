@@ -2,7 +2,6 @@ import { Ban, Info, RotateCcw, Save, Star, X } from 'lucide-react'
 import * as React from 'react'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +13,7 @@ import { PRIORITY_LABELS, cn } from '@/lib/utils'
 import { CompanyAutocomplete } from '@/features/companies/components/CompanyAutocomplete'
 import { useCompanyPreferences, useReplaceCompanyPreferences } from '@/features/companies/api'
 import { COMPANY_PRIORITIES, type CompanyPreferenceUpsert, type CompanyPriority } from '@/types/api'
+import { PriorityBoardSkeleton } from '@/features/companies/components/CompaniesSkeletons'
 
 interface BoardEntry extends CompanyPreferenceUpsert {
   /** Stable key for React; preference ids disappear on unsaved rows. */
@@ -93,7 +93,7 @@ export function PriorityBoard() {
     }
   }
 
-  if (preferencesQuery.isLoading) return <LoadingState variant="cards" rows={2} />
+  if (preferencesQuery.isLoading) return <PriorityBoardSkeleton />
   if (preferencesQuery.error) {
     return (
       <ErrorState

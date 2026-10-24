@@ -83,7 +83,7 @@ export function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `mutate` is stable; run on entry only
   }, [enteredCode, active.isLauncher, setLastModuleCode])
 
-  const motion = animate ? 'duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none' : 'transition-none'
+  const motion = animate ? 'duration-300 ease-drawer motion-reduce:transition-none' : 'transition-none'
 
   const moduleName = active.pathModule ? (active.module?.name ?? active.pathModule.name) : undefined
   const pageLabel = active.navItem?.label
@@ -91,26 +91,35 @@ export function AppShell() {
     active.isLauncher ? 'All modules' : pageLabel && moduleName ? `${pageLabel} · ${moduleName}` : (pageLabel ?? moduleName),
   )
 
-  const title = active.isLauncher ? null : moduleName && active.pathModule ? (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
-      <Link
-        to={active.pathModule.homePath}
-        className="hidden shrink-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline"
-      >
-        {moduleName}
-      </Link>
-      {pageLabel ? (
-        <>
-          <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground/70 sm:inline" aria-hidden />
-          <span className="truncate" aria-current="page">
-            {pageLabel}
-          </span>
-        </>
-      ) : null}
-    </nav>
-  ) : (
-    pageLabel
+  // Memoised so the (memoised) topbar does not re-render when the shell does for unrelated
+  // reasons (a module-list refetch, the rail animation flag).
+  const homePath = active.pathModule?.homePath
+  const title = React.useMemo(
+    () =>
+      active.isLauncher ? null : moduleName && homePath ? (
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
+          <Link
+            to={homePath}
+            className="hidden shrink-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline"
+          >
+            {moduleName}
+          </Link>
+          {pageLabel ? (
+            <>
+              <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground/70 sm:inline" aria-hidden />
+              <span className="truncate" aria-current="page">
+                {pageLabel}
+              </span>
+            </>
+          ) : null}
+        </nav>
+      ) : (
+        pageLabel
+      ),
+    [active.isLauncher, moduleName, homePath, pageLabel],
   )
+  const openMobile = React.useCallback(() => setMobileOpen(true), [])
+  const closeMobile = React.useCallback(() => setMobileOpen(false), [])
 
   // Any navigation closes the mobile drawer.
   React.useEffect(() => {
@@ -135,12 +144,17 @@ export function AppShell() {
 
             {/* Mobile drawer */}
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetContent side="left" className="w-72 p-0" showClose>
+              <SheetContent
+                side="left"
+                className="w-72 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground"
+                closeClassName="right-3.5 top-[1.375rem] text-sidebar-muted ring-offset-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:ring-sidebar-ring"
+                showClose
+              >
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
                 <SheetDescription className="sr-only">
                   {active.module?.name ?? active.definition?.name ?? 'JobPilot AI'} sections
                 </SheetDescription>
-                <Sidebar onNavigate={() => setMobileOpen(false)} />
+                <Sidebar onNavigate={closeMobile} />
               </SheetContent>
             </Sheet>
           </>
@@ -156,11 +170,14 @@ export function AppShell() {
           <Topbar
             title={title}
             showBrand={!showSidebar}
-            onOpenMenu={showSidebar ? () => setMobileOpen(true) : undefined}
+            onOpenMenu={showSidebar ? openMobile : undefined}
           />
           <main className="flex-1">
             <StaySignedInNudge />
-            <Outlet />
+            {/* Route change: 180 ms fade + 4 px lift (CSS, reduced-motion safe). */}
+            <div key={pathname} className="animate-page-in">
+              <Outlet />
+            </div>
           </main>
         </div>
       </div>

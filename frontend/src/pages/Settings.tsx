@@ -5,7 +5,6 @@ import { useSearchParams } from 'react-router-dom'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 import { useAuth } from '@/hooks/useAuth'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -15,6 +14,7 @@ import { AiProvidersLinkCard } from '@/features/ai-providers/components/AiProvid
 import { AiSettingsCard } from '@/features/settings/components/AiSettingsCard'
 import { AutomationSettingsForm } from '@/features/settings/components/AutomationSettingsForm'
 import { ConnectedAccountsCard } from '@/features/settings/components/ConnectedAccountsCard'
+import { LinkedInAccountCard } from '@/features/linkedin/components/LinkedInAccountCard'
 import { EmailIntegrationCard } from '@/features/settings/components/EmailIntegrationCard'
 import { NotificationSettingsCard } from '@/features/settings/components/NotificationSettingsCard'
 import { SecurityCard } from '@/features/settings/components/SecurityCard'
@@ -39,6 +39,8 @@ type SettingsSection =
 interface SectionDef {
   id: SettingsSection
   label: string
+  /** One line under the section title. */
+  blurb: string
   icon: LucideIcon
   /** Only for a session acting as ADMIN. */
   adminOnly?: boolean
@@ -47,16 +49,16 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
-  { id: 'general', label: 'Your data', icon: UserCog },
-  { id: 'workspace', label: 'Workspace', icon: LayoutGrid },
-  { id: 'roles', label: 'Account roles', icon: Users },
-  { id: 'automation', label: 'Limits & schedule', icon: SlidersHorizontal, module: 'apply' },
-  { id: 'accounts', label: 'Connected accounts', icon: Link2 },
-  { id: 'email', label: 'Email integration', icon: Mail },
-  { id: 'ai', label: 'AI & browser', icon: Bot },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'security', label: 'Security', icon: ShieldCheck },
-  { id: 'admin', label: 'Admin', icon: ShieldPlus, adminOnly: true },
+  { id: 'general', label: 'Your data', blurb: 'Where your profile, resumes and history live.', icon: UserCog },
+  { id: 'workspace', label: 'Workspace', blurb: 'Where you land after signing in, and the order of your modules.', icon: LayoutGrid },
+  { id: 'roles', label: 'Account roles', blurb: 'The roles this account can act as.', icon: Users },
+  { id: 'automation', label: 'Limits & schedule', blurb: 'Daily limits, timing and the safety rails.', icon: SlidersHorizontal, module: 'apply' },
+  { id: 'accounts', label: 'Connected accounts', blurb: 'Job platforms JobPilot may read from.', icon: Link2 },
+  { id: 'email', label: 'Email integration', blurb: 'Read-only Gmail access for replies to your applications.', icon: Mail },
+  { id: 'ai', label: 'AI & browser', blurb: 'The AI model and the browser that fills forms for you.', icon: Bot },
+  { id: 'notifications', label: 'Notifications', blurb: 'What JobPilot tells you about, and where.', icon: Bell },
+  { id: 'security', label: 'Security', blurb: 'Password, signed-in devices and sessions.', icon: ShieldCheck },
+  { id: 'admin', label: 'Admin', blurb: 'Platform modules and per-user access.', icon: ShieldPlus, adminOnly: true },
 ]
 
 function isSection(sections: SectionDef[], value: string | null): value is SettingsSection {
@@ -87,6 +89,7 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const sectionParam = searchParams.get('section')
   const activeSection: SettingsSection = isSection(sections, sectionParam) ? sectionParam : 'general'
+  const activeMeta = sections.find((section) => section.id === activeSection)
 
   const setSection = React.useCallback(
     (section: string) => {
@@ -124,23 +127,36 @@ export default function SettingsPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
-        <nav aria-label="Settings sections" className="lg:sticky lg:top-20 lg:self-start">
-          <div className="lg:hidden">
-            <Select value={activeSection} onValueChange={setSection}>
-              <SelectTrigger aria-label="Settings section">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {sections.map((section) => (
-                  <SelectItem key={section.id} value={section.id}>
+        <nav aria-label="Settings sections" className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+          {/* Mobile / tablet: a scrollable row of pills (the row scrolls, never the page). */}
+          <ul className="scrollbar-none -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6 lg:hidden">
+            {sections.map((section) => {
+              const Icon = section.icon
+              const active = section.id === activeSection
+              return (
+                <li key={section.id} className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSection(section.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex h-9 items-center gap-2 whitespace-nowrap rounded-full px-3.5 text-sm font-medium transition-[background-color,color,box-shadow]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                      active
+                        ? 'bg-gradient-brand text-gradient-foreground shadow-glow'
+                        : 'border border-border bg-card text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Icon className="size-4 shrink-0" aria-hidden />
                     {section.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
 
-          <ul className="hidden space-y-1 lg:block">
+          {/* Desktop: a pill rail in its own card. */}
+          <ul className="hidden space-y-1 rounded-2xl border border-border bg-card p-2 shadow-xs dark:shadow-highlight lg:block">
             {sections.map((section) => {
               const Icon = section.icon
               const active = section.id === activeSection
@@ -151,11 +167,11 @@ export default function SettingsPage() {
                     onClick={() => setSection(section.id)}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
                       active
-                        ? 'bg-accent font-medium text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                        ? 'bg-gradient-brand text-gradient-foreground shadow-glow'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                     )}
                   >
                     <Icon className="size-4 shrink-0" aria-hidden />
@@ -167,7 +183,19 @@ export default function SettingsPage() {
           </ul>
         </nav>
 
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-6">
+          {activeMeta ? (
+            // Section header band: icon chip on the soft brand gradient + title + one line.
+            <div className="border-gradient-soft flex items-center gap-4 rounded-2xl p-4 sm:p-5">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-brand text-gradient-foreground shadow-glow">
+                <activeMeta.icon className="size-5" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h2 className="font-display text-xl font-semibold tracking-tight">{activeMeta.label}</h2>
+                <p className="text-sm text-muted-foreground">{activeMeta.blurb}</p>
+              </div>
+            </div>
+          ) : null}
           {activeSection === 'general' ? <SettingsShortcuts /> : null}
           {activeSection === 'workspace' ? <WorkspaceSettingsCard /> : null}
           {activeSection === 'admin' ? (
@@ -178,7 +206,12 @@ export default function SettingsPage() {
           ) : null}
           {activeSection === 'roles' ? <AccountRolesCard /> : null}
           {activeSection === 'automation' ? <AutomationSettingsForm /> : null}
-          {activeSection === 'accounts' ? <ConnectedAccountsCard /> : null}
+          {activeSection === 'accounts' ? (
+            <>
+              <LinkedInAccountCard />
+              <ConnectedAccountsCard />
+            </>
+          ) : null}
           {activeSection === 'email' ? <EmailIntegrationCard /> : null}
           {activeSection === 'ai' ? (
             <>

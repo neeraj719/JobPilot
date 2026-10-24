@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Skeleton } from '@/components/ui/skeleton'
 import { CompanyAvatar } from '@/features/jobs/components/CompanyAvatar'
+import { JobDetailSkeleton } from '@/features/jobs/components/JobsSkeletons'
 import {
   EMPLOYMENT_TYPE_LABELS,
   WORK_MODE_LABELS,
@@ -104,12 +104,10 @@ export function JobDetailSheet({
     <Sheet open={jobId !== null} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-xl" aria-describedby={undefined}>
         {loading || (!job && !error) ? (
-          <div className="space-y-4 p-6">
-            <Skeleton className="h-6 w-2/3" />
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-40 w-full" />
-          </div>
+          <>
+            <SheetTitle className="sr-only">Loading job</SheetTitle>
+            <JobDetailSkeleton />
+          </>
         ) : error ? (
           <div className="p-6">
             <ErrorState error={error} onRetry={onRetry} />

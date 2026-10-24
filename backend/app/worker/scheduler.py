@@ -1,11 +1,14 @@
 """Background scheduler (contract §14).
 
-Four jobs, all idempotent and all safe to run in several processes because every
+Five jobs, all idempotent and all safe to run in several processes because every
 pipeline execution goes through the per-user lock in :mod:`app.modules.automation.locks`:
 
 ``tick_scheduled_runs``              every minute — start the daily pipeline for users whose
                                      ``schedule_time`` has passed in *their* timezone today
 ``sync_gmail``                       every 30 minutes — pull new mail for connected accounts
+``sync_linkedin``                    hourly tick — re-read LinkedIn for connections with
+                                     auto-sync on whose last sync is ``LINKEDIN_AUTO_SYNC_HOURS``
+                                     old; stores the diff and notifies, **never** writes the profile
 ``mark_no_response``                 nightly 02:00 UTC — APPLIED + 21 days + silence → NO_RESPONSE
 ``cleanup_expired_browser_sessions`` daily 03:00 UTC — expire stale Playwright storage state
 
@@ -47,6 +50,8 @@ logger = logging.getLogger(__name__)
 NO_RESPONSE_AFTER_DAYS = 21
 TICK_SECONDS = 60
 GMAIL_SYNC_MINUTES = 30
+#: The LinkedIn job ticks hourly; each connection is only re-read once it is due.
+LINKEDIN_TICK_MINUTES = 60
 
 __all__ = [
     "build_scheduler",
@@ -54,6 +59,7 @@ __all__ = [
     "due_users",
     "mark_no_response",
     "sync_gmail",
+    "sync_linkedin",
     "tick_scheduled_runs",
 ]
 
@@ -156,6 +162,28 @@ def sync_gmail() -> int:
     return count
 
 
+# --------------------------------------------------------------------------- linkedin
+
+
+def sync_linkedin(now: datetime | None = None) -> dict[str, str]:
+    """Re-read LinkedIn for due auto-sync connections; notify about changes, never apply them.
+
+    Acts for each connection's owner (``integrations.linkedin_service`` publishes the actor);
+    users without the Resume Studio module are skipped.
+    """
+    try:
+        from app.modules.integrations.linkedin_service import sync_due_connections
+    except Exception as exc:  # pragma: no cover - never kill the scheduler
+        logger.debug("linkedin_service.sync_due_connections unavailable: %s", exc)
+        return {}
+    try:
+        with session_scope() as db:
+            return sync_due_connections(db, now)
+    except Exception as exc:  # pragma: no cover - never kill the scheduler
+        logger.exception("LinkedIn sync failed: %s", exc)
+        return {}
+
+
 # --------------------------------------------------------------------------- housekeeping
 
 
@@ -227,7 +255,7 @@ def cleanup_expired_browser_sessions(now: datetime | None = None) -> int:
 
 
 def build_scheduler() -> BackgroundScheduler:
-    """Wire the four jobs onto a UTC :class:`BackgroundScheduler` (not started)."""
+    """Wire the five jobs onto a UTC :class:`BackgroundScheduler` (not started)."""
     scheduler = BackgroundScheduler(timezone="UTC", job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300})
     scheduler.add_job(
         tick_scheduled_runs,
@@ -244,6 +272,14 @@ def build_scheduler() -> BackgroundScheduler:
         id="sync_gmail",
         replace_existing=True,
         name="Sync connected Gmail accounts",
+    )
+    scheduler.add_job(
+        sync_linkedin,
+        trigger="interval",
+        minutes=LINKEDIN_TICK_MINUTES,
+        id="sync_linkedin",
+        replace_existing=True,
+        name="Check LinkedIn connections for changes (notify only)",
     )
     scheduler.add_job(
         mark_no_response,

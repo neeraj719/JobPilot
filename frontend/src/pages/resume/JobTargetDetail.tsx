@@ -1,4 +1,5 @@
 import {
+  Check,
   Archive,
   ArrowLeft,
   Briefcase,
@@ -18,7 +19,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -31,7 +31,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
-import { formatDate, formatDateTime, formatRelative, humanizeEnum } from '@/lib/utils'
+import { cn, formatDate, formatDateTime, formatRelative, humanizeEnum } from '@/lib/utils'
 import { useResumes } from '@/features/resume/api'
 import {
   downloadResumeExport,
@@ -43,12 +43,16 @@ import {
   useUpdateTarget,
   useUploadSnapshot,
 } from '@/features/ats/api'
+import { JobTargetDetailSkeleton } from '@/features/ats/components/AtsSkeletons'
 import { CompareView } from '@/features/ats/components/CompareView'
 import { ScoreRing } from '@/features/ats/components/ScoreRing'
 import { StructuredJdView } from '@/features/ats/components/StructuredJdView'
 import { TargetDueBadges, TargetStatusBadge } from '@/features/ats/components/TargetBadges'
 import { JD_SOURCE_LABELS, TARGET_STATUS_LABELS } from '@/features/ats/labels'
 import { JOB_TARGET_STATUSES, type JobTargetDetail, type JobTargetStatus } from '@/features/ats/types'
+import { InlineEdit } from '@/features/ats/tailor/InlineEdit'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
 
 const NONE = '__none__'
 
@@ -181,9 +185,9 @@ function TailorCard({ target }: { target: JobTargetDetail }) {
   const tailored = target.tailored_resume
   const options = (resumes.data ?? []).filter((r) => !r.archived_at && r.kind !== 'TAILORED')
 
-  const run = async () => {
+  const run = async (ai?: WorkflowTarget) => {
     try {
-      const result = await tailor.mutateAsync({ source_resume_id: sourceId === NONE ? undefined : sourceId })
+      const result = await tailor.mutateAsync({ source_resume_id: sourceId === NONE ? undefined : sourceId, ai })
       toast.success(`Created “${result.resume.name}”`, {
         description: `Estimate ${result.source_score ?? '—'} → ${result.analysis.overall_score ?? '—'} with ${result.explanations.length} safe changes. The original is unchanged.`,
       })
@@ -199,7 +203,7 @@ function TailorCard({ target }: { target: JobTargetDetail }) {
   }
 
   return (
-    <Card>
+    <Card variant="soft">
       <CardHeader className="pb-3">
         <CardTitle>Tailored resume</CardTitle>
         <CardDescription>
@@ -256,10 +260,17 @@ function TailorCard({ target }: { target: JobTargetDetail }) {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={() => void run()} disabled={!target.latest_snapshot || tailor.isPending} loading={tailor.isPending}>
+          <AiRunButton
+            task="tailor_resume"
+            context="Your resume and this job description"
+            onRun={(ai) => run(ai)}
+            disabled={!target.latest_snapshot || tailor.isPending}
+            loading={tailor.isPending}
+            wrapperClassName="sm:items-end"
+          >
             <Sparkles aria-hidden />
             {tailored ? 'Tailor again' : 'Tailor resume'}
-          </Button>
+          </AiRunButton>
         </div>
         {!target.latest_snapshot ? <p className="text-xs text-muted-foreground">Add the job description first.</p> : null}
         {tailor.isPending ? <p className="text-sm text-muted-foreground" role="status">Analysing and applying safe changes…</p> : null}
@@ -327,6 +338,60 @@ function DetailsCard({ target }: { target: JobTargetDetail }) {
 }
 
 /** `/resume/targets/:id` — one company and role: JD, estimate, tailored resume, activity. */
+/** The main path a target moves along; Rejected / Archived sit outside it. */
+const STEPS: JobTargetStatus[] = ['SAVED', 'PREPARING', 'READY', 'APPLIED', 'INTERVIEW', 'OFFER']
+
+/** Clickable status stepper (the Status select beside it covers every status). */
+function StatusStepper({ status, onChange, disabled }: { status: JobTargetStatus; onChange: (status: JobTargetStatus) => void; disabled?: boolean }) {
+  const current = STEPS.indexOf(status)
+  const off = current < 0
+  return (
+    <div className="-mx-1 overflow-x-auto px-1 pb-1">
+      <ol className="grid min-w-[34rem] grid-cols-6" aria-label="Status">
+        {STEPS.map((step, index) => {
+          const done = !off && index < current
+          const here = index === current
+          return (
+            <li key={step} className="relative flex flex-col items-center gap-1.5">
+              {index > 0 ? (
+                <span
+                  aria-hidden
+                  className={cn('absolute right-1/2 top-3.5 h-0.5 w-full -translate-y-1/2', !off && index <= current ? 'bg-gradient-brand' : 'bg-border')}
+                />
+              ) : null}
+              <button
+                type="button"
+                disabled={disabled || here}
+                onClick={() => onChange(step)}
+                aria-current={here ? 'step' : undefined}
+                aria-label={`${TARGET_STATUS_LABELS[step]}${here ? ' (current)' : done ? ' (done)' : ''}`}
+                className={cn(
+                  'relative z-10 flex size-7 items-center justify-center rounded-full text-xs font-semibold tabular-nums transition-[box-shadow,background-color]',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                  done && 'bg-gradient-brand text-gradient-foreground',
+                  here && 'bg-gradient-brand text-gradient-foreground shadow-glow ring-4 ring-primary/20',
+                  !done && !here && 'border border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground',
+                  'disabled:cursor-default',
+                )}
+              >
+                {done ? <Check className="size-3.5" aria-hidden /> : index + 1}
+              </button>
+              <span className={cn('h-4 whitespace-nowrap text-xs leading-4', here ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+                {TARGET_STATUS_LABELS[step]}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+      {off ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          This target is <span className="font-medium text-foreground">{TARGET_STATUS_LABELS[status]}</span> — pick a step to bring it back.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export default function JobTargetDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
@@ -340,7 +405,7 @@ export default function JobTargetDetailPage() {
   if (query.isLoading) {
     return (
       <PageContainer>
-        <LoadingState rows={4} />
+        <JobTargetDetailSkeleton />
       </PageContainer>
     )
   }
@@ -364,65 +429,86 @@ export default function JobTargetDetailPage() {
     }
   }
 
+  const rename = async (field: 'role_title' | 'company_name', value: string) => {
+    try {
+      await update.mutateAsync({ [field]: value })
+      toast.success(field === 'role_title' ? 'Role renamed' : 'Company renamed')
+    } catch (error) {
+      toast.error('Could not rename', { description: errorMessage(error) })
+      throw error
+    }
+  }
+
   const analysis = target.last_analysis
   const optimizerLink = `/resume/ats?target=${target.id}${target.tailored_resume ? `&resume=${target.tailored_resume.id}` : target.source_resume ? `&resume=${target.source_resume.id}` : ''}`
 
   return (
     <PageContainer>
-      <PageHeader
-        eyebrow={
-          <Link to="/resume/targets" className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="size-3.5" aria-hidden />
-            Job-specific resumes
-          </Link>
-        }
-        title={target.role_title}
-        description={
-          <span className="flex flex-wrap items-center gap-2">
-            {target.company_name}
-            <TargetStatusBadge status={target.status} />
-            <TargetDueBadges target={target} />
-          </span>
-        }
-        actions={
-          <>
-            <Select value={target.status} onValueChange={(value) => void setStatus(value as JobTargetStatus)}>
-              <SelectTrigger className="w-44" aria-label="Status">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {JOB_TARGET_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {TARGET_STATUS_LABELS[status]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {target.job_url ? (
-              <Button variant="outline" size="icon" asChild title="Open the posting">
-                <a href={target.job_url} target="_blank" rel="noreferrer noopener" aria-label="Open the posting">
-                  <ExternalLink />
-                </a>
+      {/* Header band: where this target stands, on the soft brand panel. */}
+      <header className="border-gradient-soft relative min-w-0 space-y-5 overflow-hidden rounded-3xl p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-2">
+            <Link
+              to="/resume/targets"
+              className="inline-flex h-5 items-center gap-1 rounded-sm text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowLeft className="size-3.5" aria-hidden />
+              Job-specific resumes
+            </Link>
+            <h1 className="min-w-0 text-2xl font-heading sm:text-3xl">
+              <InlineEdit value={target.role_title} label="Role" onSave={(v) => rename('role_title', v)} saving={update.isPending} className="w-full" />
+            </h1>
+            <p className="flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <InlineEdit
+                value={target.company_name}
+                label="Company"
+                onSave={(v) => rename('company_name', v)}
+                saving={update.isPending}
+                textClassName="font-medium text-foreground"
+              />
+              <TargetStatusBadge status={target.status} />
+              <TargetDueBadges target={target} />
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Select value={target.status} onValueChange={(value) => void setStatus(value as JobTargetStatus)}>
+                <SelectTrigger className="w-44" aria-label="Status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {JOB_TARGET_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {TARGET_STATUS_LABELS[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {target.job_url ? (
+                <Button variant="outline" size="icon" asChild title="Open the posting">
+                  <a href={target.job_url} target="_blank" rel="noreferrer noopener" aria-label="Open the posting">
+                    <ExternalLink />
+                  </a>
+                </Button>
+              ) : null}
+              {target.job_id ? (
+                <Button variant="outline" size="icon" asChild title="Open in Jobs">
+                  <Link to={`/jobs?q=${encodeURIComponent(target.role_title)}`} aria-label="Find this job in Jobs">
+                    <Briefcase />
+                  </Link>
+                </Button>
+              ) : null}
+              {target.status !== 'ARCHIVED' ? (
+                <Button variant="ghost" size="icon" onClick={() => setConfirm('archive')} title="Archive" aria-label="Archive">
+                  <Archive />
+                </Button>
+              ) : null}
+              <Button variant="ghost" size="icon" onClick={() => setConfirm('delete')} title="Delete" aria-label="Delete">
+                <Trash2 />
               </Button>
-            ) : null}
-            {target.job_id ? (
-              <Button variant="outline" size="icon" asChild title="Open in Jobs">
-                <Link to={`/jobs?q=${encodeURIComponent(target.role_title)}`} aria-label="Find this job in Jobs">
-                  <Briefcase />
-                </Link>
-              </Button>
-            ) : null}
-            {target.status !== 'ARCHIVED' ? (
-              <Button variant="ghost" size="icon" onClick={() => setConfirm('archive')} title="Archive" aria-label="Archive">
-                <Archive />
-              </Button>
-            ) : null}
-            <Button variant="ghost" size="icon" onClick={() => setConfirm('delete')} title="Delete" aria-label="Delete">
-              <Trash2 />
-            </Button>
-          </>
-        }
-      />
+          </div>
+        </div>
+        <StatusStepper status={target.status} disabled={update.isPending} onChange={(next) => void setStatus(next)} />
+      </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
         <div className="min-w-0 space-y-6">
@@ -452,7 +538,7 @@ export default function JobTargetDetailPage() {
                     {target.missing_requirements.length ? (
                       <ul className="flex flex-wrap gap-1.5">
                         {target.missing_requirements.map((skill) => (
-                          <li key={skill} className="rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-0.5 text-xs">
+                          <li key={skill} className="rounded-full border border-destructive/20 bg-destructive-soft px-2.5 py-0.5 text-xs font-medium text-destructive-soft-foreground">
                             {skill}
                           </li>
                         ))}
@@ -486,10 +572,11 @@ export default function JobTargetDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ol className="space-y-3 border-l border-border pl-4">
+              <ol className="relative space-y-4 pl-6">
+                <span aria-hidden className="pointer-events-none absolute inset-y-1 left-[5px] w-0.5 rounded-full bg-gradient-to-b from-primary/50 via-border to-border/0" />
                 {target.activity.map((item, index) => (
                   <li key={`${item.at}-${index}`} className="relative text-sm">
-                    <span className="absolute -left-[21px] top-1.5 size-2 rounded-full bg-primary/70" aria-hidden />
+                    <span className="absolute -left-6 top-1 size-3 rounded-full bg-gradient-brand ring-4 ring-card" aria-hidden />
                     <p>{item.message}</p>
                     <p className="text-xs text-muted-foreground" title={formatDateTime(item.at)}>
                       {formatRelative(item.at)}

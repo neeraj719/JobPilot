@@ -58,6 +58,8 @@ TASK_WORKFLOWS: dict[str, AiWorkflow] = {
     # ats
     "analyze_job_description": AiWorkflow.JD_ANALYSIS,
     "analyze_resume_fit": AiWorkflow.ANALYSIS,
+    #: the model polish of an ATS analysis's suggestions (Analyse / Polish / Auto-optimize)
+    "polish_suggestions": AiWorkflow.ANALYSIS,
     "tailor_resume": AiWorkflow.GENERATION,
     "review_resume": AiWorkflow.REVIEW,
     "explain_changes": AiWorkflow.REVIEW,
@@ -81,6 +83,8 @@ TASK_WORKFLOWS: dict[str, AiWorkflow] = {
 SOURCE_TASK_OVERRIDE = "task_override"
 SOURCE_USER_DEFAULT = "user_default"
 SOURCE_SERVER_DEFAULT = "server_default"
+#: The user picked the model for this run (``ai.choice``); beats every rule above.
+SOURCE_PER_RUN = "per_run"
 
 
 def workflow_for(task: str | None) -> AiWorkflow:
@@ -154,12 +158,26 @@ def load_settings(db: Session, user_id: uuid.UUID):  # noqa: ANN201 - AiProvider
     return db.scalar(select(AiProviderSettings).where(AiProviderSettings.user_id == user_id))
 
 
-def resolve_from(row: Any, task: str, *, user_id: uuid.UUID | None = None, workflow: str | None = None) -> Resolved:
-    """Pure resolution from a settings row (or ``None``). ``workflow`` overrides the task's."""
+def resolve_from(
+    row: Any,
+    task: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    workflow: str | None = None,
+    override: Target | None = None,
+) -> Resolved:
+    """Pure resolution from a settings row (or ``None``). ``workflow`` overrides the task's.
+
+    ``override`` is a validated per-run choice (``ai.choice``): it becomes the primary with
+    ``source="per_run"``; the user's fallback still applies when it fails.
+    """
     workflow = AiWorkflow(workflow) if workflow else workflow_for(task)
     primary: Target | None = None
     source = SOURCE_SERVER_DEFAULT
-    if row is not None:
+    if override is not None and override.provider and override.model:
+        primary = Target(override.provider, override.model)
+        source = SOURCE_PER_RUN
+    elif row is not None:
         override = (getattr(row, "workflow_models", None) or {}).get(workflow.value)
         if isinstance(override, dict):
             primary = _target(override.get("provider"), override.get("model"))
@@ -201,6 +219,7 @@ __all__ = [
     "AiWorkflow",
     "CONFIGURABLE_WORKFLOWS",
     "Resolved",
+    "SOURCE_PER_RUN",
     "SOURCE_SERVER_DEFAULT",
     "SOURCE_TASK_OVERRIDE",
     "SOURCE_USER_DEFAULT",

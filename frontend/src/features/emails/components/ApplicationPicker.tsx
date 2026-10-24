@@ -4,11 +4,11 @@ import * as React from 'react'
 
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { applicationOptionsQuery } from '@/features/emails/api'
 import type { ApplicationRead, ApplicationStatus, UUID } from '@/types/api'
+import { ApplicationOptionsSkeleton } from '@/features/emails/components/EmailSkeletons'
 
 export interface ApplicationPickerProps {
   value: UUID | null
@@ -89,11 +89,7 @@ export function ApplicationPicker({
 
       <div className="max-h-64 overflow-y-auto rounded-md border border-border">
         {isLoading ? (
-          <div className="space-y-2 p-3">
-            {Array.from({ length: 4 }, (_, index) => (
-              <Skeleton key={index} className="h-9 w-full" />
-            ))}
-          </div>
+          <ApplicationOptionsSkeleton rows={4} />
         ) : isError ? (
           <p className="p-4 text-sm text-destructive">Could not load your applications.</p>
         ) : applications.length === 0 ? (

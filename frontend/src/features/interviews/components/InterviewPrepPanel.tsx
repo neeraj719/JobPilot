@@ -3,10 +3,10 @@ import * as React from 'react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toaster'
 import { cn } from '@/lib/utils'
 import { formatApiDateTime } from '@/features/automation/datetime'
+import { InterviewPrepSkeleton } from '@/features/interviews/components/InterviewSkeletons'
 import { hasPrep, prepSections } from '@/features/interviews/helpers'
 import type { InterviewPrep, InterviewRead } from '@/types/api'
 
@@ -113,13 +113,7 @@ export function InterviewPrepPanel({ interview, generating = false, onGenerate }
 
   if (generating && !ready) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center">
-        <Spinner size="lg" label="Generating preparation" />
-        <p className="text-sm font-medium">Writing your preparation sheet…</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Pulling questions from the job description, the company and your own resume.
-        </p>
-      </div>
+      <InterviewPrepSkeleton />
     )
   }
 

@@ -17,7 +17,7 @@ const SheetOverlay = React.forwardRef<
   <SheetPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-overlay/40 backdrop-blur-[2px] dark:bg-overlay/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'fixed inset-0 z-50 bg-overlay/35 backdrop-blur-md dark:bg-overlay/55 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
     )}
     {...props}
@@ -46,16 +46,23 @@ export interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
   showClose?: boolean
+  /** Extra classes for the close button (e.g. the navigation drawer's rail colours). */
+  closeClassName?: string
 }
 
 const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
-  ({ side = 'right', className, children, showClose = true, ...props }, ref) => (
+  ({ side = 'right', className, children, showClose = true, closeClassName, ...props }, ref) => (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
         {children}
         {showClose ? (
-          <SheetPrimitive.Close className="absolute right-4 top-4 rounded-md p-0.5 text-muted-foreground ring-offset-card transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+          <SheetPrimitive.Close
+            className={cn(
+              'absolute right-4 top-4 rounded-md p-0.5 text-muted-foreground ring-offset-card transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+              closeClassName,
+            )}
+          >
             <X className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>

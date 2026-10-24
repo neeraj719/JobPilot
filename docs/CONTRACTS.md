@@ -570,6 +570,26 @@ Seed (`app/seed.py`, `python -m app.seed`, idempotent): demo user (`settings.DEM
   `GET /status` (+ `effective`). No response contains a stored key (`masked_key` only).
 * **Tables** (migration `c7e9b1d3f5a7`): `master.ai_provider_settings`, `master.ai_provider_credentials`,
   `transaction.ai_usage_events`.
+* **Per-run model choice** (`ai.choice`, migration `e6f8a0b2c4d7`: `ai_provider_settings.model_prompt_mode`
+  `ask|default`, `ai_usage_events.source`). `GET /ai/choices?task=` → `{task, workflow, workflow_label, mode,
+  default, candidates[{id "<provider>:<model>", provider, provider_name, model, label, source
+  workflow_default|user_default|server_default|credential|local, is_default, hosted, privacy_note, cost_hint
+  ("free, local" | "≈ $x per 1k tokens" | "unknown"), available, unavailable_reason, last_used_at}], usable_count,
+  should_ask}` — routed default first, one entry per credentialed provider (+ ≤ 3 recently used models), Ollama models
+  when reachable, the server default; hosted providers the server forbids are hidden; cached 60 s per user and
+  invalidated by every settings/credential write. Every AI endpoint takes optional `ai: {provider, model}`
+  (multipart: `ai_provider` / `ai_model`): ats `jd/parse|upload|fetch`, `analyses`, `analyses/{id}/polish|auto-optimize`,
+  `targets/{id}/snapshot[/upload]|refresh|tailor`; resumes `POST /` (upload), `import/text`, `{id}/reparse`,
+  `{id}/ai/*` (their responses gain `ai_provider` / `ai_model`). Validated by `ai.choice.validate_choice`: 403
+  `ai_hosted_disabled`, 409 `ai_credential_missing`, 422 `ai_model_unknown` | `data_residency_ack_required` |
+  `ai_choice_incomplete`. The choice rides on `ai.context.AiUserSlot.target_override` (and into the ATS polish
+  thread), so `runtime.resolve_current` returns it with `source="per_run"` for every task of the request; limits
+  apply to it, the user's fallback still applies when it fails, usage rows record `source`. It is always honoured
+  when valid — `model_prompt_mode` only tells the UI whether to ask. The ATS suggestion polish (Analyse / Polish /
+  Auto-optimize) runs task `polish_suggestions` (workflow `analysis`); a tailoring run polishes under
+  `tailor_resume` (workflow `generation`). `PATCH /ai/settings {model_prompt_mode?,
+  remember?: {workflow, provider, model}}` changes only those (remember is validated like `PUT` and sets
+  `workflow_models[workflow]`); `PUT /ai/settings` takes optional `model_prompt_mode` (omitted = kept).
 
 ## 17. Resume Studio — builder, editor, export, versions (`/api/v1/resumes`)
 
@@ -637,6 +657,9 @@ employer's ATS result.
   `GET /targets/{id}/compare` (source vs tailored with the explanation per change); `GET /summary`.
 * Model calls go through `ats.llm` → `ai.runtime`; JD and resume text is always fenced with
   `ai.safety.wrap_untrusted`; background polish runs inside `ai.context.ai_user(user_id)`.
+* Every model-calling endpoint above accepts the per-run model choice `ai: {provider, model}` (multipart
+  `ai_provider` / `ai_model`; `/polish` and `/refresh` take an optional body `{ai, use_ai}`); the background polish
+  started by the request runs on it (§16 "Per-run model choice").
 
 ## 19. Workspace modules (`/api/v1/workspace`)
 
@@ -685,3 +708,66 @@ prefixes it owns, its sidebar sections). URLs never moved.
   launcher. A module route whose module is not returned or not available redirects to `/home`
   with a toast; a `403 module_disabled` from any query refetches the module list.
 
+
+## 20. LinkedIn connection (`/api/v1/integrations/linkedin`, `/api/v1/resumes/from-linkedin`)
+
+Official OAuth only (Sign In with LinkedIn using OpenID Connect; Member Data Portability when
+`LINKEDIN_DMA_ENABLED` and granted). No scraping, no browser automation. Setup and the data each
+path yields: `docs/INTEGRATIONS.md`. Code: `app/modules/integrations/linkedin_{oauth,service,
+schemas,router}.py`, `app/modules/resumes/router_linkedin.py`, model `app/models/linkedin.py`
+(`master.linkedin_connections`, migration `d2e4f6a8b0c1`). Every route but the callback requires
+the `resume` workspace module.
+
+* `GET /` → `LinkedInStatus {configured, dma_enabled, status: not_connected|pending|connected|
+  expired|revoked|error, connected, name, email, picture_url, locale, scopes[], dma_granted,
+  dma_error, connected_at, token_expires_at, last_synced_at, auto_sync, auto_sync_hours,
+  snapshot_source: oidc|dma|export, history_source: dma|export|null, history_counts {positions,
+  education, skills, certifications, languages}, export_imported_at, export_stale,
+  export_stale_days, last_error, pending_changes, last_sync_diff {synced_at, source, adds,
+  replaces, same, changes, trigger}}`. Never a token, the state or the verifier.
+* `POST /connect` → `{authorization_url}` + `HttpOnly` cookie `linkedin_oauth_state` (path
+  `/api/v1/integrations/linkedin`, 10 min). 422 `not_configured`. 10/min per user.
+* `GET /callback?code&state` (public) → 302 `FRONTEND_URL/resume/new?source=linkedin&connected=1`,
+  or `&error=<code>`: `access_denied` (member cancelled), `invalid_state` (forged / reused),
+  `state_expired`, `state_mismatch` (cookie missing / different browser), `nonce_mismatch`,
+  `token_exchange_failed`, `linkedin_code_rejected` (LinkedIn: "authorization code not found"),
+  `id_token_invalid` (bad signature / aud / exp / iss; a missing nonce is fine — LinkedIn omits it),
+  `userinfo_failed`, `linkedin_unreachable`,
+  `not_configured`, `connection_failed`.
+* `POST /sync` → `LinkedInSyncResult {status, diff, notes[]}`: re-reads `/v2/userinfo` (+ the six
+  snapshot domains when the DMA scope was granted), stores the normalised snapshot, returns the
+  diff against `UserProfile`. Writes nothing to the profile. 422 `not_connected`,
+  `reconnect_required` (token expired without refresh token, or LinkedIn answered 401 →
+  status `expired` / `revoked`). 6/min per user.
+* `GET /diff` → `LinkedInSyncResult` for the stored snapshot vs the profile now (no LinkedIn call;
+  the notification deep link and Settings' "Review latest changes" use it).
+* `LinkedInDiff {source, history_source, rows[], adds, replaces, same, changes}`; row =
+  `{id, field, label, group: basics|experience|education|skills|certifications|languages, key,
+  current, incoming, action: add|replace|same, default_selected}`. Scalars: `full_name,
+  first_name, last_name, email, headline, summary, current_designation, current_company,
+  linkedin_url`. Lists keyed: `previous_companies` by company|title, `education` by
+  institution|degree, `skills` case-insensitively against `skills + technologies` (dedup),
+  `certifications` by name, `languages` by name. Additions are pre-ticked, conflicts are not;
+  nothing is ever removed from the profile.
+* `POST /apply {change_ids[]}` → `LinkedInApplyResult {applied, fields[], skipped[], status, diff}`.
+  The server recomputes the diff and writes only the named rows (values never come from the
+  client); audited `integration.linkedin.profile_applied` (field names + counts only).
+* `POST /export` (multipart `files`: the ZIP or its CSVs) → `LinkedInSyncResult`; keeps the
+  normalised export on the connection, sets `export_imported_at`. `POST /resumes/import/linkedin`
+  does the same as a side effect when LinkedIn is connected.
+* `PATCH / {auto_sync}` → `LinkedInStatus`. `DELETE /` → `LinkedInStatus` (revoke at LinkedIn best
+  effort, wipe tokens + snapshot, soft delete).
+* `POST /api/v1/resumes/from-linkedin {name?, target_role?, template?, set_default?}` → 201
+  `ResumeRead`: DMA / export history through `parse_linkedin_rows`; basics only → the profile
+  builder (`prefill_from_profile`) with LinkedIn's name / email filling empty basics. First
+  version `change_source=SYSTEM`, note "Imported from LinkedIn". 422 `not_connected`,
+  `nothing_to_import`.
+* Scheduler job `sync_linkedin` (hourly tick): connections with `auto_sync`, status `connected`
+  and a token whose last sync is ≥ `LINKEDIN_AUTO_SYNC_HOURS` old are synced (acting as the
+  owner); users without the `resume` module are skipped. New changes → one `SYSTEM` notification
+  "LinkedIn: N changes found — review" linking to `/resume/new?source=linkedin&review=1` (not
+  repeated for the same set of changes). Never applies anything.
+* Client: `src/features/linkedin/**` (`useLinkedIn`, `useSyncLinkedIn`, `useApplyLinkedIn`, …,
+  keys `qk.linkedin.{all,status,diff}`), `LinkedInConnectPanel` (Create Resume, mode `connect`
+  or `?source=linkedin`), `LinkedInReviewDialog`, `LinkedInAccountCard` (Settings › Connected
+  accounts).

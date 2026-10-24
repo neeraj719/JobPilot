@@ -128,6 +128,8 @@ def _include_routers(app: FastAPI) -> None:
     app.include_router(auth_router, prefix=f"{p}/auth", tags=["auth"])
     app.include_router(profiles_router, prefix=f"{p}", tags=["profile"])  # /profile, /preferences/job
     app.include_router(resumes_router, prefix=f"{p}/resumes", tags=["resumes"], dependencies=resume_module)
+    from app.modules.resumes.router_upload import router as resumes_upload_router  # /resumes/{id}/file, /file-info, /edit-copy
+    app.include_router(resumes_upload_router, prefix=f"{p}/resumes", tags=["resumes"], dependencies=resume_module)
     app.include_router(companies_router, prefix=f"{p}/companies", tags=["companies"], dependencies=apply_module)
     app.include_router(jobs_router, prefix=f"{p}/jobs", tags=["jobs"], dependencies=apply_module)
     app.include_router(matching_router, prefix=f"{p}/matching", tags=["matching"], dependencies=apply_module)
@@ -135,6 +137,8 @@ def _include_routers(app: FastAPI) -> None:
     app.include_router(automation_router, prefix=f"{p}/automation", tags=["automation"], dependencies=apply_module)
     app.include_router(emails_router, prefix=f"{p}/emails", tags=["emails"], dependencies=apply_module)
     app.include_router(integrations_router, prefix=f"{p}/integrations", tags=["integrations"])
+    from app.modules.integrations.linkedin_router import router as linkedin_router  # /integrations/linkedin + /resumes/from-linkedin
+    app.include_router(linkedin_router, prefix=p)
     app.include_router(dashboard_router, prefix=f"{p}/dashboard", tags=["dashboard"], dependencies=apply_module)
     app.include_router(interviews_router, prefix=f"{p}/interviews", tags=["interviews"], dependencies=apply_module)
     app.include_router(notifications_router, prefix=f"{p}/notifications", tags=["notifications"])

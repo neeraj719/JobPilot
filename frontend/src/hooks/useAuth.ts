@@ -1,4 +1,4 @@
-import { type LoginOutcome, useAuthStore } from '@/stores/auth'
+import { type LoginOutcome, type SignOutReason, useAuthStore } from '@/stores/auth'
 import type { UserRead } from '@/types/api'
 
 export interface UseAuthResult {
@@ -14,7 +14,7 @@ export interface UseAuthResult {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<LoginOutcome>
   register: (fullName: string, email: string, password: string, rememberMe?: boolean) => Promise<LoginOutcome>
   switchRole: (role: string) => Promise<UserRead>
-  logout: () => Promise<void>
+  logout: (reason?: SignOutReason) => Promise<void>
   refreshUser: () => Promise<UserRead | null>
 }
 

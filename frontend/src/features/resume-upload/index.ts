@@ -1,0 +1,11 @@
+/** "Upload my original resume" — see notes/resume-upload-prompt.md. */
+export { UploadResumeSheet, useUploadSheet } from './UploadResumeSheet'
+export { PageFileDrop } from './PageFileDrop'
+export { UploadedResumeView, EditCopyButton } from './UploadedResumeView'
+export { OriginalFileBadge } from './components/OriginalFileBadge'
+export { ResumeDropzone, useCheckedFile } from './components/ResumeDropzone'
+export { AfterUploadChoice } from './components/AfterUploadChoice'
+export { UploadProgressBar } from './components/UploadProgressBar'
+export { useUploadOriginal, useReplaceFile, useFileInfo, useEditCopy, downloadOriginal } from './api'
+export { parseSummary, nameFromFile } from './validation'
+export type { AfterUpload, ResumeFileInfo } from './types'

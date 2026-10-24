@@ -3,7 +3,6 @@ import * as React from 'react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,6 +28,7 @@ import {
 } from '@/features/settings/api'
 import { useAuthStore } from '@/stores/auth'
 import type { SessionRead } from '@/types/api'
+import { SessionRowsSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 /** A sensitive action, run first without and then (if asked) with the password. */
 type ReauthAction = (reauth: { password?: string }) => Promise<void>
@@ -177,9 +177,9 @@ export function DeviceSessionsCard() {
 
   async function signOut(session: SessionRead) {
     if (session.is_current) {
-      // This browser: a normal sign-out (revokes the cookie and clears local state).
-      await logout()
-      toast.success('Signed out of this device')
+      // This browser: the normal sign-out (revokes the cookie, clears local state, toasts and
+      // lands on the landing page through the route guard).
+      await logout('user')
       return
     }
     setBusyId(session.id)
@@ -245,7 +245,7 @@ export function DeviceSessionsCard() {
         ) : null}
 
         {sessions.isLoading ? (
-          <LoadingState variant="list" rows={2} />
+          <SessionRowsSkeleton rows={2} label="Loading your signed-in devices" />
         ) : sessions.error ? (
           <ErrorState error={sessions.error} size="sm" onRetry={() => void sessions.refetch()} />
         ) : list.length === 0 ? (

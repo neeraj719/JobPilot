@@ -93,6 +93,7 @@ export const qk = {
     settings: ['ai-providers', 'settings'] as const,
     models: (provider: string) => ['ai-providers', provider, 'models'] as const,
     usage: (params: unknown) => ['ai-providers', 'usage', params] as const,
+    choices: (task: string) => ['ai-providers', 'choices', task] as const,
   },
   companies: {
     all: ['companies'] as const,
@@ -159,4 +160,16 @@ export const qk = {
     adminUser: (email: string) => ['workspace', 'admin', 'user', email] as const,
     adminUserModules: (userId: string) => ['workspace', 'admin', 'modules', userId] as const,
   },
+  // LinkedIn connection (status, stored diff) — owned by linkedin-connect.
+  linkedin: {
+    all: ['linkedin'] as const,
+    status: ['linkedin', 'status'] as const,
+    diff: ['linkedin', 'diff'] as const,
+  },
 } as const
+
+// Dev-only handle for the render-count / profiling scripts (scratchpad landing-perf): lets a
+// Playwright run trigger a background refetch. Stripped from production builds.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __queryClient?: QueryClient }).__queryClient = queryClient
+}

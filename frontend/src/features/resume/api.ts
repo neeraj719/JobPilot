@@ -145,8 +145,13 @@ export function useSaveParsedData() {
 export function useReparseResume() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => api.post<ResumeRead>(`/resumes/${id}/reparse`),
-    onSuccess: (_resume, id) => {
+    /** `ai`: the model picked for this re-parse (`GET /ai/choices`); omitted = the routing. */
+    mutationFn: (input: string | { id: string; ai?: { provider: string; model: string } }) => {
+      const { id, ai } = typeof input === 'string' ? { id: input, ai: undefined } : input
+      return api.post<ResumeRead>(`/resumes/${id}/reparse`, ai ? { ai } : undefined)
+    },
+    onSuccess: (_resume, input) => {
+      const id = typeof input === 'string' ? input : input.id
       void queryClient.invalidateQueries({ queryKey: qk.resumes.all })
       void queryClient.invalidateQueries({ queryKey: qk.resumes.versions(id) })
     },

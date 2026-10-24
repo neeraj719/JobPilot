@@ -4,7 +4,6 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -12,6 +11,7 @@ import { formatDate, formatNumber } from '@/lib/utils'
 import { axisProps, gridProps, useChartTheme } from '@/features/dashboard/chart-theme'
 import { ChartTooltip } from '@/features/dashboard/components/ChartTooltip'
 import { useAiUsage } from '@/features/ai-providers/api'
+import { UsageBodySkeleton } from '@/features/ai-providers/components/AiProvidersSkeleton'
 import { formatUsd } from '@/features/ai-providers/schema'
 import type { UsageGroup, UsageRange } from '@/features/ai-providers/types'
 
@@ -99,7 +99,7 @@ export function UsageCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         {usage.isLoading ? (
-          <LoadingState variant="cards" rows={4} />
+          <UsageBodySkeleton />
         ) : usage.error ? (
           <ErrorState error={usage.error} size="sm" onRetry={() => void usage.refetch()} />
         ) : !data || data.totals.calls === 0 ? (

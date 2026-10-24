@@ -1,11 +1,11 @@
-import { GitCompareArrows, History, RotateCcw } from 'lucide-react'
+import { GitCompareArrows, History, RotateCcw, Settings2, Sparkles, UserRound } from 'lucide-react'
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { VersionTimelineSkeleton } from '@/features/resume-studio/components/ResumeStudioSkeletons'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +30,13 @@ const SOURCES: { value: 'ALL' | ResumeChangeSource; label: string }[] = [
 ]
 
 /** `/resume/history` — every version of every resume; compare and restore. Deep link `?resume=<id>&v=<n>`. */
+/** Timeline node per change source: who made this version, at a glance. */
+const SOURCE_NODE: Record<ResumeChangeSource, { icon: typeof Sparkles; className: string }> = {
+  USER: { icon: UserRound, className: 'bg-card text-primary shadow-xs ring-primary/15 border border-primary/30' },
+  AI: { icon: Sparkles, className: 'bg-gradient-brand text-gradient-foreground shadow-glow' },
+  SYSTEM: { icon: Settings2, className: 'bg-muted text-muted-foreground' },
+}
+
 export default function VersionHistoryPage() {
   useDocumentTitle('Version History')
   const [params, setParams] = useSearchParams()
@@ -140,7 +147,7 @@ export default function VersionHistoryPage() {
       </div>
 
       {history.isLoading ? (
-        <LoadingState rows={6} />
+        <VersionTimelineSkeleton />
       ) : history.error ? (
         <ErrorState error={history.error} title="Could not load the history" onRetry={() => void history.refetch()} />
       ) : items.length === 0 ? (
@@ -163,26 +170,38 @@ export default function VersionHistoryPage() {
       ) : (
         <div className="space-y-6">
           {groups.map(([day, rows]) => (
-            <section key={day} className="space-y-2" aria-label={day}>
-              <h2 className="text-sm font-semibold text-muted-foreground">{day}</h2>
-              <ol className="relative space-y-2 border-l border-border pl-4">
-                {rows.map((item) => (
+            <section key={day} className="space-y-3" aria-label={day}>
+              <h2 className="flex h-6 items-center gap-2">
+                <span className="rounded-full border border-border bg-card px-3 py-0.5 text-xs font-semibold text-foreground shadow-xs">{day}</span>
+                <span className="text-xs text-muted-foreground">
+                  {rows.length} {rows.length === 1 ? 'version' : 'versions'}
+                </span>
+              </h2>
+              <ol className="relative space-y-3 pl-11">
+                {/* The spine: brand at the newest end, fading into the hairline. */}
+                <span aria-hidden className="pointer-events-none absolute inset-y-3 left-[15px] w-0.5 rounded-full bg-gradient-to-b from-primary/60 via-border to-border/0" />
+                {rows.map((item) => {
+                  const node = SOURCE_NODE[item.change_source] ?? SOURCE_NODE.USER
+                  const NodeIcon = node.icon
+                  return (
                   <li key={item.id} className="relative">
+                    {/* change_source node on the spine (the pill in the card names it in words). */}
                     <span
-                      className={cn(
-                        'absolute -left-[21px] top-4 size-2.5 rounded-full ring-4 ring-background',
-                        item.change_source === 'AI' ? 'bg-ai' : item.change_source === 'SYSTEM' ? 'bg-muted-foreground' : 'bg-primary',
-                      )}
+                      className={cn('absolute -left-11 top-3.5 flex size-8 items-center justify-center rounded-full ring-4 ring-background', node.className)}
                       aria-hidden
-                    />
-                    <Card className={cn(item.change_source === 'AI' && 'border-ai/30')}>
-                      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
-                        <div className="min-w-0 flex-1 space-y-1">
+                    >
+                      <NodeIcon className="size-3.5" />
+                    </span>
+                    <Card variant={item.change_source === 'AI' ? 'soft' : 'default'} className="transition-shadow hover:shadow-sm">
+                      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+                        <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <Link to={`/resume/my/${item.resume_id}`} className="truncate font-medium hover:underline">
+                            <Link to={`/resume/my/${item.resume_id}`} className="truncate font-display font-semibold tracking-tight hover:underline">
                               {item.resume_name}
                             </Link>
-                            <Badge variant="outline">v{item.version_number}</Badge>
+                            <span className="rounded-full bg-surface-3 px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground">
+                              v{item.version_number}
+                            </span>
                             {item.is_current ? <Badge variant="muted">Current</Badge> : null}
                             <ChangeSourceBadge source={item.change_source} />
                             <KindBadge kind={item.resume_kind} />
@@ -205,7 +224,8 @@ export default function VersionHistoryPage() {
                       </CardContent>
                     </Card>
                   </li>
-                ))}
+                  )
+                })}
               </ol>
             </section>
           ))}

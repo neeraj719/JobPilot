@@ -29,7 +29,9 @@ export function useWorkspaceModules({ summary = false }: { summary?: boolean } =
   return useQuery({
     queryKey: [...qk.workspace.modules(summary), activeRole ?? ''] as const,
     queryFn: () => api.get<WorkspaceModule[]>('/workspace/modules', { params: { summary } }),
-    staleTime: summary ? 30_000 : 60_000,
+    // Catalog: 5 min (it changes only when an admin flips a module; a 403 module_disabled
+    // refetches it at once). Launcher numbers: 30 s.
+    staleTime: summary ? 30_000 : 5 * 60_000,
   })
 }
 
@@ -56,7 +58,7 @@ export function useWorkspacePreferences() {
   return useQuery({
     queryKey: qk.workspace.preferences,
     queryFn: () => api.get<WorkspacePreferences>('/workspace/preferences'),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
   })
 }
 

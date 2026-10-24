@@ -1,6 +1,7 @@
 import { type LucideIcon, TrendingDown, TrendingUp } from 'lucide-react'
 import * as React from 'react'
 
+import { AnimatedNumber } from '@/components/common/AnimatedNumber'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -61,12 +62,12 @@ export function StatCard({
         : {})}
     >
       <CardContent className="flex items-start justify-between gap-4 p-5">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 space-y-2">
           <p className="truncate text-sm font-medium text-muted-foreground">{title}</p>
           {loading ? (
-            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-[1.875rem] w-20" />
           ) : (
-            <p className="text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</p>
+            <p className="text-3xl font-heading leading-none tabular-nums text-foreground">{typeof value === 'number' ? <AnimatedNumber value={value} /> : value}</p>
           )}
           {hasDelta && !loading ? (
             <p className="flex items-center gap-1 text-xs">
@@ -79,9 +80,11 @@ export function StatCard({
             </p>
           ) : null}
           {description && !hasDelta ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+          {/* Keep the caption line while loading so the tile does not grow when data lands. */}
+          {loading && !description ? <Skeleton className="h-4 w-32 max-w-full" /> : null}
         </div>
         {Icon ? (
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/10">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-brand-soft text-primary ring-1 ring-inset ring-primary/15">
             <Icon className="size-4" aria-hidden />
           </span>
         ) : null}

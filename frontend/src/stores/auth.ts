@@ -1,7 +1,9 @@
+import { toast } from 'sonner'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { api, configureApiAuth, isApiError } from '@/lib/api'
+import { queryClient } from '@/lib/queryClient'
 import { getPreferredRole, setPreferredRole } from '@/lib/roles'
 import type {
   LoginRequest,
@@ -21,7 +23,23 @@ export interface PendingRoleSelection {
   user: UserRead
   /** The login form's "Stay signed in" choice, forwarded to `/auth/select-role`. */
   rememberMe: boolean
+  /** When the password was accepted (ms). The selection token lives 5 minutes. */
+  createdAt: number
 }
+
+/** Matches `ROLE_SELECTION_TTL_SECONDS` on the server: an older pending selection is dead. */
+const PENDING_TTL_MS = 5 * 60 * 1000
+
+function isFreshPending(pending: PendingRoleSelection | null | undefined): pending is PendingRoleSelection {
+  return Boolean(pending && typeof pending.createdAt === 'number' && Date.now() - pending.createdAt < PENDING_TTL_MS)
+}
+
+/**
+ * Why this tab's session ended (memory only, never persisted). The router reads it to pick
+ * the destination: `user` / `remote` (signed out here or in another tab) → the landing page;
+ * `expired` (the API refused the session) → `/?auth=login` with the deep link kept.
+ */
+export type SignOutReason = 'user' | 'expired' | 'remote'
 
 /**
  * Result of `login` / `register`:
@@ -47,6 +65,8 @@ interface AuthState {
   sessionRemembered: boolean | null
   /** Set between a multi-role password check and the role choice. */
   pendingRoleSelection: PendingRoleSelection | null
+  /** Why the last session in this tab ended; `null` while signed in or never signed in. */
+  signOutReason: SignOutReason | null
   /** True while a login/register/bootstrap request is in flight. */
   isLoading: boolean
   /** Flipped once the stored session has been validated (or found absent) on boot. */
@@ -61,7 +81,13 @@ interface AuthState {
   switchRole: (role: string) => Promise<UserRead>
   /** Abandon a pending selection (the "Not you?" link). */
   cancelRoleSelection: () => void
-  logout: () => Promise<void>
+  /**
+   * The one sign-out. Revokes the refresh token server-side (best effort, 4 s timeout; skipped
+   * for `expired` / `remote`), then clears every piece of session state in this tab — token,
+   * user, roles, pending selection, "stay signed in" flag, the session hint, the react-query
+   * cache and the persisted copy — and tells the other tabs. Idempotent and safe offline.
+   */
+  logout: (reason?: SignOutReason) => Promise<void>
   setToken: (token: string | null, user?: UserRead | null) => void
   setUser: (user: UserRead) => void
   /** Record that this device's session was switched to / from "Stay signed in". */
@@ -98,6 +124,7 @@ function sessionFrom(token: TokenResponse) {
     activeRole: token.active_role ?? token.user.active_role ?? token.user.role,
     availableRoles: token.available_roles ?? token.user.roles ?? [],
     pendingRoleSelection: null,
+    signOutReason: null,
     // A no-op role switch sets no cookie and says `null`: keep what we knew.
     ...(typeof token.remembered === 'boolean' ? { sessionRemembered: token.remembered } : {}),
   }
@@ -118,8 +145,9 @@ export const useAuthStore = create<AuthState>()(
           roles: response.available_roles,
           user: response.user,
           rememberMe,
+          createdAt: Date.now(),
         }
-        set({ ...SIGNED_OUT, pendingRoleSelection: pending, isBootstrapped: true })
+        set({ ...SIGNED_OUT, pendingRoleSelection: pending, signOutReason: null, isBootstrapped: true })
 
         // A role remembered on this device and still held is picked silently.
         const preferred = getPreferredRole(response.user.id)
@@ -137,6 +165,7 @@ export const useAuthStore = create<AuthState>()(
 
       return {
         ...SIGNED_OUT,
+        signOutReason: null,
         isLoading: false,
         isBootstrapped: false,
 
@@ -212,16 +241,30 @@ export const useAuthStore = create<AuthState>()(
 
         cancelRoleSelection: () => set({ pendingRoleSelection: null }),
 
-        logout: async () => {
-          try {
-            // Revokes the refresh token and clears the HttpOnly cookie server-side.
-            await api.post('/auth/logout')
-          } catch {
-            // A failed logout must never trap the user in the app.
-          } finally {
+        logout: (reason = 'user') => {
+          // Concurrent calls (a burst of 401s, a double click) share one sign-out.
+          if (signingOut) return signingOut
+          signingOut = (async () => {
+            const hadSession = Boolean(get().accessToken || get().pendingRoleSelection)
+            // Already signed out: a late 401 from a request that was in flight must not turn
+            // "you signed out" into "session expired".
+            if (!hadSession && reason !== 'user') return
+            if (reason === 'user') await revokeRefreshCookie()
             forgetSessionHint()
-            set({ ...SIGNED_OUT, isBootstrapped: true })
-          }
+            set({ ...SIGNED_OUT, signOutReason: reason, isLoading: false, isBootstrapped: true })
+            // Nothing fetched as this user may be shown to the next one.
+            queryClient.clear()
+            // Drop the persisted copy too, so a reload cannot resurrect any of it.
+            useAuthStore.persist.clearStorage()
+            if (reason === 'user') broadcastSignOut()
+            if (!hadSession) return
+            if (reason === 'user') toast.success('Signed out')
+            else if (reason === 'remote') toast('Signed out', { description: 'You signed out of JobPilot in another tab.' })
+            else toast.error('Session expired, please sign in again', { id: 'session-expired' })
+          })().finally(() => {
+            signingOut = null
+          })
+          return signingOut
         },
 
         fetchMe: async () => {
@@ -239,7 +282,7 @@ export const useAuthStore = create<AuthState>()(
             // a server error or a dropped connection must not silently sign the
             // user out and bounce them to the login screen.
             if (isApiError(error) && (error.status === 401 || error.status === 403)) {
-              set({ accessToken: null, user: null, activeRole: null, availableRoles: [] })
+              await get().logout('expired')
             }
             return null
           }
@@ -291,6 +334,12 @@ export const useAuthStore = create<AuthState>()(
         pendingRoleSelection: state.pendingRoleSelection,
         sessionRemembered: state.sessionRemembered,
       }),
+      // A pending selection older than its 5-minute token (or from before `createdAt`
+      // existed) is dropped on load: it can only fail, and it must never steer routing.
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<AuthState>
+        return { ...current, ...stored, pendingRoleSelection: isFreshPending(stored.pendingRoleSelection) ? stored.pendingRoleSelection : null }
+      },
     },
   ),
 )
@@ -301,6 +350,15 @@ export const useAuthStore = create<AuthState>()(
  * check it directly). Set whenever a session starts, cleared on sign-out.
  */
 const SESSION_HINT_KEY = 'jobpilot.mayHaveSession'
+
+/**
+ * True when this device may hold a refresh cookie (signed in before, or "Stay signed in").
+ * The router uses it to render the public landing page immediately for a first-time visitor
+ * instead of waiting for the session bootstrap.
+ */
+export function hasSessionHint(): boolean {
+  return mayHaveSession()
+}
 
 function mayHaveSession(): boolean {
   try {
@@ -338,10 +396,66 @@ configureApiAuth({
       useAuthStore.setState({ accessToken: token })
     }
   },
+  // The API refused the session (refresh failed): sign out as "expired" — the router sends
+  // the visitor to `/?auth=login` with the deep link kept for after sign-in.
   onAuthFailure: () => {
-    useAuthStore.setState({ ...SIGNED_OUT, isBootstrapped: true })
+    void useAuthStore.getState().logout('expired')
   },
 })
+
+/* ------------------------------------------------------------------ */
+/* Sign-out helpers                                                    */
+/* ------------------------------------------------------------------ */
+
+let signingOut: Promise<void> | null = null
+
+/** Revoke the refresh token and clear its HttpOnly cookie server-side; never blocks > 4 s. */
+async function revokeRefreshCookie(): Promise<void> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timer = controller ? setTimeout(() => controller.abort(), 4000) : undefined
+  try {
+    // The endpoint reads only the cookie: no bearer, no refresh-and-retry dance.
+    await api.post('/auth/logout', undefined, { skipAuth: true, skipRefresh: true, signal: controller?.signal })
+  } catch {
+    // Offline, timed out or already revoked: a failed revoke must never trap the user.
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/*
+ * Cross-tab sign-out. Each tab keeps its own access token (sessionStorage), so a sign-out in
+ * one tab is announced to the others: BroadcastChannel where available, else a localStorage
+ * `storage` event. A receiving tab clears its state as `remote` and lands on `/` too.
+ */
+const CHANNEL_NAME = 'jobpilot.auth'
+const SIGNOUT_KEY = 'jobpilot.signedOutAt'
+const channel: BroadcastChannel | null =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL_NAME) : null
+
+function broadcastSignOut(): void {
+  try {
+    if (channel) channel.postMessage({ type: 'signed-out' })
+    else localStorage.setItem(SIGNOUT_KEY, String(Date.now()))
+  } catch {
+    /* storage blocked: the other tabs find out on their next request */
+  }
+}
+
+function onRemoteSignOut(): void {
+  const state = useAuthStore.getState()
+  if (state.accessToken || state.pendingRoleSelection) void state.logout('remote')
+}
+
+if (channel) {
+  channel.onmessage = (event: MessageEvent<{ type?: string }>) => {
+    if (event.data?.type === 'signed-out') onRemoteSignOut()
+  }
+} else if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === SIGNOUT_KEY && event.newValue) onRemoteSignOut()
+  })
+}
 
 /** Non-reactive read, for use outside React (e.g. route loaders). */
 export const getAccessToken = (): string | null => useAuthStore.getState().accessToken

@@ -28,7 +28,7 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationFailed
 from app.core.security import decrypt_str, encrypt_str
 from app.core.soft_delete import soft_delete
-from app.models.ai_settings import AiCredentialStatus, AiProviderCredential, AiProviderSettings
+from app.models.ai_settings import MODEL_PROMPT_MODES, AiCredentialStatus, AiProviderCredential, AiProviderSettings
 from app.models.enums import Actor
 from app.models.user import User
 from app.modules.ai import registry, runtime
@@ -36,7 +36,7 @@ from app.modules.ai.base_url import is_local_url, validate_base_url
 from app.modules.ai.errors import AIProviderError, label, map_exception
 from app.modules.ai.provider import LLMProvider
 from app.modules.ai.routing import CONFIGURABLE_WORKFLOWS, Resolved, Target, resolve_from, server_default
-from app.modules.ai.settings_schemas import CredentialWrite, SettingsUpdate
+from app.modules.ai.settings_schemas import CredentialWrite, SettingsPatch, SettingsUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,19 @@ def target_problem(provider: str, credentials: dict[str, AiProviderCredential]) 
     return f"Add your {label(provider)} API key first."
 
 
+def prompt_mode(row: AiProviderSettings | None) -> str:
+    """``ask`` (the default, also for users without a settings row) or ``default``."""
+    mode = getattr(row, "model_prompt_mode", None) if row is not None else None
+    return mode if mode in MODEL_PROMPT_MODES else "ask"
+
+
+def _forget_choices(user_id: uuid.UUID) -> None:
+    """Drop the user's cached ``GET /ai/choices`` answers (settings or credentials changed)."""
+    from app.modules.ai.choice import invalidate_choices
+
+    invalidate_choices(user_id)
+
+
 def _summary(resolved: Resolved) -> str:
     provider, model = resolved.provider, resolved.model
     info = registry.provider_info(provider)
@@ -169,6 +182,7 @@ def read_settings(db: Session, user: User) -> dict[str, Any]:
         "daily_call_limit": row.daily_call_limit if row else None,
         "monthly_budget_usd": float(row.monthly_budget_usd) if row and row.monthly_budget_usd is not None else None,
         "data_residency_ack": bool(row.data_residency_ack) if row else False,
+        "model_prompt_mode": prompt_mode(row),
         "effective": effective,
         "fallback": fallback,
         "server_default": {"provider": server.provider, "model": server.model},
@@ -418,7 +432,12 @@ def update_settings(db: Session, user: User, payload: SettingsUpdate) -> dict[st
     row.daily_call_limit = payload.daily_call_limit
     row.monthly_budget_usd = Decimal(str(payload.monthly_budget_usd)) if payload.monthly_budget_usd is not None else None
     row.data_residency_ack = bool(payload.data_residency_ack)
+    if payload.model_prompt_mode is not None:
+        row.model_prompt_mode = payload.model_prompt_mode
+    elif not row.model_prompt_mode:
+        row.model_prompt_mode = "ask"
     db.flush()
+    _forget_choices(user.id)
     after = _settings_snapshot(row)
     changed = sorted(k for k in after if before.get(k) != after.get(k))
     audit(
@@ -444,7 +463,58 @@ def _settings_snapshot(row: AiProviderSettings | None) -> dict[str, Any]:
         "daily_call_limit": row.daily_call_limit,
         "monthly_budget_usd": str(row.monthly_budget_usd) if row.monthly_budget_usd is not None else None,
         "data_residency_ack": bool(row.data_residency_ack),
+        "model_prompt_mode": prompt_mode(row),
     }
+
+
+def patch_settings(db: Session, user: User, payload: SettingsPatch) -> dict[str, Any]:
+    """``PATCH /ai/settings``: change the prompt mode and/or remember one workflow's model.
+
+    Everything else is kept. ``remember`` is validated exactly like ``PUT`` (usable provider,
+    known model, hosted-data acknowledgement already given).
+    """
+    row = get_settings_row(db, user.id)
+    before = _settings_snapshot(row)
+    if row is None:
+        row = AiProviderSettings(user_id=user.id, workflow_models={}, model_prompt_mode="ask")
+        db.add(row)
+    if payload.remember is not None:
+        creds = {c.provider: c for c in list_credential_rows(db, user.id)}
+        target = payload.remember
+        what = CONFIGURABLE_WORKFLOWS.get(target.workflow, target.workflow)
+        cred = creds.get(target.provider)
+        if _hosted(target.provider, cred.base_url if cred else None) and not row.data_residency_ack:
+            raise ValidationFailed(
+                f"Confirm in AI Model Settings that hosted providers receive your resume and job text before routing "
+                f"{what} to {label(target.provider)}.",
+                code="data_residency_ack_required",
+                details={"field": "data_residency_ack", "providers": [target.provider]},
+            )
+        provider, model = _validate_target(db, user, target.provider, target.model, creds, what=what)
+        workflows = dict(row.workflow_models or {})
+        workflows[target.workflow] = {"provider": provider, "model": model}
+        row.workflow_models = workflows
+    if payload.model_prompt_mode is not None:
+        row.model_prompt_mode = payload.model_prompt_mode
+    db.flush()
+    _forget_choices(user.id)
+    after = _settings_snapshot(row)
+    changed = sorted(k for k in after if before.get(k) != after.get(k))
+    if changed:
+        audit(
+            db,
+            action="ai.settings_updated",
+            message="AI model settings updated",
+            user_id=user.id,
+            actor=Actor.USER,
+            meta={
+                "changed": changed,
+                "model_prompt_mode": after.get("model_prompt_mode"),
+                "remembered": payload.remember.workflow if payload.remember else None,
+            },
+        )
+    db.refresh(row)
+    return read_settings(db, user)
 
 
 # --------------------------------------------------------------------------- credentials
@@ -501,6 +571,7 @@ def save_credential(db: Session, user: User, provider: str, payload: CredentialW
     db.flush()
     runtime.evict_clients(user.id, provider)
     forget_models(user.id, provider)
+    _forget_choices(user.id)
     action = "ai.credential_rotated" if rotating else "ai.credential_saved"
     audit(
         db,
@@ -528,6 +599,7 @@ def delete_credential(db: Session, user: User, provider: str) -> None:
     db.flush()
     runtime.evict_clients(user.id, provider)
     forget_models(user.id, provider)
+    _forget_choices(user.id)
     audit(
         db,
         action="ai.credential_deleted",
@@ -570,6 +642,7 @@ def run_connection_test(db: Session, user: User, provider: str, model: str | Non
         db.flush()
     if result["ok"]:
         forget_models(user.id, provider)  # the next list is fetched fresh
+    _forget_choices(user.id)
     audit(
         db,
         action="ai.credential_tested",
@@ -598,6 +671,8 @@ __all__ = [
     "list_credential_rows",
     "model_known",
     "models_for",
+    "patch_settings",
+    "prompt_mode",
     "providers_catalog",
     "read_settings",
     "save_credential",

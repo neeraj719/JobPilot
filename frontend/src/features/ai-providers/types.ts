@@ -4,6 +4,8 @@ export type ProviderId = 'mock' | 'ollama' | 'openai' | 'gemini' | 'anthropic' |
 export type WorkflowId = 'generation' | 'analysis' | 'rewriting' | 'jd_analysis' | 'review' | 'general'
 export type UsageRange = '7d' | '30d' | 'month'
 export type CredentialStatus = 'UNTESTED' | 'OK' | 'ERROR'
+/** `ask`: ask which model to use before each AI run (when 2+ are usable); `default`: never ask. */
+export type ModelPromptMode = 'ask' | 'default'
 
 /** Error codes the runtime and the connection test report. */
 export type AiErrorCode =
@@ -89,6 +91,7 @@ export interface AiSettingsRead {
   daily_call_limit: number | null
   monthly_budget_usd: number | null
   data_residency_ack: boolean
+  model_prompt_mode: ModelPromptMode
   effective: Record<WorkflowId, EffectiveTarget>
   fallback: EffectiveTarget | null
   server_default: WorkflowTarget
@@ -109,6 +112,44 @@ export interface AiSettingsUpdate {
   daily_call_limit: number | null
   monthly_budget_usd: number | null
   data_residency_ack: boolean
+  /** Omitted = keep the stored mode. */
+  model_prompt_mode?: ModelPromptMode
+}
+
+/** `PATCH /ai/settings` — what the model picker changes; everything else is kept. */
+export interface AiSettingsPatch {
+  model_prompt_mode?: ModelPromptMode
+  remember?: { workflow: WorkflowId; provider: ProviderId; model: string }
+}
+
+/** One model the user can pick for a run (`GET /ai/choices`). */
+export interface AiChoice {
+  /** `"<provider>:<model>"` */
+  id: string
+  provider: ProviderId
+  provider_name: string
+  model: string
+  label: string
+  source: 'workflow_default' | 'user_default' | 'server_default' | 'credential' | 'local'
+  is_default: boolean
+  hosted: boolean
+  privacy_note: string
+  /** `free, local` | `≈ $x per 1k tokens` | `unknown` */
+  cost_hint: string
+  available: boolean
+  unavailable_reason: string | null
+  last_used_at: string | null
+}
+
+export interface AiChoicesResponse {
+  task: string
+  workflow: WorkflowId
+  workflow_label: string
+  mode: ModelPromptMode
+  default: string
+  candidates: AiChoice[]
+  usable_count: number
+  should_ask: boolean
 }
 
 export interface ModelRow {

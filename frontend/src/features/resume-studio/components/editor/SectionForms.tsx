@@ -9,6 +9,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
+import { AiModelChip } from '@/features/ai-providers/components/AiModelChip'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
+
 import { useDraftSummary, useImproveText } from '../../api'
 import { toStudioResume, type EditorValues } from '../../schema'
 import type { BulletCandidate } from '../../types'
@@ -72,6 +76,8 @@ interface TextPanel {
   note: string | null
   original: string
   retry: () => void
+  /** The model that answered (`ai_provider` / `ai_model`), when one did. */
+  model?: { provider: string | null; model: string | null }
 }
 
 export function SummaryFields({ resumeId, onAiApplied }: { resumeId: string; onAiApplied: () => void }) {
@@ -80,18 +86,19 @@ export function SummaryFields({ resumeId, onAiApplied }: { resumeId: string; onA
   const improve = useImproveText(resumeId)
   const [panel, setPanel] = React.useState<TextPanel | null>(null)
 
-  const runDraft = async () => {
+  const runDraft = async (ai?: WorkflowTarget) => {
     const original = getValues('summary').trim()
-    const retry = () => void runDraft()
+    const retry = () => void runDraft(ai)
     setPanel({ title: 'Summary from your facts', loading: true, error: null, candidates: [], note: null, original: original || '(empty)', retry })
     try {
-      const result = await draft.mutateAsync(toStudioResume(getValues()))
+      const result = await draft.mutateAsync({ parsed: toStudioResume(getValues()), ai })
       setPanel({
         title: 'Summary from your facts',
         loading: false,
         error: null,
         original: original || '(empty)',
         retry,
+        model: { provider: result.ai_provider ?? null, model: result.ai_model ?? null },
         candidates: result.text
           ? [{ text: result.text, source: result.source, has_placeholder: false, checks: { kept_details: true, no_new_numbers: true, no_new_claims: true } }]
           : [],
@@ -104,19 +111,20 @@ export function SummaryFields({ resumeId, onAiApplied }: { resumeId: string; onA
     }
   }
 
-  const runImprove = async () => {
+  const runImprove = async (ai?: WorkflowTarget) => {
     const original = getValues('summary').trim()
     if (!original) return
-    const retry = () => void runImprove()
+    const retry = () => void runImprove(ai)
     setPanel({ title: 'Improved wording', loading: true, error: null, candidates: [], note: null, original, retry })
     try {
-      const result = await improve.mutateAsync({ text: original, field: 'summary' })
+      const result = await improve.mutateAsync({ text: original, field: 'summary', ai })
       setPanel({
         title: 'Improved wording',
         loading: false,
         error: null,
         original,
         retry,
+        model: { provider: result.ai_provider ?? null, model: result.ai_model ?? null },
         candidates: result.changed
           ? [{ text: result.text, source: result.source, has_placeholder: false, checks: { kept_details: true, no_new_numbers: true, no_new_claims: true } }]
           : [],
@@ -137,14 +145,15 @@ export function SummaryFields({ resumeId, onAiApplied }: { resumeId: string; onA
         Summary
       </Label>
       <Textarea id="f-summary" rows={5} placeholder="2–3 sentences: your role, experience and strongest skills." {...register('summary')} />
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => void runDraft()}>
+      <div className="flex flex-wrap items-start gap-2">
+        <AiRunButton task="draft_summary" type="button" variant="outline" size="sm" onRun={(ai) => runDraft(ai)}>
           <Sparkles aria-hidden /> Draft from my facts
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => void runImprove()}>
+        </AiRunButton>
+        <AiRunButton task="improve_grammar" type="button" variant="outline" size="sm" showModel={false} onRun={(ai) => runImprove(ai)}>
           <Wand2 aria-hidden /> Improve wording
-        </Button>
+        </AiRunButton>
       </div>
+      {panel?.model && !panel.loading ? <AiModelChip provider={panel.model.provider} model={panel.model.model} prefix="Answered by" /> : null}
       {panel ? (
         <SuggestionPanel
           title={panel.title}

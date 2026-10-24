@@ -1,6 +1,8 @@
 import { Check } from 'lucide-react'
 
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
+import { tiltHandlers } from '@/lib/tilt'
 import { cn } from '@/lib/utils'
 
 import type { ResumeTemplate, StudioResume } from '../types'
@@ -48,11 +50,21 @@ export interface TemplatePickerProps {
 export function TemplatePicker({ templates, value, onChange, loading, data, className }: TemplatePickerProps) {
   if (loading || !templates) {
     return (
-      <div className={cn('grid gap-3 sm:grid-cols-3', className)}>
+      <SkeletonRegion label="Loading templates" className={cn('grid gap-3 sm:grid-cols-3', className)}>
         {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-56" />
+          <div key={i} className="flex flex-col overflow-hidden rounded-lg border border-border bg-card" aria-hidden>
+            <div className="h-40 overflow-hidden bg-muted/60 px-3 pt-3">
+              {/* The 0.27-scale page preview (794 px × 0.27). */}
+              <Skeleton className="h-full w-[214px] max-w-full rounded-b-none rounded-t-sm" />
+            </div>
+            <div className="space-y-0.5 p-3">
+              <SkeletonLine size="sm" className="w-24" />
+              <SkeletonLine size="xs" className="w-full" />
+              <SkeletonLine size="xs" className="w-2/3" />
+            </div>
+          </div>
         ))}
-      </div>
+      </SkeletonRegion>
     )
   }
   return (
@@ -66,15 +78,17 @@ export function TemplatePicker({ templates, value, onChange, loading, data, clas
             role="radio"
             aria-checked={selected}
             onClick={() => onChange(tpl.id)}
+            {...tiltHandlers(true, { x: 5, y: 7, lift: 2 })}
             className={cn(
-              'group flex flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              selected ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-primary/40',
+              // v2: CSS 3D tilt on hover; the selected template gets the gradient edge.
+              'tilt group flex flex-col overflow-hidden rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              selected ? 'border-gradient shadow-glow' : 'border border-border bg-card hover:border-primary/40 hover:shadow-md',
             )}
           >
             <div className="relative h-40 overflow-hidden bg-muted/60 px-3 pt-3" aria-hidden>
               <ResumePreview data={data && data.name ? data : SAMPLE_PREVIEW} template={tpl} scale={0.27} bare />
               {selected ? (
-                <span className="absolute right-2 top-2 flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <span className="absolute right-2 top-2 flex size-6 items-center justify-center rounded-full bg-gradient-brand text-gradient-foreground shadow-sm">
                   <Check className="size-4" />
                 </span>
               ) : null}

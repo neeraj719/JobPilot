@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import ResumeChangeSource, ResumeKind, ResumeParseStatus
+from app.modules.ai.settings_schemas import WorkflowTarget
 from app.modules.ai.schemas import (
     CertificationEntry,
     EducationEntry,
@@ -276,6 +277,8 @@ class ResumeImportText(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     target_role: str | None = Field(default=None, max_length=255)
     template: str | None = Field(default=None, max_length=40)
+    #: The model picked for this run (``ai.choice``); ``None`` = the routing.
+    ai: WorkflowTarget | None = None
 
 
 class ParsedDataSave(ParsedResume):
@@ -414,6 +417,17 @@ class BulletSuggestions(BaseModel):
     #: Why nothing (or nothing more) is offered.
     note: str | None = None
     ai_used: bool = False
+    #: The model that answered (``ai.runtime.last_call``); ``None`` when only rules ran.
+    ai_provider: str | None = None
+    ai_model: str | None = None
+
+
+class AiRunBody(BaseModel):
+    """Optional body of an AI action with no other input (``POST /{id}/reparse``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ai: WorkflowTarget | None = None
 
 
 class RewriteBulletRequest(BaseModel):
@@ -422,12 +436,14 @@ class RewriteBulletRequest(BaseModel):
     text: str = Field(min_length=3, max_length=600)
     role: str | None = Field(default=None, max_length=255)
     company: str | None = Field(default=None, max_length=255)
+    ai: WorkflowTarget | None = None
 
 
 class AchievementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=3, max_length=600)
+    ai: WorkflowTarget | None = None
 
 
 class ImproveTextRequest(BaseModel):
@@ -435,6 +451,7 @@ class ImproveTextRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=4000)
     field: WritingField = "summary"
+    ai: WorkflowTarget | None = None
 
 
 class ImprovedText(BaseModel):
@@ -443,6 +460,8 @@ class ImprovedText(BaseModel):
     source: Literal["rule", "ai"] = "rule"
     #: Set when the model's version was refused (``invented_number``, ``invented_skill``…).
     reason: str | None = None
+    ai_provider: str | None = None
+    ai_model: str | None = None
 
 
 class DraftSummaryRequest(BaseModel):
@@ -451,12 +470,15 @@ class DraftSummaryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parsed_data: ParsedResume | None = None
+    ai: WorkflowTarget | None = None
 
 
 class SummaryDraft(BaseModel):
     text: str | None = None
     source: Literal["rule", "ai"] = "rule"
     reason: str | None = None
+    ai_provider: str | None = None
+    ai_model: str | None = None
 
 
 __all__ = [

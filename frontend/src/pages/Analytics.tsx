@@ -95,10 +95,35 @@ export default function AnalyticsPage() {
     toast.success('CSV downloaded', { description: `Applications and responses per day, ${rangeLabel(range).toLowerCase()}.` })
   }
 
+  // One header for the loading and loaded states (the range toggle works while charts load).
+  const header = (
+    <PageHeader
+      title="Analytics"
+      description="Funnel, response rates and where your applications actually go."
+      actions={
+        <>
+          <RangeToggle value={range} onChange={setRange} />
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={!chartsData}>
+            <Download aria-hidden />
+            Export CSV
+          </Button>
+        </>
+      }
+    >
+      <p className="text-xs text-muted-foreground">
+        {rangeLabel(range)}
+        {chartsData?.start_date && chartsData?.end_date
+          ? ` · ${chartsData.start_date} to ${chartsData.end_date}`
+          : ''}
+        {' · every chart and table below uses this window unless it says otherwise.'}
+      </p>
+    </PageHeader>
+  )
+
   if (charts.isLoading && !chartsData) {
     return (
       <PageContainer>
-        <PageHeader title="Analytics" description="Funnel, response rates and where your applications actually go." />
+        {header}
         <AnalyticsSkeleton />
       </PageContainer>
     )
@@ -115,27 +140,7 @@ export default function AnalyticsPage() {
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Analytics"
-        description="Funnel, response rates and where your applications actually go."
-        actions={
-          <>
-            <RangeToggle value={range} onChange={setRange} />
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={!chartsData}>
-              <Download aria-hidden />
-              Export CSV
-            </Button>
-          </>
-        }
-      >
-        <p className="text-xs text-muted-foreground">
-          {rangeLabel(range)}
-          {chartsData?.start_date && chartsData?.end_date
-            ? ` · ${chartsData.start_date} to ${chartsData.end_date}`
-            : ''}
-          {' · every chart and table below uses this window unless it says otherwise.'}
-        </p>
-      </PageHeader>
+      {header}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard

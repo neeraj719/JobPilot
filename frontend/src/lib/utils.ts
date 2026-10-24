@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { format, formatDistanceToNowStrict, isValid, parseISO } from 'date-fns'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
 
 import { SCORE_BAR, SCORE_PILL, scoreTone } from '@/lib/score'
 
@@ -16,6 +16,21 @@ import type {
   NotificationType,
   WorkMode,
 } from '@/types/api'
+
+/**
+ * tailwind-merge cannot tell that our custom `backgroundImage` utilities (tailwind.config.ts)
+ * are images, so by default it files `bg-gradient-brand` under background *colour* and drops a
+ * neighbouring `bg-primary`. That left dark-mode switches with no fill once `dark:bg-none`
+ * removed the gradient. Registering them in the `bg-image` group keeps colour and image
+ * utilities independent, as they are in CSS.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'bg-image': ['bg-gradient-brand', 'bg-gradient-brand-soft', 'bg-gradient-text'],
+    },
+  },
+})
 
 /** Tailwind-aware className merge — the single helper every component uses. */
 export function cn(...inputs: ClassValue[]): string {

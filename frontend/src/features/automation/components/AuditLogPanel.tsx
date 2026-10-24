@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useAuditLog } from '@/features/automation/api'
@@ -190,14 +191,27 @@ export function AuditLogPanel({
 
       <CardContent className="space-y-3">
         {isLoading ? (
-          <div className="space-y-2.5" aria-busy="true">
-            {Array.from({ length: 6 }, (_, index) => (
-              <div key={index} className="flex gap-2">
-                <Skeleton className="h-3 w-14 shrink-0" />
-                <Skeleton className="h-3 flex-1" />
-              </div>
-            ))}
-          </div>
+          <SkeletonRegion label="Loading activity">
+            {/* Same rows as `AuditLine`: level dot, time, message over the action line. */}
+            <ul className="pr-1" aria-hidden>
+              {Array.from({ length: 6 }, (_, index) => (
+                <li key={index} className="border-b border-border/60 last:border-b-0">
+                  <div className="flex items-start gap-2 px-1 py-1.5">
+                    <Skeleton className="mt-[7px] size-1.5 shrink-0 rounded-full" />
+                    <Skeleton className="mt-1 h-3 w-12 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex h-[1.203rem] items-center">
+                        <Skeleton className={index % 2 ? 'h-3.5 w-1/2' : 'h-3.5 w-3/4'} />
+                      </div>
+                      <div className="flex h-[1.031rem] items-center">
+                        <Skeleton className="h-2.5 w-28" />
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </SkeletonRegion>
         ) : isError ? (
           <ErrorState error={error} size="sm" onRetry={() => void refetch()} />
         ) : entries.length === 0 ? (

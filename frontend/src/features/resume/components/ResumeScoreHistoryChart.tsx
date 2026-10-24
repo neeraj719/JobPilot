@@ -1,9 +1,10 @@
 import { LineChart as LineChartIcon } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { ScoreHistoryPlotSkeleton } from '@/features/resume/components/ResumeSkeletons'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatDate } from '@/lib/utils'
 import { axisProps, gridProps, useChartTheme } from '@/features/dashboard/chart-theme'
@@ -33,7 +34,7 @@ export function ResumeScoreHistoryChart({ resumeId }: { resumeId: string }) {
       </CardHeader>
       <CardContent>
         {history.isLoading ? (
-          <LoadingState variant="list" rows={2} />
+          <ScoreHistoryPlotSkeleton />
         ) : history.error ? (
           <ErrorState error={history.error} size="sm" onRetry={() => void history.refetch()} />
         ) : data.length < 2 ? (
@@ -45,6 +46,7 @@ export function ResumeScoreHistoryChart({ resumeId }: { resumeId: string }) {
           />
         ) : (
           <div className="space-y-3">
+            <ErrorBoundary variant="widget" label="the score chart">
             <div style={{ width: '100%', height: 220 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -16 }}>
@@ -78,6 +80,7 @@ export function ResumeScoreHistoryChart({ resumeId }: { resumeId: string }) {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+            </ErrorBoundary>
             <ChartLegend
               markShape="line"
               items={SERIES.map((series, index) => ({

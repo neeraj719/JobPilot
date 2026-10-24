@@ -4,6 +4,12 @@ A target is one company + role (+ posting URL). Its uniqueness key is ``fingerpr
 (sha256 of the normalised company, the normalised role and the normalised URL), enforced by a
 partial unique index, so the same posting is not saved twice but a deleted one can come back.
 
+The one-screen flow (``quick_tailor``, ``POST /ats/targets/tailor``) creates the target from a
+pasted job description: company and role come from the request, else from the JD (``Unknown
+company`` / the JD title / ``Untitled role``). When either was derived, the JD text hash joins
+the fingerprint, so two different pasted postings never collide while the same one pasted twice
+is still ``target_exists``.
+
 Status changes are audited (``ats.target_status_changed``). Moving to APPLIED records which
 resume version was sent (``submitted_resume_version``: the tailored resume's current version,
 else the source resume's) and links the JobPilot application for the same job when there is
@@ -28,10 +34,11 @@ from app.models.application import Application
 from app.models.ats import AtsAnalysis, JobDescriptionSnapshot, JobTarget, OptimizationSuggestion
 from app.models.audit import AuditLog
 from app.models.base import utcnow
-from app.models.enums import Actor, JdSource, JobTargetStatus
+from app.models.enums import Actor, AtsAnalysisStatus, JdSource, JobTargetStatus, SuggestionKind
 from app.models.job import Job
 from app.models.resume import Resume
 from app.modules.ats import fetch as fetch_mod
+from app.modules.ats import llm
 from app.modules.ats import service as ats
 from app.modules.ats.schemas import (
     ActivityItem,
@@ -46,6 +53,8 @@ from app.modules.ats.schemas import (
     SnapshotCreate,
     SnapshotRead,
     StructuredJD,
+    QuickTailorRequest,
+    TailorChange,
     TailorRequest,
     TailorResult,
     TargetCreate,
@@ -84,9 +93,19 @@ def _normalize_url(url: str | None) -> str:
     return urlunparse(("", host, path, "", parsed.query, "")).lstrip("/")
 
 
-def fingerprint(company: str, role: str, url: str | None) -> str:
-    key = "|".join([_normalize_company(company), " ".join(role.lower().split()), _normalize_url(url)])
+def fingerprint(company: str, role: str, url: str | None, extra: str | None = None) -> str:
+    """Uniqueness key of a target. ``extra`` (the JD text hash) is added when company or role
+    were derived from the posting rather than typed (``quick_tailor``)."""
+    parts = [_normalize_company(company), " ".join(role.lower().split()), _normalize_url(url)]
+    if extra:
+        parts.append(f"jd:{extra}")
+    key = "|".join(parts)
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+#: Fallbacks of the one-screen flow when the job description names no company / no title.
+UNKNOWN_COMPANY = "Unknown company"
+UNTITLED_ROLE = "Untitled role"
 
 
 def _clean_url(url: str | None) -> str | None:
@@ -322,7 +341,16 @@ def add_snapshot(
     return snapshot, created
 
 
-def create_target(db: Session, user_id: uuid.UUID, payload: TargetCreate) -> TargetDetail:
+def create_target(
+    db: Session,
+    user_id: uuid.UUID,
+    payload: TargetCreate,
+    *,
+    fingerprint_extra: str | None = None,
+    link_company: bool = True,
+) -> TargetDetail:
+    """Save a target. ``fingerprint_extra`` / ``link_company`` serve :func:`quick_tailor` (a derived
+    company/role adds the JD hash to the key; ``Unknown company`` is never linked to a company row)."""
     job: Job | None = None
     company_name = " ".join((payload.company_name or "").split())
     role = " ".join((payload.role_title or "").split())
@@ -350,11 +378,11 @@ def create_target(db: Session, user_id: uuid.UUID, payload: TargetCreate) -> Tar
     normalized = _normalize_company(company_name)
     if not normalized:
         raise ValidationFailed("Company name is required", code="invalid_company_name")
-    key = fingerprint(company_name, role, job_url)
+    key = fingerprint(company_name, role, job_url, fingerprint_extra)
     _ensure_unique(db, user_id, key)
     from app.modules.companies.service import find_company_by_name
 
-    company = find_company_by_name(db, company_name)
+    company = find_company_by_name(db, company_name) if link_company else None
     target = JobTarget(
         user_id=user_id,
         company_name=company_name[:255],
@@ -538,7 +566,8 @@ def tailor(db: Session, user_id: uuid.UUID, target_id: uuid.UUID, payload: Tailo
     if target.status in _PREP_STATUSES:
         set_status(db, user_id, target, JobTargetStatus.PREPARING, reason=f"tailoring {source.name}")
     analysis = ats.run_analysis(db, user_id, source, snapshot, target=target, schedule_polish=False)
-    result = ats.auto_optimize(db, user_id, analysis.id, mode="new_resume", name=payload.name)
+    # the tailored analysis is polished as part of tailoring (workflow ``generation``)
+    result = ats.auto_optimize(db, user_id, analysis.id, mode="new_resume", name=payload.name, polish_task=llm.TASK_TAILOR)
     db.flush()
     if target.status in _PREP_STATUSES:
         set_status(db, user_id, target, JobTargetStatus.READY, reason="tailored resume ready")
@@ -560,7 +589,84 @@ def tailor(db: Session, user_id: uuid.UUID, target_id: uuid.UUID, payload: Tailo
         source_analysis_id=analysis.id,
         source_score=analysis.overall_score,
         explanations=result.explanations,
+        target_id=target.id,
+        tailored_resume_id=result.resume.id,
+        analysis_id=result.analysis.id,
+        ai_pass="running" if result.analysis.status == AtsAnalysisStatus.RUNNING else "rules_only",
     )
+
+
+def _one_line(value: str | None) -> str:
+    return " ".join((value or "").split())
+
+
+def _quick_snapshot(db: Session, user_id: uuid.UUID, jd: SnapshotCreate) -> JobDescriptionSnapshot:
+    """A target-less snapshot from the request: pasted text (with an optional posting URL, e.g. text
+    the client already fetched or uploaded), a posting URL fetched now, or a board posting."""
+    if jd.source == "PASTED":
+        if not (jd.text or "").strip():
+            raise ValidationFailed("Paste the job description text.", code="jd_required")
+        snapshot, _ = ats.snapshot_from_text(
+            db, user_id, text=jd.text or "", source=JdSource.PASTED, title=jd.title, url=_clean_url(jd.url),
+            structured=jd.structured, use_ai=jd.use_ai,
+        )
+        return snapshot
+    fetch_mod.enforce_rate_limit(user_id)
+    if jd.source == "BOARD":
+        if jd.board is None:
+            raise ValidationFailed("Choose a posting from the company's board.", code="board_required")
+        posting = fetch_mod.fetch_board_posting(jd.board.vendor, jd.board.token, jd.board.external_id)
+    else:
+        if not (jd.url or "").strip():
+            raise ValidationFailed("Give the job posting's URL.", code="invalid_url")
+        posting = fetch_mod.fetch_posting(jd.url or "")
+    snapshot, _ = ats.snapshot_from_text(
+        db, user_id, text=posting.text, source=posting.source, title=jd.title or posting.title, company=posting.company,
+        url=posting.url, location=posting.location, use_ai=jd.use_ai,
+    )
+    return snapshot
+
+
+def quick_tailor(db: Session, user_id: uuid.UUID, payload: QuickTailorRequest) -> TailorResult:
+    """The one-screen flow: job description + resume -> target + tailored copy (one transaction).
+
+    The resume is resolved first (``resume_required`` when the user has none, 404 for another
+    user's), then the snapshot, then the target (company/role: request -> JD -> fallbacks), then
+    the same :func:`tailor` run as ``POST /targets/{id}/tailor``."""
+    source = (
+        resumes.get_resume(db, user_id, payload.source_resume_id)
+        if payload.source_resume_id
+        else resumes.get_default_resume(db, user_id)
+    )
+    if source is None:
+        raise ValidationFailed("Upload or create a resume first.", code="resume_required")
+    ats._require_analysable(source)
+    snapshot = _quick_snapshot(db, user_id, payload.jd)
+    parsed_company, parsed_role = _one_line(snapshot.company), _one_line(snapshot.title)
+    typed_company, typed_role = _one_line(payload.company_name), _one_line(payload.role_title)
+    company = typed_company or parsed_company
+    role = typed_role or parsed_role
+    # Derived = not typed, or typed exactly as the posting says (the form prefills from the parse).
+    derived = (
+        not typed_company or not typed_role
+        or typed_company.lower() == parsed_company.lower() or typed_role.lower() == parsed_role.lower()
+    )
+    unknown = not company or _normalize_company(company) == ""
+    company = UNKNOWN_COMPANY if unknown else company
+    role = role or UNTITLED_ROLE
+    detail = create_target(
+        db,
+        user_id,
+        TargetCreate(
+            company_name=company[:255], role_title=role[:255], job_url=snapshot.url, source_resume_id=source.id,
+            snapshot_id=snapshot.id,
+        ),
+        fingerprint_extra=snapshot.text_sha256 if derived else None,
+        link_company=not unknown,
+    )
+    label = " ".join(p for p in (company if not unknown else "", role if role != UNTITLED_ROLE else "") if p)
+    name = payload.name or f"{source.name} — {label or 'tailored copy'}"
+    return tailor(db, user_id, detail.id, TailorRequest(source_resume_id=source.id, name=name[:255]))
 
 
 def _flatten(value: Any, path: str = "") -> dict[str, Any]:
@@ -627,13 +733,28 @@ def compare(db: Session, user_id: uuid.UUID, target_id: uuid.UUID) -> CompareRes
         )
 
     explanations: list[Explanation] = []
+    applied: list[OptimizationSuggestion] = []
+    rejected = 0
+    # The source's analyses carry the rule-based changes; the tailored copy's carry the AI pass's.
     analyses = db.scalars(
-        select(AtsAnalysis).where(AtsAnalysis.user_id == user_id, AtsAnalysis.resume_id == source.id, AtsAnalysis.job_target_id == target.id)
+        select(AtsAnalysis)
+        .where(
+            AtsAnalysis.user_id == user_id,
+            AtsAnalysis.resume_id.in_((source.id, tailored.id)),
+            AtsAnalysis.job_target_id == target.id,
+        )
+        .order_by(AtsAnalysis.created_at, AtsAnalysis.id)
     )
-    for analysis in analyses:
-        for suggestion in analysis.suggestions:
-            if (suggestion.checks or {}).get("applied_to_resume_id") == str(tailored.id):
+    # Rule-based changes (the source's analyses) before the AI pass's (the copy's): one transaction
+    # can stamp both with the same time.
+    for analysis in sorted(analyses, key=lambda a: 0 if a.resume_id == source.id else 1):
+        for suggestion in sorted(analysis.suggestions, key=lambda s: s.ordinal):
+            checks = suggestion.checks or {}
+            if checks.get("applied_to_resume_id") == str(tailored.id):
                 explanations.append(ats._explanation(suggestion))
+                applied.append(suggestion)
+            elif analysis.resume_id == tailored.id and checks.get("tailor_pass") and checks.get("ai_rejected"):
+                rejected += 1
     return CompareResult(
         source=CompareSide(id=source.id, name=source.name, version=int(source.current_version or 1), parsed_data=source.parsed_data or {}, score=latest_score(source.id)),
         tailored=CompareSide(
@@ -643,7 +764,64 @@ def compare(db: Session, user_id: uuid.UUID, target_id: uuid.UUID) -> CompareRes
         fields=changes,
         summary=summary,
         explanations=explanations,
+        changes=tailor_changes(applied),
+        ai_rejected=rejected,
     )
+
+
+_GROUPS = {
+    SuggestionKind.ADD_SKILL: "skills",
+    SuggestionKind.REPLACE_SUMMARY: "summary",
+    SuggestionKind.REPLACE_BULLET: "bullets",
+    SuggestionKind.REORDER_SECTION: "sections",
+}
+
+
+def tailor_changes(applied: list[OptimizationSuggestion]) -> list[TailorChange]:
+    """Applied suggestions (in the order they were applied) as "what changed" entries.
+
+    A text the rules changed and the AI later rewrote again (same path, the AI's ``before`` is the
+    rules' ``after``) becomes one entry: original -> final, with the AI's rationale."""
+    out: list[TailorChange] = []
+    for suggestion in applied:
+        group = _GROUPS.get(suggestion.kind)
+        if group is None and suggestion.kind == SuggestionKind.ADD_KEYWORD_CONTEXT:
+            group = "summary" if suggestion.target_path == "summary" else "bullets"
+        if group is None:
+            continue
+        ai = bool((suggestion.checks or {}).get("ai_polished"))
+        if group in ("summary", "bullets"):
+            chained = next(
+                (
+                    c for c in reversed(out)
+                    if c.group == group and c.target_path == suggestion.target_path and c.after == suggestion.before
+                ),
+                None,
+            )
+            if chained is not None:
+                chained.after = suggestion.after
+                chained.rationale = suggestion.rationale or chained.rationale
+                chained.source = "AI" if ai else chained.source
+                chained.applied_version = suggestion.applied_version or chained.applied_version
+                chained.suggestion_ids.append(suggestion.id)
+                continue
+        if group == "sections" and any(c.group == "sections" and c.target_path == suggestion.target_path for c in out):
+            continue  # the AI pass re-checks the skills order; the rules already moved them
+        out.append(
+            TailorChange(
+                group=group,  # type: ignore[arg-type]
+                kind=suggestion.kind,
+                title=suggestion.title,
+                before=suggestion.before,
+                after=suggestion.after,
+                rationale=suggestion.rationale,
+                source="AI" if ai else "SYSTEM",
+                target_path=suggestion.target_path,
+                applied_version=suggestion.applied_version,
+                suggestion_ids=[suggestion.id],
+            )
+        )
+    return out
 
 
 # --------------------------------------------------------------------------- summary
@@ -694,6 +872,8 @@ __all__ = [
     "fingerprint",
     "get_detail",
     "list_targets",
+    "quick_tailor",
+    "tailor_changes",
     "refresh_target",
     "set_status",
     "summary",

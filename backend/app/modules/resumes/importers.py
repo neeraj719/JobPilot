@@ -328,8 +328,17 @@ def _rows(name: str, content: bytes) -> list[dict[str, str]]:
 
 def parse_linkedin(members: dict[str, bytes]) -> ParsedResume:
     """Map LinkedIn export CSVs onto ``ParsedResume`` (column names as LinkedIn writes them)."""
+    return parse_linkedin_rows({name: _rows(name, content) for name, content in members.items()})
+
+
+def parse_linkedin_rows(rows: dict[str, list[dict[str, str]]]) -> ParsedResume:
+    """``{"positions.csv": [{"Company Name": ...}, ...], ...}`` → ``ParsedResume``.
+
+    Shared by the export ZIP (CSV rows) and LinkedIn's Member Snapshot API (Member Data
+    Portability), whose domains carry the same field names as the export's CSV columns.
+    """
     data: dict[str, Any] = {"links": {}}
-    profile = _rows("profile.csv", members["profile.csv"]) if "profile.csv" in members else []
+    profile = rows.get("profile.csv", [])
     if profile:
         row = profile[0]
         data["name"] = _s(" ".join(p for p in (row.get("First Name"), row.get("Last Name")) if p))
@@ -344,11 +353,11 @@ def parse_linkedin(members: dict[str, bytes]) -> ParsedResume:
                 data["links"].setdefault("linkedin", url)
             else:
                 data["links"].setdefault("portfolio", url)
-    emails = _rows("email addresses.csv", members["email addresses.csv"]) if "email addresses.csv" in members else []
+    emails = rows.get("email addresses.csv", [])
     if emails:
         primary = next((r for r in emails if (r.get("Primary") or "").lower() == "yes"), emails[0])
         data["email"] = _s(primary.get("Email Address"))
-    phones = _rows("phonenumbers.csv", members["phonenumbers.csv"]) if "phonenumbers.csv" in members else []
+    phones = rows.get("phonenumbers.csv", [])
     if phones:
         data["phone"] = _s(phones[0].get("Number"))
 
@@ -362,7 +371,7 @@ def parse_linkedin(members: dict[str, bytes]) -> ParsedResume:
             # LinkedIn leaves "Finished On" empty for the role you hold now.
             "end": normalise_date(r.get("Finished On")) or ("Present" if _s(r.get("Started On")) else None),
         }
-        for r in (_rows("positions.csv", members["positions.csv"]) if "positions.csv" in members else [])
+        for r in (rows.get("positions.csv", []))
         if _s(r.get("Company Name")) or _s(r.get("Title"))
     ]
     data["education"] = [
@@ -372,11 +381,11 @@ def parse_linkedin(members: dict[str, bytes]) -> ParsedResume:
             "start": normalise_date(r.get("Start Date")),
             "end": normalise_date(r.get("End Date")),
         }
-        for r in (_rows("education.csv", members["education.csv"]) if "education.csv" in members else [])
+        for r in (rows.get("education.csv", []))
         if _s(r.get("School Name")) or _s(r.get("Degree Name"))
     ]
     data["skills"] = _dedupe(
-        [ai_tasks.resume_skill_name(r.get("Name") or "") for r in (_rows("skills.csv", members["skills.csv"]) if "skills.csv" in members else [])]
+        [ai_tasks.resume_skill_name(r.get("Name") or "") for r in (rows.get("skills.csv", []))]
     )
     data["certifications"] = [
         {
@@ -384,22 +393,22 @@ def parse_linkedin(members: dict[str, bytes]) -> ParsedResume:
             "issuer": _s(r.get("Authority")),
             "year": (m.group(0) if (m := re.search(r"(19|20)\d{2}", r.get("Started On") or "")) else None),
         }
-        for r in (_rows("certifications.csv", members["certifications.csv"]) if "certifications.csv" in members else [])
+        for r in (rows.get("certifications.csv", []))
         if _s(r.get("Name"))
     ]
     data["projects"] = [
         {"name": _s(r.get("Title")), "description": (r.get("Description") or "").strip() or None, "url": _s(r.get("Url"))}
-        for r in (_rows("projects.csv", members["projects.csv"]) if "projects.csv" in members else [])
+        for r in (rows.get("projects.csv", []))
         if _s(r.get("Title")) or _s(r.get("Description"))
     ]
     data["languages"] = [
         f"{_s(r.get('Name'))} ({_s(r.get('Proficiency'))})" if _s(r.get("Proficiency")) else _s(r.get("Name"))
-        for r in (_rows("languages.csv", members["languages.csv"]) if "languages.csv" in members else [])
+        for r in (rows.get("languages.csv", []))
         if _s(r.get("Name"))
     ]
     data["achievements"] = [
         _s(" - ".join(p for p in (r.get("Title"), r.get("Description")) if _s(p)))
-        for r in (_rows("honors.csv", members["honors.csv"]) if "honors.csv" in members else [])
+        for r in (rows.get("honors.csv", []))
         if _s(r.get("Title"))
     ]
     return ParsedResume.model_validate(data)
@@ -436,6 +445,11 @@ def import_linkedin(
         change_source=ResumeChangeSource.SYSTEM,
     )
     logger.info("LinkedIn import for user %s: %s", user_id, sorted(members))
+    # With LinkedIn connected, the export becomes that connection's full history (and its date
+    # lets "Sync" say when the export is getting old). Lazy import: integrations imports us.
+    from app.modules.integrations import linkedin_service
+
+    linkedin_service.record_export(db, user_id, parsed)
     return resume
 
 
@@ -447,5 +461,6 @@ __all__ = [
     "linkedin_members",
     "normalise_date",
     "parse_linkedin",
+    "parse_linkedin_rows",
     "prefill_from_profile",
 ]

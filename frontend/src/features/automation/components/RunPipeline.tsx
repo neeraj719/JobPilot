@@ -1,7 +1,8 @@
-import { AlertTriangle, CheckCircle2, Circle, Loader2, MinusCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, Circle, MinusCircle } from 'lucide-react'
 import * as React from 'react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatApiClock, formatDuration } from '@/features/automation/datetime'
@@ -12,7 +13,7 @@ const STATUS_ICON: Record<AutomationStepStatus, typeof Circle> = {
   SUCCESS: CheckCircle2,
   FAILED: AlertTriangle,
   SKIPPED: MinusCircle,
-  RUNNING: Loader2,
+  RUNNING: Activity,
   PENDING: Circle,
 }
 
@@ -20,7 +21,7 @@ const STATUS_ICON_CLASS: Record<AutomationStepStatus, string> = {
   SUCCESS: 'text-success',
   FAILED: 'text-destructive',
   SKIPPED: 'text-muted-foreground',
-  RUNNING: 'text-primary animate-spin',
+  RUNNING: 'text-primary animate-pulse motion-reduce:animate-none',
   PENDING: 'text-muted-foreground/40',
 }
 
@@ -140,17 +141,19 @@ export function RunPipeline({ run, loading = false, className }: RunPipelineProp
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="space-y-4">
-            {Array.from({ length: 6 }, (_, index) => (
-              <div key={index} className="flex gap-3">
-                <Skeleton className="size-5 shrink-0 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-3.5 w-32" />
-                  <Skeleton className="h-3 w-48" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <SkeletonRegion label="Loading the pipeline">
+            <ol className="relative" aria-hidden>
+              {Array.from({ length: 6 }, (_, index) => (
+                <li key={index} className="relative flex gap-3 pb-5 last:pb-0">
+                  <Skeleton className="mt-0.5 size-[22px] shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <SkeletonLine size="sm" className={index % 2 ? 'w-28' : 'w-36'} />
+                    <SkeletonLine size="xs" className="w-48 max-w-full" />
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </SkeletonRegion>
         ) : (
           <ol className="relative">
             {steps.map((step, index) => (

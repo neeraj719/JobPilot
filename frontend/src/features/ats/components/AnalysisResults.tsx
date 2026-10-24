@@ -1,10 +1,9 @@
-import { AlertTriangle, Bookmark, Bot, FileWarning, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Bookmark, FileWarning, RefreshCw, Sparkles, Wand2 } from 'lucide-react'
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,20 +13,32 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { formatRelative } from '@/lib/utils'
 import { useAnalysis, useAutoOptimize, useCreateTarget, useRetryPolish, useUndoApply } from '@/features/ats/api'
+import { AnalysisResultsSkeleton } from '@/features/ats/components/AtsSkeletons'
 import { CategoryBars } from '@/features/ats/components/CategoryBars'
 import { KeywordChips } from '@/features/ats/components/KeywordChips'
 import { MethodologyPopover } from '@/features/ats/components/MethodologyPopover'
 import { ScoreRing } from '@/features/ats/components/ScoreRing'
 import { SuggestionList } from '@/features/ats/components/SuggestionList'
 import type { ApplyResult, AtsAnalysis } from '@/features/ats/types'
+import { AiModelChip } from '@/features/ai-providers/components/AiModelChip'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
+import { useAiChoices } from '@/features/ai-providers/useAiChoice'
 
 function PolishStatus({ analysis }: { analysis: AtsAnalysis }) {
   const retry = useRetryPolish(analysis.id)
+  const choices = useAiChoices('polish_suggestions')
+  const runPolish = (ai?: WorkflowTarget) =>
+    retry.mutateAsync(ai).catch((e) => toast.error('Could not polish the suggestions', { description: errorMessage(e) }))
+  const unpolished = analysis.suggestions.some(
+    (s) => s.kind === 'REPLACE_BULLET' && s.status === 'PROPOSED' && !(s.checks as Record<string, unknown> | undefined)?.ai_attempted,
+  )
+  const hasModel = Boolean(choices.data?.candidates.some((c) => c.available && c.provider !== 'mock'))
   if (analysis.status === 'RUNNING' || analysis.status === 'PENDING') {
     return (
       <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3" role="status" aria-live="polite">
         <p className="flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin text-primary" aria-hidden />
+          <Sparkles className="size-4 shrink-0 text-primary" aria-hidden />
           The AI model is polishing the bullet suggestions. The results below are already final; rewrites appear as they pass JobPilot's fact checks.
         </p>
         <Progress value={analysis.progress} aria-label="Polish progress" />
@@ -40,12 +51,26 @@ function PolishStatus({ analysis }: { analysis: AtsAnalysis }) {
         <AlertTriangle aria-hidden />
         <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
           <span>{analysis.error} The rule-based suggestions are shown.</span>
-          <Button size="sm" variant="outline" onClick={() => void retry.mutateAsync().catch((e) => toast.error('Could not retry', { description: errorMessage(e) }))} loading={retry.isPending}>
+          <AiRunButton task="polish_suggestions" size="sm" variant="outline" onRun={runPolish} loading={retry.isPending} showModel={false}>
             <RefreshCw aria-hidden />
             Retry AI polish
-          </Button>
+          </AiRunButton>
         </AlertDescription>
       </Alert>
+    )
+  }
+  if (analysis.is_current && unpolished && hasModel && (!analysis.ai_provider || analysis.ai_provider === 'mock')) {
+    return (
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
+        <p className="flex items-center gap-2 text-sm">
+          <Wand2 className="size-4 shrink-0 text-primary" aria-hidden />
+          These suggestions come from JobPilot&apos;s rules. An AI model can reword the bullet rewrites (every result is fact-checked).
+        </p>
+        <AiRunButton task="polish_suggestions" size="sm" variant="outline" onRun={runPolish} loading={retry.isPending}>
+          <Sparkles aria-hidden />
+          Polish suggestions
+        </AiRunButton>
+      </div>
     )
   }
   return null
@@ -66,8 +91,10 @@ export function AnalysisResults({ analysisId, onAnalysisChange }: AnalysisResult
   const autoOptimize = useAutoOptimize(analysisId)
   const createTarget = useCreateTarget()
   const [confirmAuto, setConfirmAuto] = React.useState(false)
+  /** The model picked for the auto-optimize run (the picker runs before the confirmation). */
+  const [autoAi, setAutoAi] = React.useState<WorkflowTarget | undefined>(undefined)
 
-  if (query.isLoading) return <LoadingState rows={3} />
+  if (query.isLoading) return <AnalysisResultsSkeleton />
   if (query.error || !analysis) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />
 
   const onApplied = (result: ApplyResult) => {
@@ -100,7 +127,7 @@ export function AnalysisResults({ analysisId, onAnalysisChange }: AnalysisResult
 
   const runAutoOptimize = async () => {
     try {
-      const result = await autoOptimize.mutateAsync({ mode: 'new_resume' })
+      const result = await autoOptimize.mutateAsync({ mode: 'new_resume', ai: autoAi })
       onAnalysisChange(result.analysis.id)
       toast.success(`Created “${result.resume.name}”`, {
         description: `${result.applied.length} safe changes · estimate ${result.previous_score ?? '—'} → ${result.analysis.overall_score ?? '—'}. Your original resume is unchanged.`,
@@ -144,23 +171,28 @@ export function AnalysisResults({ analysisId, onAnalysisChange }: AnalysisResult
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   {analysis.resume_name} v{analysis.resume_version} · analysed {formatRelative(analysis.created_at)}
-                  {analysis.ai_provider && analysis.ai_provider !== 'mock' ? (
-                    <span className="inline-flex items-center gap-1">
-                      {' '}
-                      · <Bot className="size-3.5" aria-hidden /> {analysis.ai_model ?? analysis.ai_provider}
-                    </span>
-                  ) : null}
                 </p>
+                <AiModelChip provider={analysis.ai_provider} model={analysis.ai_model} prefix="Suggestions polished by" />
               </div>
               <MethodologyPopover weights={analysis.weights} />
             </div>
             <p className="text-xs text-muted-foreground">{analysis.disclaimer}</p>
             <PolishStatus analysis={analysis} />
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => setConfirmAuto(true)} disabled={!analysis.is_current || autoOptimize.isPending} loading={autoOptimize.isPending}>
+              <AiRunButton
+                task="polish_suggestions"
+                size="sm"
+                showModel={false}
+                onRun={(ai) => {
+                  setAutoAi(ai)
+                  setConfirmAuto(true)
+                }}
+                disabled={!analysis.is_current || autoOptimize.isPending}
+                loading={autoOptimize.isPending}
+              >
                 <Sparkles aria-hidden />
                 Auto-optimize → new resume
-              </Button>
+              </AiRunButton>
               {analysis.job_target_id ? (
                 <Button size="sm" variant="outline" asChild>
                   <Link to={`/resume/targets/${analysis.job_target_id}`}>

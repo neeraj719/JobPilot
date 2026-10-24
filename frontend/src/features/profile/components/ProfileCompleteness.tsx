@@ -26,11 +26,22 @@ function barColor(value: number): string {
 export function ProfileCompleteness({ completeness, missingFields, loading, onJumpTo }: ProfileCompletenessProps) {
   if (loading) {
     return (
-      <Card>
-        <CardContent className="space-y-3 py-5">
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-2 w-full" />
-          <Skeleton className="h-4 w-72" />
+      <Card role="status" aria-busy="true">
+        <span className="sr-only">Loading profile completeness</span>
+        <CardContent className="space-y-3 py-5" aria-hidden>
+          <div className="flex h-5 items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-4 rounded-full" />
+              <Skeleton className="h-3.5 w-36" />
+            </div>
+            <Skeleton className="h-3.5 w-9" />
+          </div>
+          <Skeleton className="h-2 w-full rounded-full" />
+          <div className="flex h-[22px] flex-wrap items-center gap-1.5">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-[22px] w-20 rounded-full" />
+            <Skeleton className="h-[22px] w-24 rounded-full" />
+          </div>
         </CardContent>
       </Card>
     )

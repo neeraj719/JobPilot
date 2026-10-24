@@ -3,7 +3,6 @@ import * as React from 'react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -16,12 +15,27 @@ import { useFetchJd, useParseJd, useTargets, useUploadJd } from '@/features/ats/
 import { JD_SOURCE_LABELS } from '@/features/ats/labels'
 import type { JdInput, JdParseResult } from '@/features/ats/types'
 import { StructuredJdView } from '@/features/ats/components/StructuredJdView'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import { useAiChoice } from '@/features/ai-providers/useAiChoice'
 
 export type JdTab = 'paste' | 'upload' | 'url' | 'target' | 'job'
+
+export const ALL_JD_TABS: JdTab[] = ['paste', 'upload', 'url', 'target', 'job']
 
 export interface JdInputPanelProps {
   initialTarget?: string | null
   onChange: (jd: JdInput | null) => void
+  /** Tabs to offer (default: all five). The one-screen tailor flow hides the saved-target and job tabs. */
+  tabs?: JdTab[]
+  /** The paste tab's own Company / Job title fields (default shown). */
+  showMetaFields?: boolean
+  /** Read the pasted text with the rules (no model) a moment after typing stops, so the preview
+      and `onParsed` follow without a click. */
+  autoPreview?: boolean
+  /** Every parse result (paste preview, upload, URL); `null` when the input changed since. */
+  onParsed?: (result: JdParseResult | null) => void
+  /** Text to start the paste tab with (e.g. kept from an earlier run). */
+  initialText?: string
 }
 
 const MIN_CHARS = 120
@@ -52,9 +66,17 @@ function Preview({ result }: { result: JdParseResult }) {
 }
 
 /** Step 2 of the optimizer: where the job description comes from. */
-export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
-  const [tab, setTab] = React.useState<JdTab>(initialTarget ? 'target' : 'paste')
-  const [text, setText] = React.useState('')
+export function JdInputPanel({
+  initialTarget,
+  onChange,
+  tabs = ALL_JD_TABS,
+  showMetaFields = true,
+  autoPreview = false,
+  onParsed,
+  initialText = '',
+}: JdInputPanelProps) {
+  const [tab, setTab] = React.useState<JdTab>(initialTarget && tabs.includes('target') ? 'target' : 'paste')
+  const [text, setText] = React.useState(initialText)
   const [company, setCompany] = React.useState('')
   const [title, setTitle] = React.useState('')
   const [url, setUrl] = React.useState('')
@@ -67,6 +89,7 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
   const parse = useParseJd()
   const upload = useUploadJd()
   const fetchJd = useFetchJd()
+  const jdChoice = useAiChoice('analyze_job_description', { enabled: useAi })
   const targets = useTargets({ page_size: 100 })
   const jobs = useJobs({ page_size: 50 })
 
@@ -94,10 +117,11 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, text, company, title, parsed, targetId, jobId])
 
-  const run = async (action: () => Promise<JdParseResult>) => {
+  const run = async (action: () => Promise<JdParseResult | undefined>) => {
     setError(null)
     try {
-      setParsed(await action())
+      const result = await action()
+      if (result) setParsed(result) // undefined: the model picker was cancelled
     } catch (err) {
       setParsed(null)
       setError(errorMessage(err))
@@ -105,21 +129,39 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
   }
 
   const busy = parse.isPending || upload.isPending || fetchJd.isPending
+
+  // Report every parse result upwards (the tailor flow prefills role and company from it).
+  React.useEffect(() => {
+    onParsed?.(parsed)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed])
+
+  // Rules-only preview a moment after the pasted text stops changing (no model, no click).
+  const parseAsync = parse.mutateAsync
+  React.useEffect(() => {
+    if (!autoPreview || tab !== 'paste' || useAi || parsed || text.trim().length < MIN_CHARS) return
+    const handle = window.setTimeout(() => {
+      void parseAsync({ text, company: company || undefined, title: title || undefined })
+        .then((result) => setParsed((current) => current ?? result))
+        .catch(() => undefined) // the manual "Preview requirements" button reports errors
+    }, 700)
+    return () => window.clearTimeout(handle)
+  }, [autoPreview, tab, useAi, parsed, text, company, title, parseAsync])
   const savedTargets = (targets.data?.items ?? []).filter((t) => t.latest_snapshot_id)
 
   return (
     <div className="space-y-4">
       <Tabs value={tab} onValueChange={(value) => { setTab(value as JdTab); setParsed(null); setError(null) }}>
         <TabsList className="flex h-auto flex-wrap justify-start">
-          <TabsTrigger value="paste"><ClipboardPaste aria-hidden />Paste</TabsTrigger>
-          <TabsTrigger value="upload"><FileUp aria-hidden />Upload</TabsTrigger>
-          <TabsTrigger value="url"><Link2 aria-hidden />URL</TabsTrigger>
-          <TabsTrigger value="target"><Crosshair aria-hidden />Saved target</TabsTrigger>
-          <TabsTrigger value="job"><Briefcase aria-hidden />Discovered job</TabsTrigger>
+          {tabs.includes('paste') ? <TabsTrigger value="paste"><ClipboardPaste aria-hidden />Paste</TabsTrigger> : null}
+          {tabs.includes('upload') ? <TabsTrigger value="upload"><FileUp aria-hidden />Upload</TabsTrigger> : null}
+          {tabs.includes('url') ? <TabsTrigger value="url"><Link2 aria-hidden />URL</TabsTrigger> : null}
+          {tabs.includes('target') ? <TabsTrigger value="target"><Crosshair aria-hidden />Saved target</TabsTrigger> : null}
+          {tabs.includes('job') ? <TabsTrigger value="job"><Briefcase aria-hidden />Discovered job</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="paste" className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className={showMetaFields ? 'grid gap-3 sm:grid-cols-2' : 'hidden'}>
             <div className="space-y-1.5">
               <Label htmlFor="jd-company">Company (optional)</Label>
               <Input id="jd-company" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme" />
@@ -142,16 +184,18 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
               {text.trim().length < MIN_CHARS ? `At least ${MIN_CHARS} characters (${text.trim().length} so far).` : `${text.length.toLocaleString()} characters.`} The text is treated as data only; instructions inside it are ignored.
             </p>
           </div>
-          <Button
+          <AiRunButton
+            task="analyze_job_description"
+            aiEnabled={useAi}
             variant="outline"
             size="sm"
             disabled={text.trim().length < MIN_CHARS || busy}
             loading={parse.isPending}
-            onClick={() => void run(() => parse.mutateAsync({ text, company: company || undefined, title: title || undefined, use_ai: useAi }))}
+            onRun={(ai) => run(() => parse.mutateAsync({ text, company: company || undefined, title: title || undefined, use_ai: useAi, ai }))}
           >
             <Search aria-hidden />
             Preview requirements
-          </Button>
+          </AiRunButton>
         </TabsContent>
 
         <TabsContent value="upload" className="space-y-3">
@@ -163,8 +207,16 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
               accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               disabled={busy}
               onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) void run(() => upload.mutateAsync({ file, useAi }))
+                const input = e.target
+                const file = input.files?.[0]
+                if (!file) return
+                void run(async () => {
+                  const result = useAi
+                    ? await jdChoice.runWithModel((ai) => upload.mutateAsync({ file, useAi, ai }))
+                    : await upload.mutateAsync({ file, useAi })
+                  if (!result) input.value = '' // cancelled: let the same file be picked again
+                  return result
+                })
               }}
             />
           </div>
@@ -175,9 +227,16 @@ export function JdInputPanel({ initialTarget, onChange }: JdInputPanelProps) {
             <Label htmlFor="jd-url">Job posting URL</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input id="jd-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://job-boards.greenhouse.io/company/jobs/123" />
-              <Button disabled={!url.trim() || busy} loading={fetchJd.isPending} onClick={() => void run(() => fetchJd.mutateAsync({ url: url.trim(), use_ai: useAi }))}>
+              <AiRunButton
+                task="analyze_job_description"
+                aiEnabled={useAi}
+                showModel={false}
+                disabled={!url.trim() || busy}
+                loading={fetchJd.isPending}
+                onRun={(ai) => run(() => fetchJd.mutateAsync({ url: url.trim(), use_ai: useAi, ai }))}
+              >
                 Fetch
-              </Button>
+              </AiRunButton>
             </div>
             <p className="text-xs text-muted-foreground">
               Greenhouse, Lever, Ashby and SmartRecruiters postings are read from their public APIs. Other pages are fetched once;

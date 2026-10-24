@@ -47,6 +47,9 @@ class AiUsageStatus(StrEnum):
     FALLBACK = "FALLBACK"
 
 
+MODEL_PROMPT_MODES = ("ask", "default")
+
+
 class AiProviderSettings(StandardColumnsMixin, Base):
     __tablename__ = "ai_provider_settings"
     __table_args__ = (
@@ -67,6 +70,11 @@ class AiProviderSettings(StandardColumnsMixin, Base):
     monthly_budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     #: The user acknowledged that hosted providers receive their resume / job text.
     data_residency_ack: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: ``ask`` = when two or more models are usable, every AI action asks which one should
+    #: process the run; ``default`` = always use the routing above without asking
+    #: (``ai.choice``, migration ``e6f8a0b2c4d7``). The UI decides; the API always honours a
+    #: valid per-run choice.
+    model_prompt_mode: Mapped[str] = mapped_column(String(10), default="ask", nullable=False)
 
 
 class AiProviderCredential(StandardColumnsMixin, Base):
@@ -115,6 +123,10 @@ class AiUsageEvent(StandardColumnsMixin, Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[AiUsageStatus] = mapped_column(Enum(AiUsageStatus, native_enum=False, length=20), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(40))
+    #: How the model was chosen: ``per_run`` (picked for this run), ``task_override``,
+    #: ``user_default``, ``server_default`` or ``fallback``. ``None`` on rows written before
+    #: migration ``e6f8a0b2c4d7``.
+    source: Mapped[str | None] = mapped_column(String(20))
 
 
 __all__ = [
@@ -123,4 +135,5 @@ __all__ = [
     "AiProviderSettings",
     "AiUsageEvent",
     "AiUsageStatus",
+    "MODEL_PROMPT_MODES",
 ]

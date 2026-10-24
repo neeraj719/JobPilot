@@ -1,11 +1,11 @@
-import { ArrowLeft, FilePlus2, FileText, History, PencilRuler, Search, Target, Upload } from 'lucide-react'
+import { ArrowLeft, Crosshair, FilePlus2, FileText, History, PencilRuler, ScanSearch, Search, Target, Upload } from 'lucide-react'
 import * as React from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { ResumeCardGridSkeleton, ResumeDetailSkeleton } from '@/features/resume-studio/components/ResumeStudioSkeletons'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -18,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
-import { useDebounce } from '@/hooks/useDebounce'
 import { errorMessage, isApiError } from '@/lib/api'
 import { formatRelative } from '@/lib/utils'
 import { ParsedDataPanel } from '@/features/resume/components/ParsedDataPanel'
@@ -41,6 +40,10 @@ import { ArchivedBadge, KindBadge } from '@/features/resume-studio/components/ba
 import { ExportMenu } from '@/features/resume-studio/components/ExportMenu'
 import { StudioResumeCard } from '@/features/resume-studio/components/StudioResumeCard'
 import type { ExportFormat, StudioResumeRead } from '@/features/resume-studio/types'
+import { OriginalFileBadge } from '@/features/resume-upload/components/OriginalFileBadge'
+import { PageFileDrop } from '@/features/resume-upload/PageFileDrop'
+import { EditCopyButton, UploadedResumeView } from '@/features/resume-upload/UploadedResumeView'
+import { useUploadSheet } from '@/features/resume-upload/UploadResumeSheet'
 import type { ResumeKind, ResumeRead } from '@/types/api'
 
 /** `/resume/my` (list) and `/resume/my/:id` (one resume's detail). */
@@ -71,7 +74,7 @@ function useResumeActions() {
     }
   }
 
-  const actions = {
+  const impl = {
     rename: (resume: StudioResumeRead) => setRenaming(resume),
     duplicate: (resume: StudioResumeRead) =>
       busy(resume.id, async () => {
@@ -126,6 +129,22 @@ function useResumeActions() {
         }
       }),
   }
+  // One identity for the page's lifetime (each call reads the latest implementation), so the
+  // memoised resume cards do not re-render on every keystroke in the search box.
+  const implRef = React.useRef(impl)
+  implRef.current = impl
+  const actions = React.useMemo<typeof impl>(
+    () => ({
+      rename: (resume) => implRef.current.rename(resume),
+      duplicate: (resume) => implRef.current.duplicate(resume),
+      setDefault: (resume) => implRef.current.setDefault(resume),
+      archive: (resume) => implRef.current.archive(resume),
+      unarchive: (resume) => implRef.current.unarchive(resume),
+      remove: (resume) => implRef.current.remove(resume),
+      export: (resume, format) => implRef.current.export(resume, format),
+    }),
+    [],
+  )
 
   const dialogs = (
     <>
@@ -215,6 +234,118 @@ function RenameDialog({
 
 /* ------------------------------------------------------------------ list */
 
+interface ResumeFiltersProps {
+  kind: 'ALL' | ResumeKind
+  role: string
+  sort: SortKey
+  roles: string[]
+  showArchived: boolean
+  setKind: (kind: 'ALL' | ResumeKind) => void
+  setRole: (role: string) => void
+  setSort: (sort: SortKey) => void
+  setShowArchived: (show: boolean) => void
+}
+
+/**
+ * Kind / role / sort selects and the archive switch, memoised (landing-perf D): Radix Select
+ * keeps its items mounted, so re-rendering the toolbar on every search keystroke cost ~15
+ * SelectItems per pass. Its props are filter values, a memoised role list and state setters.
+ * Filter switches run in a transition so the select closes before the grid re-renders.
+ */
+const ResumeFilters = React.memo(function ResumeFilters({ kind, role, sort, roles, showArchived, setKind, setRole, setSort, setShowArchived }: ResumeFiltersProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={kind} onValueChange={(v) => React.startTransition(() => setKind(v as 'ALL' | ResumeKind))}>
+        <SelectTrigger className="h-9 w-36" aria-label="Filter by kind">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {KIND_FILTERS.map((k) => (
+            <SelectItem key={k.value} value={k.value}>
+              {k.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={role} onValueChange={(v) => React.startTransition(() => setRole(v))}>
+        <SelectTrigger className="h-9 w-44" aria-label="Filter by target role">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="ALL">All target roles</SelectItem>
+          <SelectItem value="NONE">No target role</SelectItem>
+          {roles.map((r) => (
+            <SelectItem key={r} value={r}>
+              {r}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={sort} onValueChange={(v) => React.startTransition(() => setSort(v as SortKey))}>
+        <SelectTrigger className="h-9 w-40" aria-label="Sort">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="edited">Recently edited</SelectItem>
+          <SelectItem value="created">Newest first</SelectItem>
+          <SelectItem value="name">Name A–Z</SelectItem>
+        </SelectContent>
+      </Select>
+      <label className="flex items-center gap-2 text-sm">
+        <Switch checked={showArchived} onCheckedChange={setShowArchived} aria-label="Show archived resumes" />
+        Archived
+      </label>
+    </div>
+  )
+})
+
+type CardProps = React.ComponentProps<typeof StudioResumeCard>
+
+/**
+ * One resume card, memoised (landing-perf D): its props are the resume object (referentially
+ * stable across refetches by react-query's structural sharing), a template object from the
+ * templates query, a boolean and the page-lifetime `actions`. Typing in the search box or
+ * changing a filter therefore re-renders no card whose data did not change (measured: 9 cards
+ * × every keystroke before).
+ */
+const ResumeCardItem = React.memo(function ResumeCardItem({
+  resume,
+  sourceName,
+  template,
+  busy,
+  actions,
+}: {
+  resume: StudioResumeRead
+  sourceName: CardProps['sourceName']
+  template: CardProps['template']
+  busy: boolean
+  actions: ReturnType<typeof useResumeActions>['actions']
+}) {
+  const card = (
+    <StudioResumeCard
+      resume={resume}
+      sourceName={sourceName}
+      template={template}
+      busy={busy}
+      onRename={() => actions.rename(resume)}
+      onDuplicate={() => void actions.duplicate(resume)}
+      onSetDefault={() => void actions.setDefault(resume)}
+      onArchive={() => void actions.archive(resume)}
+      onUnarchive={() => void actions.unarchive(resume)}
+      onDelete={() => actions.remove(resume)}
+      onExport={(format) => void actions.export(resume, format)}
+    />
+  )
+  if (resume.kind !== 'UPLOADED' || !resume.has_file) return card
+  // The card belongs to resume-studio; the "Original file" badge sits on its preview corner.
+  return (
+    <div className="relative min-w-0">
+      {card}
+      <OriginalFileBadge className="pointer-events-none absolute left-3 top-3 shadow-xs" />
+    </div>
+  )
+})
+
 type SortKey = 'edited' | 'name' | 'created'
 const KIND_FILTERS: { value: 'ALL' | ResumeKind; label: string }[] = [
   { value: 'ALL', label: 'All kinds' },
@@ -230,10 +361,12 @@ function ResumeList() {
   const [kind, setKind] = React.useState<'ALL' | ResumeKind>('ALL')
   const [role, setRole] = React.useState<string>('ALL')
   const [sort, setSort] = React.useState<SortKey>('edited')
-  const search = useDebounce(query, 150).trim().toLowerCase()
+  // Client-side filter: the input updates at once, the (interruptible) list render follows.
+  const search = React.useDeferredValue(query).trim().toLowerCase()
   const list = useStudioResumes(showArchived)
   const templates = useTemplates()
   const { actions, dialogs, busyId } = useResumeActions()
+  const upload = useUploadSheet()
 
   const resumes = React.useMemo(() => list.data ?? [], [list.data])
   const names = React.useMemo(() => new Map(resumes.map((r) => [r.id, r.name])), [resumes])
@@ -267,10 +400,8 @@ function ResumeList() {
         description="Every resume you have uploaded, built or tailored. The default resume is the one matching and applications use."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to="/resume/new?mode=upload">
-                <Upload aria-hidden /> Upload
-              </Link>
+            <Button variant="outline" onClick={() => upload.openSheet()} data-upload-resume>
+              <Upload aria-hidden /> Upload
             </Button>
             <Button asChild>
               <Link to="/resume/new">
@@ -280,6 +411,8 @@ function ResumeList() {
           </>
         }
       />
+      <PageFileDrop onFile={(file) => upload.openSheet(file)} disabled={upload.open} />
+      {upload.element}
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <div className="relative flex-1">
@@ -292,65 +425,39 @@ function ResumeList() {
             className="pl-8"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={kind} onValueChange={(v) => setKind(v as 'ALL' | ResumeKind)}>
-            <SelectTrigger className="h-9 w-36" aria-label="Filter by kind">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {KIND_FILTERS.map((k) => (
-                <SelectItem key={k.value} value={k.value}>
-                  {k.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={role} onValueChange={setRole}>
-            <SelectTrigger className="h-9 w-44" aria-label="Filter by target role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All target roles</SelectItem>
-              <SelectItem value="NONE">No target role</SelectItem>
-              {roles.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {r}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-            <SelectTrigger className="h-9 w-40" aria-label="Sort">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="edited">Recently edited</SelectItem>
-              <SelectItem value="created">Newest first</SelectItem>
-              <SelectItem value="name">Name A–Z</SelectItem>
-            </SelectContent>
-          </Select>
-          <label className="flex items-center gap-2 text-sm">
-            <Switch checked={showArchived} onCheckedChange={setShowArchived} aria-label="Show archived resumes" />
-            Archived
-          </label>
-        </div>
+        <ResumeFilters
+          kind={kind}
+          role={role}
+          sort={sort}
+          roles={roles}
+          showArchived={showArchived}
+          setKind={setKind}
+          setRole={setRole}
+          setSort={setSort}
+          setShowArchived={setShowArchived}
+        />
       </div>
 
       {list.isLoading ? (
-        <LoadingState variant="cards" rows={3} />
+        <ResumeCardGridSkeleton count={6} />
       ) : list.error ? (
         <ErrorState error={list.error} title="Could not load your resumes" onRetry={() => void list.refetch()} />
       ) : resumes.length === 0 ? (
         <EmptyState
           icon={FileText}
           title="No resumes yet"
-          description="Start from your profile, upload a PDF or DOCX, paste text or import your LinkedIn data. Nothing is added that you did not provide."
+          description="Upload the resume you already have (kept as your original file, or drop it anywhere on this page), or build one from your profile, pasted text or your LinkedIn data. Nothing is added that you did not provide."
           action={
-            <Button asChild>
-              <Link to="/resume/new">
-                <FilePlus2 aria-hidden /> Create your first resume
-              </Link>
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button onClick={() => upload.openSheet()} data-empty-upload>
+                <Upload aria-hidden /> Upload my resume
+              </Button>
+              <Button variant="outline" asChild>
+                <Link to="/resume/new">
+                  <FilePlus2 aria-hidden /> Create a resume
+                </Link>
+              </Button>
+            </div>
           }
         />
       ) : visible.length === 0 ? (
@@ -376,19 +483,13 @@ function ResumeList() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((resume) => (
-            <StudioResumeCard
+            <ResumeCardItem
               key={resume.id}
               resume={resume}
               sourceName={resume.source_resume_id ? names.get(resume.source_resume_id) : null}
               template={templateOf(resume.template)}
               busy={busyId === resume.id}
-              onRename={() => actions.rename(resume)}
-              onDuplicate={() => void actions.duplicate(resume)}
-              onSetDefault={() => void actions.setDefault(resume)}
-              onArchive={() => void actions.archive(resume)}
-              onUnarchive={() => void actions.unarchive(resume)}
-              onDelete={() => actions.remove(resume)}
-              onExport={(format) => void actions.export(resume, format)}
+              actions={actions}
             />
           ))}
         </div>
@@ -411,7 +512,7 @@ function ResumeDetail({ id }: { id: string }) {
   if (resume.isLoading) {
     return (
       <PageContainer>
-        <LoadingState variant="cards" rows={2} />
+        <ResumeDetailSkeleton />
       </PageContainer>
     )
   }
@@ -439,6 +540,8 @@ function ResumeDetail({ id }: { id: string }) {
   const r = resume.data
   const source = r.source_resume_id ? all.data?.find((x) => x.id === r.source_resume_id) : null
   const archived = Boolean(r.archived_at)
+  // An uploaded resume with its file: the original-file page (preview, download, replace, edit a copy).
+  const original = r.kind === 'UPLOADED' && r.has_file
 
   return (
     <PageContainer>
@@ -453,16 +556,37 @@ function ResumeDetail({ id }: { id: string }) {
           <span className="flex flex-wrap items-center gap-1.5">
             {r.is_default ? <Badge>Default</Badge> : null}
             <KindBadge kind={r.kind} sourceName={source?.name} />
+            {original ? <OriginalFileBadge /> : null}
             {archived ? <ArchivedBadge /> : null}
             <Badge variant="outline">v{r.current_version}</Badge>
             <span>Edited {formatRelative(r.updated_at)}</span>
           </span>
         }
         actions={
+          original ? (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/resume/ats?resume=${r.id}`}>
+                  <ScanSearch aria-hidden /> Check against a job
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/resume/targets/new?resume=${r.id}`}>
+                  <Crosshair aria-hidden /> Optimize for a job
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/resume/history?resume=${r.id}`}>
+                  <History aria-hidden /> History
+                </Link>
+              </Button>
+              <EditCopyButton resume={r as unknown as ResumeRead} />
+            </>
+          ) : (
           <>
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/resume/targets?resume=${r.id}`}>
-                <Target aria-hidden /> Tailor for a job
+              <Link to={`/resume/targets/new?resume=${r.id}`}>
+                <Target aria-hidden /> Optimize for a job
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
@@ -477,6 +601,7 @@ function ResumeDetail({ id }: { id: string }) {
               </Link>
             </Button>
           </>
+          )
         }
       />
 
@@ -537,7 +662,7 @@ function ResumeDetail({ id }: { id: string }) {
           <Button size="sm" variant="ghost" onClick={() => void actions.duplicate(r)}>
             Duplicate
           </Button>
-          {!r.is_default && !archived ? (
+          {!r.is_default && !archived && !original ? (
             <Button size="sm" variant="ghost" onClick={() => void actions.setDefault(r)}>
               Set as default
             </Button>
@@ -552,6 +677,14 @@ function ResumeDetail({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+
+      {original ? (
+        <UploadedResumeView
+          resume={r as unknown as ResumeRead}
+          onSetDefault={() => void actions.setDefault(r)}
+          busy={busyId === r.id}
+        />
+      ) : null}
 
       <div className="space-y-6">
         <ResumeInsights resume={r as unknown as ResumeRead} />

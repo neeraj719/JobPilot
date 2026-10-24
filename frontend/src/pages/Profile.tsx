@@ -3,7 +3,6 @@ import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -19,6 +18,7 @@ import { StandingAnswersCard } from '@/features/profile/components/StandingAnswe
 import { useResumes } from '@/features/resume/api'
 import type { ProfileTab } from '@/features/profile/schema'
 import type { ParsedResume } from '@/types/api'
+import { ProfileBodySkeleton } from '@/features/profile/components/ProfileSkeletons'
 
 const TABS: { value: ProfileTab; label: string }[] = [
   { value: 'personal', label: 'Personal' },
@@ -99,7 +99,7 @@ export default function ProfilePage() {
       ) : isLoading || !profileQuery.data || !preferencesQuery.data ? (
         <>
           <ProfileCompleteness completeness={0} missingFields={[]} loading onJumpTo={setTab} />
-          <LoadingState variant="cards" rows={3} />
+          <ProfileBodySkeleton />
         </>
       ) : (
         <>

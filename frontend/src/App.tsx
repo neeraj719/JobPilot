@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 
 import { Toaster } from '@/components/ui/toaster'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { AiModelPickerHost } from '@/features/ai-providers/components/AiModelPickerHost'
 import { queryClient } from '@/lib/queryClient'
 import { AppRoutes } from '@/router'
 import { useAuthStore } from '@/stores/auth'
@@ -31,6 +32,7 @@ export default function App() {
         */}
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AppRoutes />
+          <AiModelPickerHost />
         </BrowserRouter>
         <Toaster />
       </TooltipProvider>

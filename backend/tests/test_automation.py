@@ -586,6 +586,7 @@ def test_build_scheduler_registers_every_job():
     assert {job.id for job in scheduler.get_jobs()} == {
         "tick_scheduled_runs",
         "sync_gmail",
+        "sync_linkedin",
         "mark_no_response",
         "cleanup_expired_browser_sessions",
     }

@@ -226,8 +226,8 @@ skills (taxonomy)
 
 ## Tables
 
-All 38 carry the seven standard columns — `id` / `created_at` / `updated_at` /
-`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 38 carry the
+All 39 carry the seven standard columns — `id` / `created_at` / `updated_at` /
+`created_by` / `updated_by` / `is_active` / `deleted_at` — and all 39 carry the
 `trg_<table>_updated_at` trigger; only what is *extra* is listed.
 
 | Table | Purpose | Notable columns / constraints |
@@ -249,9 +249,9 @@ All 38 carry the seven standard columns — `id` / `created_at` / `updated_at` /
 | `job_description_snapshots` | immutable copy of a JD as read | `source` (`PASTED` / `UPLOADED` / `URL` / `BOARD` / `JOB`), `raw_text` (≤ 50 k chars), `structured` JSON, `text_sha256`, `changed_from_previous`, `changes` |
 | `ats_analyses` | one estimated ATS report: resume version × snapshot | `overall_score`, `category_scores`, `matched_keywords` / `missing_keywords`, `weak_items`, `parse_risks`, `methodology_version`, `weights`, `status` / `progress` (background polish) |
 | `optimization_suggestions` | concrete changes an analysis proposes | `kind`, `before` / `after`, `safe`, `requires_confirmation`, `status` (`PROPOSED` / `APPLIED` / `IGNORED` / `EDITED`), `checks` (guard results) |
-| `ai_provider_settings` | the user's AI provider, per-workflow models, fallback, limits | partial-unique `user_id`; `workflow_models` JSON, `fallback_enabled` (default off), `daily_call_limit`, `monthly_budget_usd` — migration `c7e9b1d3f5a7` |
+| `ai_provider_settings` | the user's AI provider, per-workflow models, fallback, limits | partial-unique `user_id`; `workflow_models` JSON, `fallback_enabled` (default off), `daily_call_limit`, `monthly_budget_usd` — migration `c7e9b1d3f5a7`; `model_prompt_mode` (`String(10)`, NOT NULL, default `ask`: `ask` = ask which model to use before each AI run when 2+ are usable, `default` = never ask) — migration `e6f8a0b2c4d7` |
 | `ai_provider_credentials` | the user's own API keys | partial-unique `(user_id, provider)`; `encrypted_api_key` (Fernet), `key_hint`, `base_url`, `credential_version`, last test status; deleting tombstones the row **and** wipes the ciphertext |
-| `ai_usage_events` | one row per real model call (append-only) | `provider`, `model`, `task`, `workflow`, tokens (`tokens_estimated`), `estimated_cost_usd`, `duration_ms`, `status`; never holds prompt or response text |
+| `ai_usage_events` | one row per real model call (append-only) | `provider`, `model`, `task`, `workflow`, tokens (`tokens_estimated`), `estimated_cost_usd`, `duration_ms`, `status`, `source` (how the model was chosen: `per_run` / `task_override` / `user_default` / `server_default` / `fallback`; `NULL` before migration `e6f8a0b2c4d7`); never holds prompt or response text |
 | `modules` | workspace module catalog (Resume Studio, Job Apply, …) | `code` partial-unique, `name`, `tagline`, `description`, `icon` (lucide name), `home_path` (null = no pages yet), `accent` (design-token name), `sort_order`, `is_enabled` (platform-wide switch), `min_role` (`USER` / `ADMIN`), `status` (`AVAILABLE` / `COMING_SOON`); seeded by migration `f6b8d0c2e4a7` (resume on, apply **off**, insights coming soon), insert-missing-only, changed by admins via `/workspace/admin/modules` |
 | `user_module_settings` | one user's settings for one module | partial-unique `(user_id, module_id)`; `is_enabled` (admin per-user switch), `is_pinned`, `sort_order` (null = catalog order), `last_opened_at`, `open_count`; created on first write |
 | `user_workspace_preferences` | workspace-wide preferences | partial-unique `user_id`; `landing` (`LAUNCHER` / `LAST_MODULE`), `last_module_id` (FK → `modules`, SET NULL), `show_tips` |
@@ -261,6 +261,7 @@ All 38 carry the seven standard columns — `id` / `created_at` / `updated_at` /
 | `application_events` | timeline | `event_type`, `from_status`, `to_status`, `actor` |
 | `application_documents` | resume / cover letter attached | |
 | `email_integrations` | Gmail OAuth (read-only) | `encrypted_credentials` (Fernet), `scopes`, `oauth_state` |
+| `linkedin_connections` | LinkedIn connection (official OAuth / OIDC; optional Member Data Portability) | partial-unique `user_id`; `subject` (LinkedIn `sub`), `name`, `email`, `picture_url`, `locale`, `scopes` JSON, `encrypted_access_token` / `encrypted_refresh_token` (Fernet), `token_expires_at`, `status` (`pending` / `connected` / `expired` / `revoked` / `error`), `last_error`, `connected_at`, `last_synced_at`, `auto_sync`, `profile_snapshot` JSON (normalised identity + DMA / export data, never raw files), `snapshot_source` (`oidc` / `dma` / `export`), `export_imported_at`, `last_sync_diff` JSON (counts only), `oauth_state` (the signed state's `jti`, single use) + `encrypted_oauth_pending` (PKCE verifier + nonce); disconnect wipes tokens + snapshot and tombstones the row — migration `d2e4f6a8b0c1` |
 | `email_messages` | classified emails | unique `(user_id, provider_message_id)`; `classification`, `matched_by`, `is_simulated`, `status_applied` |
 | `interviews` | rounds + AI prep | `prep_material` JSON |
 | `automation_configs` | daily automation settings | limits, schedule, `auto_submit_enabled` (default off), `source_modes` JSON (`{source: AUTO_APPLY \| DISCOVER_ONLY}`, default `{}` = adapter capability) |
@@ -285,7 +286,8 @@ OFFER → OFFER (never downgrades an application).
 ## Encryption at rest
 
 `email_integrations.encrypted_credentials`, `connected_accounts.encrypted_credentials`,
-`browser_sessions.encrypted_storage_state` and `ai_provider_credentials.encrypted_api_key` are
+`browser_sessions.encrypted_storage_state`, `ai_provider_credentials.encrypted_api_key` and
+`linkedin_connections.encrypted_access_token` / `encrypted_refresh_token` / `encrypted_oauth_pending` are
 Fernet-encrypted with `ENCRYPTION_KEY`; no API key is ever returned to the browser. Passwords are
 bcrypt hashes. Refresh tokens are stored as SHA-256 hashes. No plaintext secret is ever persisted.
 

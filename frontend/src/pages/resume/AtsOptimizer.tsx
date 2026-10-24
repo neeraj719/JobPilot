@@ -4,7 +4,6 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -18,9 +17,15 @@ import { cn, formatRelative } from '@/lib/utils'
 import { useResumes } from '@/features/resume/api'
 import { useAnalyses, useCreateAnalysis } from '@/features/ats/api'
 import { AnalysisResults } from '@/features/ats/components/AnalysisResults'
+import { AtsOptimizerSkeleton, AtsStepsSkeleton } from '@/features/ats/components/AtsSkeletons'
 import { JdInputPanel } from '@/features/ats/components/JdInputPanel'
 import { scoreTone, TONE_TEXT } from '@/features/ats/labels'
 import type { JdInput } from '@/features/ats/types'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
+
+const DESCRIPTION =
+  "Check how a resume reads against one job description, then apply the safe improvements. Scores are estimates, not any employer's actual ATS result."
 
 function Step({ n, label, done, active }: { n: number; label: string; done: boolean; active: boolean }) {
   return (
@@ -64,10 +69,10 @@ export default function AtsOptimizerPage() {
       { replace: key === 'analysis' },
     )
 
-  const analyse = async () => {
+  const analyse = async (ai?: WorkflowTarget) => {
     if (!resume || !jd) return
     try {
-      const analysis = await createAnalysis.mutateAsync({ resume_id: resume.id, jd })
+      const analysis = await createAnalysis.mutateAsync({ resume_id: resume.id, jd, ai })
       setParam('analysis', analysis.id)
       window.requestAnimationFrame(() => document.getElementById('ats-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } catch (error) {
@@ -78,8 +83,18 @@ export default function AtsOptimizerPage() {
   if (resumes.isLoading) {
     return (
       <PageContainer>
-        <PageHeader title="ATS Optimizer" />
-        <LoadingState rows={3} />
+        <PageHeader
+          title="ATS Optimizer"
+          description={DESCRIPTION}
+          actions={
+            <Button variant="outline" asChild>
+              <Link to="/resume/targets">Job-specific resumes</Link>
+            </Button>
+          }
+        >
+          <AtsStepsSkeleton />
+        </PageHeader>
+        <AtsOptimizerSkeleton />
       </PageContainer>
     )
   }
@@ -96,7 +111,7 @@ export default function AtsOptimizerPage() {
     <PageContainer>
       <PageHeader
         title="ATS Optimizer"
-        description="Check how a resume reads against one job description, then apply the safe improvements. Scores are estimates, not any employer's actual ATS result."
+        description={DESCRIPTION}
         actions={
           <Button variant="outline" asChild>
             <Link to="/resume/targets">Job-specific resumes</Link>
@@ -184,12 +199,18 @@ export default function AtsOptimizerPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <JdInputPanel initialTarget={params.get('target')} onChange={setJd} />
-              <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-                <Button onClick={() => void analyse()} disabled={!resume || !jd || createAnalysis.isPending} loading={createAnalysis.isPending}>
+              <div className="flex flex-wrap items-start gap-3 border-t border-border pt-4">
+                <AiRunButton
+                  task="polish_suggestions"
+                  context="Your resume and the job description"
+                  onRun={(ai) => analyse(ai)}
+                  disabled={!resume || !jd || createAnalysis.isPending}
+                  loading={createAnalysis.isPending}
+                >
                   <ScanSearch aria-hidden />
                   Analyse
-                </Button>
-                <span className="text-xs text-muted-foreground">
+                </AiRunButton>
+                <span className="self-start pt-2 text-xs text-muted-foreground">
                   {!jd ? 'Add a job description to continue.' : 'The rule-based estimate appears in about a second.'}
                 </span>
               </div>

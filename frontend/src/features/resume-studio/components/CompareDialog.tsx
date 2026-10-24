@@ -1,7 +1,6 @@
 import * as React from 'react'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -9,6 +8,7 @@ import { useResumeVersions } from '@/features/resume/api'
 
 import { useVersionDiff } from '../api'
 import { DiffView } from './DiffView'
+import { DiffViewSkeleton } from './ResumeStudioSkeletons'
 
 export interface CompareDialogProps {
   open: boolean
@@ -62,7 +62,7 @@ export function CompareDialog({ open, onOpenChange, resumeId, resumeName, versio
           </div>
         ) : null}
         {diff.isLoading ? (
-          <LoadingState rows={4} />
+          <DiffViewSkeleton />
         ) : diff.error ? (
           <ErrorState error={diff.error} size="sm" onRetry={() => void diff.refetch()} />
         ) : diff.data ? (

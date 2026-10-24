@@ -4,7 +4,6 @@ import * as React from 'react'
 import { useForm } from 'react-hook-form'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,6 +26,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { accentClasses, moduleIcon } from '@/modules/registry'
 import { renderableModules } from '@/modules/useActiveModule'
+import { LandingFormSkeleton, ModuleRowsSkeleton } from '@/features/workspace/components/WorkspaceSkeletons'
 
 const LANDING_OPTIONS: { value: WorkspacePreferencesValues['landing']; label: string; description: string }[] = [
   { value: 'LAUNCHER', label: 'The module launcher', description: 'See all your modules after signing in.' },
@@ -49,7 +49,7 @@ function LandingForm() {
     if (preferences.data) form.reset({ landing: preferences.data.landing, show_tips: preferences.data.show_tips })
   }, [preferences.data, form])
 
-  if (preferences.isPending) return <LoadingState rows={2} />
+  if (preferences.isPending) return <LandingFormSkeleton />
   if (preferences.isError) {
     return <ErrorState error={preferences.error} size="sm" onRetry={() => void preferences.refetch()} />
   }
@@ -130,7 +130,7 @@ function ModuleOrderList() {
   const [busy, setBusy] = React.useState(false)
   const modules = renderableModules(modulesQuery.data)
 
-  if (modulesQuery.isPending) return <LoadingState rows={3} />
+  if (modulesQuery.isPending) return <ModuleRowsSkeleton rows={3} trailing="arrows" />
   if (modulesQuery.isError) {
     return <ErrorState error={modulesQuery.error} size="sm" onRetry={() => void modulesQuery.refetch()} />
   }

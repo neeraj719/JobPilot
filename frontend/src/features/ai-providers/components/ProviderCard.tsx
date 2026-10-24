@@ -1,13 +1,15 @@
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, PlugZap, RefreshCw, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ExternalLink, KeyRound, PlugZap, RefreshCw, Trash2, XCircle } from 'lucide-react'
 import * as React from 'react'
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
+import { SkeletonRegion } from '@/components/common/skeletons'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { SimpleTooltip } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
@@ -66,9 +68,10 @@ export function ProviderCard({ provider, runSensitive }: ProviderCardProps) {
 
   // Ollama: the cheap local probe (GET /api/tags through the API) is the status.
   let pill = credentialPill(provider, credential)
+  // While that probe runs, the status pill is a skeleton of the same size (no "Checking…" text).
+  const probing = isOllama && !credential && models.isLoading
   if (isOllama && !credential) {
-    if (models.isLoading) pill = { label: 'Checking…', tone: 'muted' }
-    else if (models.data?.live) pill = { label: `Running · ${models.data.models.length} model${models.data.models.length === 1 ? '' : 's'}`, tone: 'success' }
+    if (models.data?.live) pill = { label: `Running · ${models.data.models.length} model${models.data.models.length === 1 ? '' : 's'}`, tone: 'success' }
     else if (models.data?.error) pill = { label: 'Not running', tone: 'destructive' }
   }
 
@@ -153,7 +156,13 @@ export function ProviderCard({ provider, runSensitive }: ProviderCardProps) {
             </CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">{KIND_LABEL[provider.kind]}</p>
           </div>
-          <Pill pill={pill} />
+          {probing ? (
+            <SkeletonRegion label="Checking the local Ollama server">
+              <Skeleton className="h-[22px] w-28 rounded-full" />
+            </SkeletonRegion>
+          ) : (
+            <Pill pill={pill} />
+          )}
         </div>
         <CardDescription>{provider.description}</CardDescription>
       </CardHeader>
@@ -274,14 +283,14 @@ export function ProviderCard({ provider, runSensitive }: ProviderCardProps) {
 
       <CardFooter className="flex flex-wrap items-center gap-2 border-t pt-4">
         <SimpleTooltip label={provider.hosted ? 'Makes one free model-list request with your key' : 'Checks the server and model'} side="top">
-          <Button type="button" variant="outline" size="sm" onClick={() => void runTest()} disabled={test.isPending || !provider.allowed}>
-            {test.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <PlugZap aria-hidden />}
+          <Button type="button" variant="outline" size="sm" onClick={() => void runTest()} disabled={!provider.allowed} loading={test.isPending}>
+            {test.isPending ? null : <PlugZap aria-hidden />}
             Test connection
           </Button>
         </SimpleTooltip>
         {provider.supports_live_models ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => void onRefresh()} disabled={refresh.isPending || !provider.allowed}>
-            <RefreshCw className={refresh.isPending ? 'animate-spin' : undefined} aria-hidden /> Refresh models
+          <Button type="button" variant="ghost" size="sm" onClick={() => void onRefresh()} disabled={!provider.allowed} loading={refresh.isPending}>
+            {refresh.isPending ? null : <RefreshCw aria-hidden />} Refresh models
           </Button>
         ) : null}
         <div className="ml-auto flex gap-3 text-xs">

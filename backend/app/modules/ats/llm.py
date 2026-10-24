@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 TASK_ANALYZE_JD = "analyze_job_description"
 TASK_ANALYZE_FIT = "analyze_resume_fit"
 TASK_TAILOR = "tailor_resume"
+#: The suggestion polish of an ATS analysis (workflow ``analysis``). A tailoring run polishes its
+#: tailored analysis under :data:`TASK_TAILOR` (workflow ``generation``) instead.
+TASK_POLISH = "polish_suggestions"
 TASK_REVIEW = "review_resume"
 TASK_EXPLAIN = "explain_changes"
 
@@ -51,13 +54,18 @@ def system_prompt(task_rules: str) -> str:
 
 
 @contextlib.contextmanager
-def ai_user(user_id: uuid.UUID | None) -> Iterator[None]:
-    """Publish the acting user for provider resolution in a background thread."""
+def ai_user(user_id: uuid.UUID | None, *, target_override: Any = None) -> Iterator[None]:
+    """Publish the acting user (and their per-run model choice) in a background thread."""
     if user_id is None:
         yield
         return
-    with context.ai_user(user_id):
+    with context.ai_user(user_id, target_override=target_override):
         yield
+
+
+def current_target_override() -> Any:
+    """The model picked for the current request (``ai.choice``), to hand to a thread."""
+    return context.current_target_override()
 
 
 # --------------------------------------------------------------------------- model calls
@@ -83,6 +91,7 @@ __all__ = [
     "TASK_ANALYZE_JD",
     "TASK_EXPLAIN",
     "TASK_REVIEW",
+    "TASK_POLISH",
     "TASK_TAILOR",
     "ai_user",
     "llm_json",

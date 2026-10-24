@@ -6,7 +6,6 @@ import { Link } from 'react-router-dom'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -24,6 +23,7 @@ import {
 import { ParsedDataPanel } from '@/features/resume/components/ParsedDataPanel'
 import { ResumeCard } from '@/features/resume/components/ResumeCard'
 import { ResumeInsights } from '@/features/resume/components/ResumeInsights'
+import { ResumeListCardsSkeleton, ResumePanelsSkeleton } from '@/features/resume/components/ResumeSkeletons'
 import { ResumeUploadCard } from '@/features/resume/components/ResumeUploadCard'
 import { ResumeVersionHistory } from '@/features/resume/components/ResumeVersionHistory'
 import type { ResumeRead } from '@/types/api'
@@ -154,7 +154,7 @@ export default function ResumePage() {
           <ResumeUploadCard isFirstResume={resumes.length === 0} onUploaded={(id) => setSelectedId(id)} />
 
           {resumesQuery.isLoading ? (
-            <LoadingState variant="cards" rows={2} />
+            <ResumeListCardsSkeleton count={2} />
           ) : resumesQuery.error ? (
             <ErrorState
               error={resumesQuery.error}
@@ -196,7 +196,7 @@ export default function ResumePage() {
               <ResumeVersionHistory resumeId={selected.id} currentVersion={selected.current_version} />
             </>
           ) : resumesQuery.isLoading ? (
-            <LoadingState variant="cards" rows={2} />
+            <ResumePanelsSkeleton />
           ) : (
             <EmptyState
               icon={FileText}

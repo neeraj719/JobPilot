@@ -176,6 +176,9 @@ export interface BulletSuggestions {
   candidates: BulletCandidate[]
   note: string | null
   ai_used: boolean
+  /** The model that answered (`null` when only the rules ran). */
+  ai_provider?: string | null
+  ai_model?: string | null
 }
 
 export type WritingField = 'summary' | 'bullet' | 'headline' | 'achievement' | 'description'
@@ -185,12 +188,16 @@ export interface ImprovedText {
   changed: boolean
   source: 'rule' | 'ai'
   reason: string | null
+  ai_provider?: string | null
+  ai_model?: string | null
 }
 
 export interface SummaryDraft {
   text: string | null
   source: 'rule' | 'ai'
   reason: string | null
+  ai_provider?: string | null
+  ai_model?: string | null
 }
 
 export type ExportFormat = 'pdf' | 'docx'

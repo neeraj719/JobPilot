@@ -13,9 +13,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
+import { TopProgressBar } from '@/components/common/skeletons'
 import {
   useApplication,
   useApplicationEvents,
@@ -44,29 +44,13 @@ import { ScreenshotGallery, collectScreenshotNames } from '@/features/applicatio
 import { StatusChangeDialog } from '@/features/applications/components/StatusChangeDialog'
 import { TimelineTab } from '@/features/applications/components/TimelineTab'
 import { UserInputCard } from '@/features/applications/components/UserInputCard'
+import { ApplicationDetailSkeleton } from '@/features/applications/components/ApplicationSkeletons'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
 import { APPLICATION_STATUS_LABELS } from '@/lib/utils'
 import type { AnswerUpdate, ApplicationPatch, ApplicationStatus } from '@/types/api'
 
 const RUNNING_POLL_MS = 3_000
-
-function DetailSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-start gap-4">
-        <Skeleton className="size-14 rounded-lg" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-6 w-64" />
-          <Skeleton className="h-4 w-48" />
-        </div>
-      </div>
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-96 w-full" />
-    </div>
-  )
-}
 
 export default function ApplicationDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -135,7 +119,7 @@ export default function ApplicationDetailPage() {
   if (!application) {
     return (
       <PageContainer>
-        <DetailSkeleton />
+        <ApplicationDetailSkeleton />
       </PageContainer>
     )
   }
@@ -282,11 +266,11 @@ export default function ApplicationDetailPage() {
             Back to queue
           </Link>
         </Button>
-        {applicationQuery.isFetching ? (
-          <span className="text-xs text-muted-foreground" aria-live="polite">
-            {isRunning ? 'Watching the run…' : 'Refreshing…'}
-          </span>
-        ) : null}
+        {/* Background refresh / live polling: a thin bar, the content stays put. */}
+        <TopProgressBar active={applicationQuery.isFetching} className="w-24 rounded-full" />
+        <span className="sr-only" aria-live="polite">
+          {applicationQuery.isFetching ? (isRunning ? 'Watching the run' : 'Refreshing') : ''}
+        </span>
       </div>
 
       {applicationQuery.isError ? (

@@ -1,6 +1,7 @@
 import { CheckCircle2, HelpCircle, PauseCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+import { SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { ReviewCounts } from '@/features/applications/api'
@@ -38,11 +39,11 @@ export interface QueueSummaryProps {
 export function QueueSummary({ counts, loading = false, className }: QueueSummaryProps) {
   if (loading && !counts) {
     return (
-      <div className={cn('flex flex-wrap gap-2', className)}>
+      <SkeletonRegion label="Loading the review counts" className={cn('flex flex-wrap gap-2', className)}>
         {CHIPS.map((chip) => (
-          <Skeleton key={chip.key} className="h-9 w-40 rounded-full" />
+          <Skeleton key={chip.key} className="h-[34px] w-40 rounded-full" />
         ))}
-      </div>
+      </SkeletonRegion>
     )
   }
 

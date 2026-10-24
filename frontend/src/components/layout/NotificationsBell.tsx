@@ -69,13 +69,27 @@ export function NotificationsBell() {
 
         <ScrollArea className="max-h-96">
           {list.isLoading ? (
-            <div className="space-y-3 p-4">
-              {Array.from({ length: 3 }, (_, index) => (
-                <div key={index} className="space-y-2">
-                  <Skeleton className="h-3 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              ))}
+            <div role="status" aria-busy="true">
+              <span className="sr-only">Loading notifications</span>
+              {/* Same rows as the list below: unread dot, title, body, time. */}
+              <ul className="divide-y divide-border" aria-hidden>
+                {Array.from({ length: 3 }, (_, index) => (
+                  <li key={index} className="flex items-start gap-3 px-4 py-3">
+                    <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex h-5 items-center">
+                        <Skeleton className={index % 2 ? 'h-3.5 w-1/2' : 'h-3.5 w-3/4'} />
+                      </div>
+                      <div className="flex h-4 items-center">
+                        <Skeleton className="h-3 w-full" />
+                      </div>
+                      <div className="flex h-4 items-center">
+                        <Skeleton className="h-2.5 w-16" />
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : items.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">No notifications yet.</p>

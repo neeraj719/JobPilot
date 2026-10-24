@@ -2,11 +2,11 @@ import { Inbox, Link2, Sparkles } from 'lucide-react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn, truncate } from '@/lib/utils'
 import { formatApiRelative } from '@/features/automation/datetime'
 import { ClassificationBadge } from '@/features/emails/components/ClassificationBadge'
 import type { ApplicationRead, EmailMessageRead, UUID } from '@/types/api'
+import { EmailListSkeleton } from '@/features/emails/components/EmailSkeletons'
 
 export interface EmailListProps {
   emails: EmailMessageRead[] | undefined
@@ -42,18 +42,7 @@ export function EmailList({
 }: EmailListProps) {
   if (loading) {
     return (
-      <ul className="divide-y divide-border" aria-busy="true">
-        {Array.from({ length: 6 }, (_, index) => (
-          <li key={index} className="space-y-2 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-3 w-12" />
-            </div>
-            <Skeleton className="h-3.5 w-3/4" />
-            <Skeleton className="h-3 w-full" />
-          </li>
-        ))}
-      </ul>
+      <EmailListSkeleton rows={6} />
     )
   }
 

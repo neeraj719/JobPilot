@@ -76,7 +76,13 @@ function SuggestionRow({ suggestion, busy, readOnly, onApply, onIgnore }: RowPro
 
   return (
     <li
-      className={cn('rounded-lg border border-border p-3', handled && 'opacity-75', suggestion.safe && !handled && 'border-success/30')}
+      className={cn(
+        'rounded-xl p-4 transition-shadow hover:shadow-sm',
+        // AI-written content sits on the soft brand gradient with a soft gradient edge (v2).
+        aiPolished && !handled ? 'border-gradient-soft' : 'border border-border bg-card',
+        handled && 'opacity-75',
+        suggestion.safe && !handled && !aiPolished && 'border-success/30',
+      )}
       data-suggestion-id={suggestion.id}
     >
       <div className="flex flex-wrap items-center gap-2">

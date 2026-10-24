@@ -6,7 +6,6 @@ import { useForm } from 'react-hook-form'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { SourceBadge } from '@/components/common/SourceBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,6 +20,7 @@ import { useBrowserSessions, useChangePassword, useRevokeBrowserSession } from '
 import { DeviceSessionsCard } from '@/features/settings/components/DeviceSessionsCard'
 import { passwordSchema, type PasswordValues } from '@/features/settings/schema'
 import type { BrowserSessionRead } from '@/types/api'
+import { SessionRowsSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 const FORM_ID = 'change-password-form'
 
@@ -121,7 +121,7 @@ function BrowserSessionsCard() {
       </CardHeader>
       <CardContent>
         {sessions.isLoading ? (
-          <LoadingState variant="list" rows={2} />
+          <SessionRowsSkeleton rows={2} badges label="Loading stored browser sessions" />
         ) : sessions.error ? (
           <ErrorState error={sessions.error} size="sm" onRetry={() => void sessions.refetch()} />
         ) : (sessions.data?.length ?? 0) === 0 ? (
@@ -180,8 +180,8 @@ function SignOutCard() {
   const confirm = async () => {
     setBusy(true)
     try {
-      await logout()
-      toast.success('Signed out')
+      // Toasts "Signed out"; the route guard then lands on the landing page.
+      await logout('user')
     } catch (error) {
       toast.error('Could not sign out', { description: errorMessage(error) })
     } finally {

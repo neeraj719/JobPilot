@@ -5,7 +5,7 @@
  * the deterministic result is shown at once. Every write that changes a resume invalidates
  * the resume caches too, so My Resumes and the version history stay in step.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, saveBlob } from '@/lib/api'
 import { qk } from '@/lib/queryClient'
@@ -24,6 +24,7 @@ import type {
   JobTarget,
   JobTargetDetail,
   Methodology,
+  QuickTailorRequest,
   SnapshotCreate,
   SnapshotResult,
   TailorResult,
@@ -32,8 +33,16 @@ import type {
   TargetUpdate,
   UndoResult,
 } from '@/features/ats/types'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
 
 const POLL_MS = 1500
+
+/** Multipart form fields of the per-run model choice (`ai_provider` / `ai_model`). */
+function appendAiFields(form: FormData, ai?: WorkflowTarget) {
+  if (!ai) return
+  form.append('ai_provider', ai.provider)
+  form.append('ai_model', ai.model)
+}
 
 /* ------------------------------------------------------------------ methodology + JD */
 
@@ -47,19 +56,20 @@ export function useMethodology() {
 
 export function useParseJd() {
   return useMutation({
-    mutationFn: (body: { text: string; title?: string; company?: string; use_ai?: boolean }) =>
+    mutationFn: (body: { text: string; title?: string; company?: string; use_ai?: boolean; ai?: WorkflowTarget }) =>
       api.post<JdParseResult>('/ats/jd/parse', body),
   })
 }
 
 export function useUploadJd() {
   return useMutation({
-    mutationFn: ({ file, company, title, useAi }: { file: File; company?: string; title?: string; useAi?: boolean }) => {
+    mutationFn: ({ file, company, title, useAi, ai }: { file: File; company?: string; title?: string; useAi?: boolean; ai?: WorkflowTarget }) => {
       const form = new FormData()
       form.append('file', file)
       if (company) form.append('company', company)
       if (title) form.append('title', title)
       form.append('use_ai', String(Boolean(useAi)))
+      appendAiFields(form, ai)
       return api.upload<JdParseResult>('/ats/jd/upload', form)
     },
   })
@@ -67,7 +77,7 @@ export function useUploadJd() {
 
 export function useFetchJd() {
   return useMutation({
-    mutationFn: (body: { url?: string; board?: BoardPostingRef; use_ai?: boolean }) =>
+    mutationFn: (body: { url?: string; board?: BoardPostingRef; use_ai?: boolean; ai?: WorkflowTarget }) =>
       api.post<JdParseResult>('/ats/jd/fetch', body),
   })
 }
@@ -153,7 +163,7 @@ export function useAutoOptimize(analysisId: UUID) {
   const queryClient = useQueryClient()
   const invalidate = useResumeInvalidation()
   return useMutation({
-    mutationFn: (body: { mode: 'new_resume' | 'new_version'; name?: string }) =>
+    mutationFn: (body: { mode: 'new_resume' | 'new_version'; name?: string; ai?: WorkflowTarget }) =>
       api.post<AutoOptimizeResult>(`/ats/analyses/${analysisId}/auto-optimize`, body),
     onSuccess: (result) => {
       queryClient.setQueryData(qk.ats.analysis(result.analysis.id), result.analysis)
@@ -175,23 +185,29 @@ export function useUndoApply() {
   })
 }
 
-export function useRetryPolish(analysisId: UUID) {
+export function useRetryPolish(analysisId: UUID, task?: 'polish_suggestions' | 'tailor_resume') {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => api.post<AtsAnalysis>(`/ats/analyses/${analysisId}/polish`),
+    mutationFn: (ai?: WorkflowTarget) =>
+      api.post<AtsAnalysis>(`/ats/analyses/${analysisId}/polish`, ai || task ? { ...(ai ? { ai } : {}), ...(task ? { task } : {}) } : undefined),
     onSuccess: (analysis) => queryClient.setQueryData(qk.ats.analysis(analysis.id), analysis),
   })
 }
 
 /* ------------------------------------------------------------------ targets */
 
-export function useTargets(params: TargetListParams) {
+/** Query options shared by `useTargets` and the hover prefetch. */
+export function targetsQuery(params: TargetListParams) {
   const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && !(Array.isArray(v) && v.length === 0)))
-  return useQuery({
+  return {
     queryKey: qk.ats.targets(clean),
     queryFn: () => api.get<PageResponse<JobTarget>>('/ats/targets', { params: clean as Record<string, string | number | string[]> }),
-    placeholderData: (previous) => previous,
-  })
+  }
+}
+
+export function useTargets(params: TargetListParams) {
+  // keepPreviousData: a new search keeps the current cards on screen until the next page lands.
+  return useQuery({ ...targetsQuery(params), placeholderData: keepPreviousData })
 }
 
 export function useTarget(id: UUID | null | undefined) {
@@ -247,9 +263,12 @@ export function useAddSnapshot(id: UUID) {
 export function useUploadSnapshot(id: UUID) {
   const invalidate = useTargetInvalidation()
   return useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: (input: File | { file: File; useAi?: boolean; ai?: WorkflowTarget }) => {
+      const { file, useAi, ai } = input instanceof File ? { file: input, useAi: false, ai: undefined } : input
       const form = new FormData()
       form.append('file', file)
+      if (useAi) form.append('use_ai', 'true')
+      appendAiFields(form, ai)
       return api.upload<SnapshotResult>(`/ats/targets/${id}/snapshot/upload`, form)
     },
     onSuccess: (result) => invalidate(result.target),
@@ -259,7 +278,8 @@ export function useUploadSnapshot(id: UUID) {
 export function useRefreshTarget(id: UUID) {
   const invalidate = useTargetInvalidation()
   return useMutation({
-    mutationFn: () => api.post<SnapshotResult>(`/ats/targets/${id}/refresh`),
+    mutationFn: (options?: { use_ai?: boolean; ai?: WorkflowTarget }) =>
+      api.post<SnapshotResult>(`/ats/targets/${id}/refresh`, options && (options.use_ai || options.ai) ? options : undefined),
     onSuccess: (result) => invalidate(result.target),
   })
 }
@@ -269,10 +289,43 @@ export function useTailor(id: UUID) {
   const invalidate = useResumeInvalidation()
   const invalidateTarget = useTargetInvalidation()
   return useMutation({
-    mutationFn: (body: { source_resume_id?: UUID; name?: string }) => api.post<TailorResult>(`/ats/targets/${id}/tailor`, body),
+    mutationFn: (body: { source_resume_id?: UUID; name?: string; ai?: WorkflowTarget }) => api.post<TailorResult>(`/ats/targets/${id}/tailor`, body),
     onSuccess: (result) => {
       queryClient.setQueryData(qk.ats.analysis(result.analysis.id), result.analysis)
       void queryClient.invalidateQueries({ queryKey: qk.ats.compare(id) })
+      invalidateTarget(result.target)
+      invalidate(result.resume.id)
+    },
+  })
+}
+
+/** `POST /ats/targets/{id}/tailor` for a target chosen at call time (the tailor flow's "another resume"). */
+export function useTailorTarget() {
+  const queryClient = useQueryClient()
+  const invalidate = useResumeInvalidation()
+  const invalidateTarget = useTargetInvalidation()
+  return useMutation({
+    mutationFn: ({ targetId, ...body }: { targetId: UUID; source_resume_id?: UUID; name?: string; ai?: WorkflowTarget }) =>
+      api.post<TailorResult>(`/ats/targets/${targetId}/tailor`, body),
+    onSuccess: (result) => {
+      queryClient.setQueryData(qk.ats.analysis(result.analysis.id), result.analysis)
+      void queryClient.invalidateQueries({ queryKey: qk.ats.compare(result.target.id) })
+      invalidateTarget(result.target)
+      invalidate(result.resume.id)
+    },
+  })
+}
+
+/** `POST /ats/targets/tailor`: JD + resume -> saved target + tailored copy, in one call. */
+export function useQuickTailor() {
+  const queryClient = useQueryClient()
+  const invalidate = useResumeInvalidation()
+  const invalidateTarget = useTargetInvalidation()
+  return useMutation({
+    mutationFn: (body: QuickTailorRequest) => api.post<TailorResult>('/ats/targets/tailor', body),
+    onSuccess: (result) => {
+      queryClient.setQueryData(qk.ats.analysis(result.analysis.id), result.analysis)
+      void queryClient.invalidateQueries({ queryKey: qk.ats.compare(result.target.id) })
       invalidateTarget(result.target)
       invalidate(result.resume.id)
     },

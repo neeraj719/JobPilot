@@ -2,11 +2,12 @@ import { BrainCircuit } from 'lucide-react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useAiProviders, useAiSettings } from '@/features/ai-providers/api'
+import { AiModelSettingsSkeleton } from '@/features/ai-providers/components/AiProvidersSkeleton'
+import { ModelPromptCard } from '@/features/ai-providers/components/ModelPromptCard'
 import { ProviderCard } from '@/features/ai-providers/components/ProviderCard'
 import { ReauthDialog, useReauthGate } from '@/features/ai-providers/components/ReauthGate'
 import { RoutingCard } from '@/features/ai-providers/components/RoutingCard'
@@ -37,7 +38,7 @@ export default function AiModelSettingsPage() {
         description="Choose which AI model writes, analyses and reviews your resumes — the free local model, or your own OpenAI, Gemini or Claude API key."
       />
       {loading ? (
-        <LoadingState variant="cards" rows={4} />
+        <AiModelSettingsSkeleton />
       ) : error ? (
         <ErrorState
           error={error}
@@ -66,6 +67,7 @@ export default function AiModelSettingsPage() {
             </div>
           </section>
 
+          <ModelPromptCard settings={settings.data} />
           <RoutingCard settings={settings.data} providers={catalog.data.providers} />
           <UsageCard />
         </div>

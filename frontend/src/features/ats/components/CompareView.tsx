@@ -1,7 +1,7 @@
 import { Bot, Info } from 'lucide-react'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { CompareViewSkeleton } from '@/features/ats/components/AtsSkeletons'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useCompare } from '@/features/ats/api'
@@ -40,7 +40,7 @@ function SideHeader({ side, label }: { side: CompareSide; label: string }) {
 /** Source vs tailored resume, side by side, with every change explained. */
 export function CompareView({ targetId }: { targetId: string }) {
   const query = useCompare(targetId)
-  if (query.isLoading) return <LoadingState rows={2} />
+  if (query.isLoading) return <CompareViewSkeleton />
   if (query.error || !query.data) return <ErrorState error={query.error} onRetry={() => void query.refetch()} size="sm" />
   const { source, tailored, summary, explanations } = query.data
   const a = parsed(source)

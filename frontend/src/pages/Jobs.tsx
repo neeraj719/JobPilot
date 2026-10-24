@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -20,6 +19,7 @@ import { JobCardItem } from '@/features/jobs/components/JobCardItem'
 import { JobDetailSheet } from '@/features/jobs/components/JobDetailSheet'
 import { JobFilters } from '@/features/jobs/components/JobFilters'
 import { JOBS_PAGE_SIZE, toJobListParams, useJobFilters } from '@/features/jobs/filters'
+import { JobGridSkeleton } from '@/features/jobs/components/JobsSkeletons'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
@@ -155,8 +155,8 @@ export default function JobsPage() {
         description="Every posting discovered across your platforms, deduplicated and scored against your resume."
         actions={
           <>
-            <Button variant="outline" onClick={() => void jobsQuery.refetch()} disabled={jobsQuery.isFetching}>
-              <RefreshCw className={jobsQuery.isFetching ? 'animate-spin' : undefined} />
+            <Button variant="outline" onClick={() => void jobsQuery.refetch()} loading={jobsQuery.isFetching}>
+              {jobsQuery.isFetching ? null : <RefreshCw />}
               Refresh
             </Button>
             <Button onClick={handleDiscover} loading={discover.isPending}>
@@ -207,7 +207,7 @@ export default function JobsPage() {
             <p className="text-sm text-muted-foreground" aria-live="polite">
               {formatNumber(page.total)} {page.total === 1 ? 'job' : 'jobs'}
               {activeCount > 0 ? ' matching your filters' : ''}
-              {jobsQuery.isFetching ? ' · updating…' : ''}
+              {jobsQuery.isFetching ? <span className="sr-only"> · updating</span> : null}
             </p>
           ) : null}
 
@@ -218,7 +218,7 @@ export default function JobsPage() {
           {jobsQuery.isError && !page ? (
             <ErrorState error={jobsQuery.error} onRetry={() => void jobsQuery.refetch()} />
           ) : showSkeleton ? (
-            <LoadingState variant="cards" rows={6} />
+            <JobGridSkeleton count={6} />
           ) : items.length === 0 ? (
             <EmptyState
               icon={Briefcase}

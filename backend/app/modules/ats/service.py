@@ -437,8 +437,12 @@ def run_analysis(
     weights: dict[str, float] | None = None,
     previous: AtsAnalysis | None = None,
     schedule_polish: bool = True,
+    polish_task: str = llm.TASK_POLISH,
 ) -> AtsAnalysis:
-    """Score ``resume`` (current version) against ``snapshot`` and store the analysis + suggestions."""
+    """Score ``resume`` (current version) against ``snapshot`` and store the analysis + suggestions.
+
+    ``polish_task`` names the AI task of the background polish (its workflow picks the model):
+    ``polish_suggestions`` (ATS analysis) by default, ``tailor_resume`` for a tailoring run."""
     started = time.monotonic()
     parsed = _require_analysable(resume)
     structured = StructuredJD.model_validate(snapshot.structured or {})
@@ -454,7 +458,11 @@ def run_analysis(
         parsed, raw_text, structured, score, facts=facts, profile_skills=profile.skills,
         profile_text=profile.text, profile_years=profile.years,
     )
-    polish = schedule_polish and llm.model_available(llm.TASK_TAILOR) and any(d.kind == "REPLACE_BULLET" for d in drafts)
+    # A tailoring run always gets its AI pass when a model answers (it rewrites the summary too);
+    # an ATS analysis only when there are bullet suggestions to polish.
+    polish = schedule_polish and llm.model_available(polish_task) and (
+        polish_task == llm.TASK_TAILOR or any(d.kind == "REPLACE_BULLET" for d in drafts)
+    )
     analysis = AtsAnalysis(
         user_id=user_id,
         resume_id=resume.id,
@@ -519,7 +527,7 @@ def run_analysis(
         },
     )
     if polish:
-        start_polish(analysis.id, user_id)
+        start_polish(analysis.id, user_id, task=polish_task)
     logger.info("ATS analysis %s: %d/100, %d suggestions, polish=%s", analysis.id, score.overall, len(drafts), polish)
     return analysis
 
@@ -745,6 +753,7 @@ def auto_optimize(
     *,
     mode: str = "new_resume",
     name: str | None = None,
+    polish_task: str = llm.TASK_POLISH,
 ) -> AutoOptimizeResult:
     """Apply every *safe* suggestion (never one that needs confirmation) to a new resume or version."""
     analysis = get_analysis(db, user_id, analysis_id)
@@ -820,7 +829,7 @@ def auto_optimize(
             "target_id": str(target.id) if target else None,
         },
     )
-    fresh = run_analysis(db, user_id, resume, snapshot, target=target, weights=analysis.weights, previous=analysis)
+    fresh = run_analysis(db, user_id, resume, snapshot, target=target, weights=analysis.weights, previous=analysis, polish_task=polish_task)
     return AutoOptimizeResult(
         mode=mode,  # type: ignore[arg-type]
         resume=resumes.resume_to_read(resume),
@@ -879,22 +888,42 @@ def undo_apply(db: Session, user_id: uuid.UUID, analysis_id: uuid.UUID) -> UndoR
     return UndoResult(resume=resumes.resume_to_read(resume), analysis=analysis_to_read(db, fresh, resume=resume), restored_version=restore_number)
 
 
-def retry_polish(db: Session, user_id: uuid.UUID, analysis_id: uuid.UUID) -> AnalysisRead:
-    """Run the model polish again (after a provider error the user fixed)."""
+def is_tailoring_analysis(db: Session, analysis: AtsAnalysis) -> bool:
+    """True for the first analysis of a tailored copy (the one its AI tailoring pass runs on)."""
+    if not analysis.previous_analysis_id:
+        return False
+    previous = db.get(AtsAnalysis, analysis.previous_analysis_id)
+    resume = db.get(Resume, analysis.resume_id)
+    return bool(
+        previous is not None and previous.resume_id != analysis.resume_id
+        and resume is not None and resume.kind == ResumeKind.TAILORED
+    )
+
+
+def retry_polish(db: Session, user_id: uuid.UUID, analysis_id: uuid.UUID, *, task: str | None = None) -> AnalysisRead:
+    """Run the model polish again (after a provider error the user fixed).
+
+    ``task`` ``tailor_resume`` re-runs the AI tailoring pass of a tailored copy (its accepted
+    rewrites are applied as a new version); omitted, it is inferred from the analysis."""
     analysis = get_analysis(db, user_id, analysis_id)
-    if not llm.model_available(llm.TASK_TAILOR):
+    if task is None:
+        task = llm.TASK_TAILOR if is_tailoring_analysis(db, analysis) else llm.TASK_POLISH
+    if not llm.model_available(task):
         raise ValidationFailed(
             "No AI model is configured, so the rule-based suggestions are final. Configure a model in AI Model Settings.",
             code="provider_not_configured",
         )
     if analysis.status == AtsAnalysisStatus.RUNNING and is_polishing(analysis.id):
         return analysis_to_read(db, analysis)
+    if task == llm.TASK_TAILOR:
+        # The AI tailoring rewrites the version this analysis scored; a copy edited since is not touched.
+        _check_current(analysis, resumes.get_resume(db, user_id, analysis.resume_id))
     analysis.status = AtsAnalysisStatus.RUNNING
     analysis.progress = 40
     analysis.error = None
     db.add(analysis)
     db.flush()
-    start_polish(analysis.id, user_id)
+    start_polish(analysis.id, user_id, task=task)
     return analysis_to_read(db, analysis)
 
 
@@ -916,15 +945,20 @@ def is_polishing(analysis_id: uuid.UUID | str) -> bool:
         return str(analysis_id) in _polishing
 
 
-def start_polish(analysis_id: uuid.UUID, user_id: uuid.UUID) -> threading.Thread | None:
-    """Polish in a daemon thread (idempotent: one thread per analysis)."""
+def start_polish(analysis_id: uuid.UUID, user_id: uuid.UUID, *, task: str | None = None) -> threading.Thread | None:
+    """Polish in a daemon thread (idempotent: one thread per analysis).
+
+    A per-run model choice of the current request (``ai.choice``) travels into the thread,
+    so the polish runs on the model the user picked for this analysis.
+    """
     key = str(analysis_id)
+    override = llm.current_target_override()
     with _polish_lock:
         if key in _polishing:
             return None
         _polishing.add(key)
     thread = threading.Thread(
-        target=_polish_thread, args=(analysis_id, user_id), name=f"jobpilot-ats-polish-{key[:8]}", daemon=True
+        target=_polish_thread, args=(analysis_id, user_id, override, task or llm.TASK_POLISH), name=f"jobpilot-ats-polish-{key[:8]}", daemon=True
     )
     try:
         thread.start()
@@ -935,18 +969,18 @@ def start_polish(analysis_id: uuid.UUID, user_id: uuid.UUID) -> threading.Thread
     return thread
 
 
-def _polish_thread(analysis_id: uuid.UUID, user_id: uuid.UUID) -> None:
+def _polish_thread(analysis_id: uuid.UUID, user_id: uuid.UUID, override: Any = None, task: str | None = None) -> None:
     from app.core.actor import actor_context
 
     try:
-        with actor_context(user_id), llm.ai_user(user_id):
+        with actor_context(user_id), llm.ai_user(user_id, target_override=override):
             deadline = time.monotonic() + POLISH_START_TIMEOUT
             while not _analysis_visible(analysis_id):
                 if time.monotonic() > deadline:
                     logger.info("ATS polish %s: analysis never became visible (request rolled back?)", analysis_id)
                     return
                 time.sleep(0.2)
-            polish_analysis(analysis_id)
+            polish_analysis(analysis_id, task=task or llm.TASK_POLISH)
     except Exception:  # noqa: BLE001 - a background thread must never raise into the void
         logger.exception("ATS polish %s crashed", analysis_id)
     finally:
@@ -961,7 +995,7 @@ def _analysis_visible(analysis_id: uuid.UUID) -> bool:
         return db.get(AtsAnalysis, analysis_id) is not None
 
 
-def _model_bullet(bullet: str, entry: dict[str, Any], structured: StructuredJD) -> str | None:
+def _model_bullet(bullet: str, entry: dict[str, Any], structured: StructuredJD, task: str = llm.TASK_POLISH) -> str | None:
     words = resume_apply._content_words(bullet)
     first = words[0] if words else ""
     verb_rule = (
@@ -981,18 +1015,26 @@ def _model_bullet(bullet: str, entry: dict[str, Any], structured: StructuredJD) 
         f"{verb_rule}\nReturn JSON: {{\"bullet\": \"<rewritten bullet>\"}}"
     )
     answer = llm.llm_json(
-        llm.TASK_TAILOR, prompt, schema=_BULLET_SCHEMA, system=llm.system_prompt(resume_apply.BULLET_SYSTEM), max_tokens=200
+        task, prompt, schema=_BULLET_SCHEMA, system=llm.system_prompt(resume_apply.BULLET_SYSTEM), max_tokens=200
     )
     text = " ".join(str((answer or {}).get("bullet") or "").split()).strip(" -•*")
     return (text.rstrip(" .;,") + ".") if text else None
 
 
-def polish_analysis(analysis_id: uuid.UUID) -> None:
+def polish_analysis(analysis_id: uuid.UUID, *, task: str = llm.TASK_POLISH) -> None:
     """Ask the model for better bullet rewrites; keep only guard-passing ones; mark the analysis DONE.
 
-    Each step is its own transaction so the UI's progress poll sees it move.
+    Each step is its own transaction so the UI's progress poll sees it move. A tailoring run
+    (``task == tailor_resume``) goes to :func:`app.modules.ats.tailoring.tailor_pass` instead,
+    which *applies* its guard-passing rewrites to the tailored copy as a new version.
     """
     from app.core.database import session_scope
+
+    if task == llm.TASK_TAILOR:
+        from app.modules.ats import tailoring
+
+        tailoring.tailor_pass(analysis_id, task=task)
+        return
 
     started = time.monotonic()
     with session_scope() as db:
@@ -1009,7 +1051,7 @@ def polish_analysis(analysis_id: uuid.UUID) -> None:
         ][:POLISH_MAX_BULLETS]
         user_id = analysis.user_id
     if stale:
-        _finish(analysis_id, started, error="The resume changed before the AI could polish these suggestions.")
+        _finish(analysis_id, started, error="The resume changed before the AI could polish these suggestions.", task=task)
         return
 
     error: str | None = None
@@ -1029,7 +1071,7 @@ def polish_analysis(analysis_id: uuid.UUID) -> None:
                 experience = parsed.get("experience") if isinstance(parsed.get("experience"), list) else []
                 entry = experience[int(match.group(1))] if match and int(match.group(1)) < len(experience) else {}
                 bullet = suggestion.before or ""
-                candidate = resume_apply.strip_filler(_model_bullet(bullet, entry if isinstance(entry, dict) else {}, structured), bullet)
+                candidate = resume_apply.strip_filler(_model_bullet(bullet, entry if isinstance(entry, dict) else {}, structured, task), bullet)
                 checks = dict(suggestion.checks or {})
                 if candidate and candidate.strip().rstrip(".") != bullet.strip().rstrip("."):
                     problem = resume_apply.bullet_problem(candidate, bullet, facts)
@@ -1050,18 +1092,18 @@ def polish_analysis(analysis_id: uuid.UUID) -> None:
             error = _safe_error(exc)
             logger.info("ATS polish %s stopped: %s", analysis_id, error)
             break
-    _finish(analysis_id, started, error=error)
+    _finish(analysis_id, started, error=error, task=task)
 
 
-def _safe_error(exc: Exception) -> str:
+def _safe_error(exc: Exception, *, prefix: str = "AI polish unavailable") -> str:
     message = getattr(exc, "message", None) or str(exc) or type(exc).__name__
-    return f"AI polish unavailable: {message}"[:300]
+    return f"{prefix}: {message}"[:300]
 
 
-def _finish(analysis_id: uuid.UUID, started: float, *, error: str | None) -> None:
+def _finish(analysis_id: uuid.UUID, started: float, *, error: str | None, task: str = llm.TASK_POLISH) -> None:
     from app.core.database import session_scope
 
-    provider, model = llm.model_info(llm.TASK_TAILOR)
+    provider, model = llm.model_info(task)
     with session_scope() as db:
         analysis = db.get(AtsAnalysis, analysis_id)
         if analysis is None:
@@ -1085,6 +1127,7 @@ __all__ = [
     "get_snapshot",
     "get_target",
     "ignore_suggestions",
+    "is_tailoring_analysis",
     "list_analyses",
     "load_profile",
     "polish_analysis",

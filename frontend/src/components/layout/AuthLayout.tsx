@@ -1,62 +1,88 @@
-import { Bot, Radar, ShieldCheck } from 'lucide-react'
+import { FileText, ScanSearch, ShieldCheck } from 'lucide-react'
 import * as React from 'react'
 
+import { AuthBrand } from '@/components/layout/AuthBrand'
+import { LogoMark } from '@/components/layout/Sidebar'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
+import {
+  AUTH_CARD,
+  AUTH_CARD_HEAD,
+  AUTH_DESCRIPTION,
+  AUTH_FOOTER,
+  AUTH_FORM_COL,
+  AUTH_GRID,
+  AUTH_HERO,
+  AUTH_HERO_ART,
+  AUTH_HERO_ART_BOX,
+  AUTH_HERO_BODY,
+  AUTH_HERO_BRAND,
+  AUTH_HERO_BRAND_TEXT,
+  AUTH_HERO_CHIP,
+  AUTH_HERO_DEFAULT_TITLE,
+  AUTH_HERO_ITEM,
+  AUTH_HERO_ITEM_BODY,
+  AUTH_HERO_ITEM_TITLE,
+  AUTH_HERO_LIST,
+  AUTH_HERO_NOTE,
+  AUTH_HERO_NOTE_TEXT,
+  AUTH_HERO_TITLE,
+  AUTH_HIGHLIGHTS,
+  AUTH_TITLE,
+} from '@/components/layout/authShell'
+import { AuthHero3D } from '@/features/brand-3d/AuthHero3D'
+import { cn } from '@/lib/utils'
+import { loadHome, prefetchWhenIdle } from '@/modules/prefetch'
 
-const HIGHLIGHTS = [
-  {
-    icon: Radar,
-    title: 'Finds the right roles',
-    body: 'Discovers postings across platforms, removes duplicates and scores each one against your resume.',
-  },
-  {
-    icon: Bot,
-    title: 'Prepares the application',
-    body: 'Drafts answers from facts you provided — never invented — and fills the form for you.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'You approve every send',
-    body: 'Anything it cannot answer pauses for review. No CAPTCHA, OTP or 2FA is ever bypassed.',
-  },
-]
+const HIGHLIGHT_ICONS = [FileText, ScanSearch, ShieldCheck]
 
 export interface AuthLayoutProps {
   title: string
   description: string
   children: React.ReactNode
   footer?: React.ReactNode
+  /** The display headline on the brand hero (lg+). */
+  heroTitle?: string
 }
 
-/** Split layout shared by the sign-in and sign-up screens. */
-export function AuthLayout({ title, description, children, footer }: AuthLayoutProps) {
+/**
+ * Split layout shared by the sign-in, sign-up and role screens (v2). Every class and string
+ * that decides a box comes from `authShell.ts`, which `AuthSkeleton` renders too — so the
+ * skeleton has this page's exact geometry and nothing moves when the chunk arrives.
+ */
+export function AuthLayout({ title, description, children, footer, heroTitle = AUTH_HERO_DEFAULT_TITLE }: AuthLayoutProps) {
+  // Signing in leads to the launcher: fetch its chunk while the visitor types.
+  React.useEffect(() => prefetchWhenIdle(loadHome), [])
   return (
-    <div className="grid min-h-svh lg:grid-cols-2">
-      <div className="relative hidden flex-col justify-between bg-gradient-to-br from-[hsl(var(--hero-from))] to-[hsl(var(--hero-to))] p-10 text-white lg:flex">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-white/15">
-            <svg viewBox="0 0 24 24" className="size-5" fill="currentColor" aria-hidden>
-              <path d="M20.3 3.9 5.6 9.8c-.9.4-.9 1.6 0 2l5.1 2.2 2.3 5.2c.4.9 1.6.8 2-.1l5.9-14.3c.3-.8-.4-1.5-1.2-1.2Z" />
-            </svg>
-          </span>
-          <span className="text-lg font-semibold">JobPilot AI</span>
+    <div className={AUTH_GRID}>
+      {/* Brand hero: the brand gradient mesh (`.bg-hero`), a glow, the interactive 3D object
+          (lazy chunk, static still as fallback) and the pitch. Identical in both themes. */}
+      <div className={AUTH_HERO} data-auth-hero-panel="">
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-3/4 bg-[radial-gradient(closest-side,hsl(var(--glow-brand)/0.32),transparent)]" />
+        <div aria-hidden className="pointer-events-none absolute bottom-0 left-0 h-1/2 w-2/3 bg-[radial-gradient(closest-side,hsl(var(--gradient-to)/0.28),transparent)]" />
+
+        <div className={AUTH_HERO_BRAND}>
+          <LogoMark className="size-9 ring-hero-foreground/20 [&>svg]:size-5" />
+          <span className={AUTH_HERO_BRAND_TEXT}>JobPilot AI</span>
         </div>
 
-        <div className="space-y-8">
-          <h2 className="max-w-md text-3xl font-semibold leading-tight text-balance">
-            Your job search, running in the background.
-          </h2>
-          <ul className="space-y-6">
-            {HIGHLIGHTS.map((item) => {
-              const Icon = item.icon
+        <div className={AUTH_HERO_ART}>
+          <AuthHero3D className={AUTH_HERO_ART_BOX} />
+        </div>
+        <p className="sr-only">Illustration: a resume card with a match score chip and a check badge.</p>
+
+        <div className={AUTH_HERO_BODY} data-auth-hero-text="">
+          <h2 className={AUTH_HERO_TITLE}>{heroTitle}</h2>
+          <ul className={AUTH_HERO_LIST}>
+            {AUTH_HIGHLIGHTS.map((item, index) => {
+              const Icon = HIGHLIGHT_ICONS[index] ?? FileText
               return (
-                <li key={item.title} className="flex gap-3">
-                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/15">
+                <li key={item.title} className={AUTH_HERO_ITEM}>
+                  <span className={cn(AUTH_HERO_CHIP, 'bg-hero-foreground/10 ring-1 ring-inset ring-hero-foreground/15 backdrop-blur-sm')}>
                     <Icon className="size-4" aria-hidden />
                   </span>
-                  <span className="space-y-1">
-                    <span className="block text-sm font-semibold">{item.title}</span>
-                    <span className="block max-w-sm text-sm text-white/75">{item.body}</span>
+                  <span className="space-y-0.5">
+                    <span className={AUTH_HERO_ITEM_TITLE}>{item.title}</span>
+                    <span className={cn(AUTH_HERO_ITEM_BODY, 'text-hero-muted')}>{item.body}</span>
                   </span>
                 </li>
               )
@@ -64,22 +90,24 @@ export function AuthLayout({ title, description, children, footer }: AuthLayoutP
           </ul>
         </div>
 
-        <p className="text-xs text-white/70">
-          Applications are only submitted after you approve them.
-        </p>
+        <p className={cn(AUTH_HERO_NOTE, 'text-hero-muted')}>{AUTH_HERO_NOTE_TEXT}</p>
       </div>
 
-      <div className="relative flex items-center justify-center px-4 py-12 sm:px-8">
-        <div className="absolute right-4 top-4">
+      {/* Form side: soft brand glows behind a glass card. */}
+      <div className={AUTH_FORM_COL}>
+        <div aria-hidden className="pointer-events-none absolute right-0 top-0 h-1/2 w-2/3 bg-[radial-gradient(closest-side,hsl(var(--glow-brand)/0.2),transparent)]" />
+        <div aria-hidden className="pointer-events-none absolute bottom-0 left-0 h-1/2 w-2/3 bg-[radial-gradient(closest-side,hsl(var(--gradient-to)/0.12),transparent)]" />
+        <div className="absolute right-4 top-4 z-10">
           <ThemeToggle />
         </div>
-        <div className="w-full max-w-sm space-y-6">
-          <div className="space-y-2 text-center lg:text-left">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            <p className="text-sm text-muted-foreground">{description}</p>
+        <div className={AUTH_CARD} data-auth-card="">
+          <div className={AUTH_CARD_HEAD}>
+            <AuthBrand />
+            <h1 className={AUTH_TITLE}>{title}</h1>
+            <p className={AUTH_DESCRIPTION}>{description}</p>
           </div>
           {children}
-          {footer ? <div className="text-center text-sm text-muted-foreground">{footer}</div> : null}
+          {footer ? <div className={AUTH_FOOTER}>{footer}</div> : null}
         </div>
       </div>
     </div>

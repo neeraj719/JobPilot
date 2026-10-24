@@ -3,6 +3,7 @@
  * Kept in the feature (not `types/api.ts`) per the resume-studio plan.
  */
 import type { ISODateString, ResumeRead, UUID, WorkMode } from '@/types/api'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
 
 export const JOB_TARGET_STATUSES = [
   'SAVED',
@@ -228,6 +229,8 @@ export interface AnalysisCreate {
   resume_id: UUID
   jd: JdInput
   weights?: Record<string, number>
+  /** The model picked for this run (`GET /ai/choices`); omitted = the routing. */
+  ai?: WorkflowTarget
 }
 
 export interface AppliedItem {
@@ -349,6 +352,7 @@ export interface JobTargetDetail extends JobTarget {
 }
 
 export interface SnapshotCreate {
+  ai?: WorkflowTarget
   source: 'PASTED' | 'URL' | 'BOARD'
   text?: string
   url?: string
@@ -391,6 +395,36 @@ export interface TailorResult {
   source_analysis_id: UUID
   source_score: number | null
   explanations: Explanation[]
+  target_id: UUID | null
+  tailored_resume_id: UUID | null
+  analysis_id: UUID | null
+  /** `running`: the AI rewrite runs on `analysis_id` (poll it); `rules_only`: the copy is final. */
+  ai_pass: 'running' | 'rules_only'
+}
+
+/** `POST /ats/targets/tailor` — paste a JD, pick a resume, get a tailored copy. */
+export interface QuickTailorRequest {
+  jd: SnapshotCreate & { url?: string | null }
+  /** Omitted = the default resume. */
+  source_resume_id?: UUID
+  company_name?: string
+  role_title?: string
+  name?: string
+  ai?: WorkflowTarget
+}
+
+/** One applied change on a tailored copy (`CompareResult.changes`). */
+export interface TailorChange {
+  group: 'skills' | 'summary' | 'bullets' | 'sections'
+  kind: SuggestionKind
+  title: string
+  before: string | null
+  after: string | null
+  rationale: string
+  source: 'AI' | 'SYSTEM'
+  target_path: string | null
+  applied_version: number | null
+  suggestion_ids: UUID[]
 }
 
 export interface FieldChange {
@@ -415,6 +449,9 @@ export interface CompareResult {
   summary: { added: number; removed: number; changed: number }
   explanations: Explanation[]
   diff_provider: 'ats' | 'builder'
+  changes: TailorChange[]
+  /** AI rewrites the guards refused (never applied). */
+  ai_rejected: number
 }
 
 export interface AtsSummary {

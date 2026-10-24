@@ -2,6 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   Copy,
+  Crosshair,
   Download,
   FileText,
   FileType2,
@@ -96,6 +97,13 @@ export function StudioResumeCard({
                   <PencilRuler aria-hidden /> Edit in editor
                 </Link>
               </DropdownMenuItem>
+              {!archived ? (
+                <DropdownMenuItem asChild>
+                  <Link to={`/resume/targets/new?resume=${resume.id}`}>
+                    <Crosshair aria-hidden /> Optimize for a job
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onSelect={onRename}>
                 <PencilLine aria-hidden /> Rename
               </DropdownMenuItem>

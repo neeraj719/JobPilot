@@ -1,73 +1,43 @@
-import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
+import {
+  CardGridSkeleton,
+  ChartSkeleton,
+  DetailSkeleton,
+  FormSkeleton,
+  ListSkeleton,
+  SkeletonRegion,
+  StatRowSkeleton,
+  TableSkeleton,
+} from '@/components/common/skeletons'
 
 export interface LoadingStateProps {
-  /** Number of placeholder rows. */
+  /** Number of placeholder rows / cards. */
   rows?: number
   className?: string
-  /** `list` = stacked cards, `table` = header + rows, `cards` = responsive grid. */
-  variant?: 'list' | 'table' | 'cards'
+  /**
+   * The shape of what is loading: `list` stacked rows, `table` header + rows, `cards` a grid,
+   * `stats` a KPI row, `form` labelled fields, `detail` main + side columns, `chart` a plot.
+   */
+  variant?: 'list' | 'table' | 'cards' | 'stats' | 'form' | 'detail' | 'chart'
+  /** Table columns (variant `table`). */
+  cols?: number
+  /** What is loading, for screen readers ("Loading resumes"). */
+  label?: string
 }
 
-/** Skeleton placeholder shown while a query is in flight. */
-export function LoadingState({ rows = 5, className, variant = 'list' }: LoadingStateProps) {
-  if (variant === 'table') {
-    return (
-      <div className={cn('space-y-2', className)} aria-busy="true" aria-live="polite">
-        <div className="flex items-center gap-4 border-b border-border pb-2">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-3 flex-1" />
-          ))}
-        </div>
-        {Array.from({ length: rows }, (_, index) => (
-          <div key={index} className="flex items-center gap-4 py-2">
-            {Array.from({ length: 4 }, (_, cell) => (
-              <Skeleton key={cell} className="h-4 flex-1" />
-            ))}
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  if (variant === 'cards') {
-    return (
-      <div
-        className={cn('grid gap-4 sm:grid-cols-2 xl:grid-cols-3', className)}
-        aria-busy="true"
-        aria-live="polite"
-      >
-        {Array.from({ length: rows }, (_, index) => (
-          <Card key={index}>
-            <CardContent className="space-y-3 p-5">
-              <Skeleton className="h-4 w-2/3" />
-              <Skeleton className="h-3 w-1/3" />
-              <div className="flex gap-2 pt-2">
-                <Skeleton className="h-5 w-16 rounded-full" />
-                <Skeleton className="h-5 w-16 rounded-full" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    )
-  }
-
+/**
+ * Skeleton placeholder shown while a query is in flight — shaped like the content, never a
+ * spinner. A thin wrapper over the composites in `skeletons.tsx`, kept for its API.
+ */
+export function LoadingState({ rows = 5, className, variant = 'list', cols = 4, label = 'Loading' }: LoadingStateProps) {
   return (
-    <div className={cn('space-y-3', className)} aria-busy="true" aria-live="polite">
-      {Array.from({ length: rows }, (_, index) => (
-        <Card key={index}>
-          <CardContent className="flex items-center gap-4 p-4">
-            <Skeleton className="size-10 shrink-0 rounded-lg" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-4 w-1/3" />
-              <Skeleton className="h-3 w-1/2" />
-            </div>
-            <Skeleton className="h-6 w-20 rounded-full" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <SkeletonRegion label={label} className={className}>
+      {variant === 'table' ? <TableSkeleton rows={rows} cols={cols} /> : null}
+      {variant === 'cards' ? <CardGridSkeleton count={rows} /> : null}
+      {variant === 'stats' ? <StatRowSkeleton count={rows > 4 ? 4 : rows} /> : null}
+      {variant === 'form' ? <FormSkeleton fields={rows} /> : null}
+      {variant === 'detail' ? <DetailSkeleton /> : null}
+      {variant === 'chart' ? <ChartSkeleton /> : null}
+      {variant === 'list' ? <ListSkeleton rows={rows} /> : null}
+    </SkeletonRegion>
   )
 }

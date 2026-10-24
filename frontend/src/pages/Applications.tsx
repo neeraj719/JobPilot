@@ -290,9 +290,9 @@ export default function ApplicationsPage() {
             <Button
               variant="outline"
               onClick={() => void applicationsQuery.refetch()}
-              disabled={applicationsQuery.isFetching}
+              loading={applicationsQuery.isFetching}
             >
-              <RefreshCw className={applicationsQuery.isFetching ? 'animate-spin' : undefined} />
+              {applicationsQuery.isFetching ? null : <RefreshCw />}
               Refresh
             </Button>
           </>

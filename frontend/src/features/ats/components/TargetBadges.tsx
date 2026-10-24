@@ -7,7 +7,15 @@ import type { JobTarget, JobTargetStatus } from '@/features/ats/types'
 
 export function TargetStatusBadge({ status, className }: { status: JobTargetStatus; className?: string }) {
   return (
-    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', TARGET_STATUS_CLASSES[status], className)}>
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium',
+        TARGET_STATUS_CLASSES[status],
+        className,
+      )}
+    >
+      {/* Status dot + label (colour is never the only cue). */}
+      <span className="size-1.5 shrink-0 rounded-full bg-current opacity-80" aria-hidden />
       {TARGET_STATUS_LABELS[status]}
     </span>
   )
@@ -40,8 +48,12 @@ export function TargetDueBadges({ target }: { target: Pick<JobTarget, 'deadline'
           key={key}
           title={title}
           className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
-            tone === 'late' ? 'bg-destructive/10 text-destructive' : tone === 'warn' ? 'bg-warning/15 text-foreground' : 'bg-primary/10 text-primary',
+            'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium',
+            tone === 'late'
+              ? 'bg-destructive-soft text-destructive-soft-foreground'
+              : tone === 'warn'
+                ? 'bg-warning-soft text-warning-soft-foreground'
+                : 'bg-info-soft text-info-soft-foreground',
           )}
         >
           <Icon className="size-3" aria-hidden />

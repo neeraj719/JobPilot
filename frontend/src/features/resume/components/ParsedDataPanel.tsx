@@ -18,6 +18,8 @@ import { useReparseResume, useSaveParsedData } from '@/features/resume/api'
 import { useSyncDefaults } from '@/features/profile/useSyncDefaults'
 import { parsedResumeDefaults, parsedResumeSchema, toParsedResume, type ParsedResumeValues } from '@/features/resume/schema'
 import type { ResumeRead } from '@/types/api'
+import { AiRunButton } from '@/features/ai-providers/components/AiRunButton'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
 
 export interface ParsedDataPanelProps {
   resume: ResumeRead
@@ -66,11 +68,11 @@ export function ParsedDataPanel({ resume }: ParsedDataPanelProps) {
     }
   })
 
-  const onReparse = async () => {
+  const onReparse = async (ai?: WorkflowTarget) => {
     if ((resume.current_version ?? 1) > 1 && !window.confirm('Re-running extraction reads your uploaded file again and replaces the information below, including edits and applied suggestions. The current version stays in the history so you can restore it. Continue?')) return
     try {
       const previous = resume.current_version ?? 1
-      const updated = await reparse.mutateAsync(resume.id)
+      const updated = await reparse.mutateAsync({ id: resume.id, ai })
       const saved = (updated.current_version ?? 1) > previous
       toast[updated.parse_status === 'PARSED' ? 'success' : 'warning'](
         updated.parse_status === 'PARSED' ? 'Extraction re-run' : 'Extraction did not finish',
@@ -99,10 +101,19 @@ export function ParsedDataPanel({ resume }: ParsedDataPanelProps) {
             version — nothing is overwritten.
           </CardDescription>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={onReparse} loading={reparse.isPending}>
+        <AiRunButton
+          task="parse_resume"
+          context="Your resume text"
+          type="button"
+          variant="outline"
+          size="sm"
+          onRun={(ai) => onReparse(ai)}
+          loading={reparse.isPending}
+          wrapperClassName="sm:items-end"
+        >
           <RefreshCw aria-hidden />
           Re-run extraction
-        </Button>
+        </AiRunButton>
       </CardHeader>
 
       <CardContent className="space-y-6">

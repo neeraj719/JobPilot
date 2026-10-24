@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
+import { CardSkeleton } from '@/components/common/skeletons'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -210,13 +211,22 @@ export default function AutomationPage() {
             />
           </div>
         </>
-      ) : !statusQuery.isLoading && !runsQuery.isLoading ? (
+      ) : statusQuery.isLoading || runsQuery.isLoading ? (
+        // Until we know whether a run exists, hold the run section's shape.
+        <>
+          <RunSummary run={undefined} loading />
+          <div className="grid gap-4 lg:grid-cols-5">
+            <RunPipeline run={undefined} loading className="lg:col-span-3" />
+            <CardSkeleton lines={5} className="lg:col-span-2" />
+          </div>
+        </>
+      ) : (
         <EmptyState
           icon={Bot}
           title="No automation runs yet"
           description="Press “Run now” above to search every enabled platform, match the results to your resume and prepare applications for your approval."
         />
-      ) : null}
+      )}
 
       <Card>
         <CardHeader className="pb-3">

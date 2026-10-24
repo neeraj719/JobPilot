@@ -49,10 +49,10 @@ export function UserMenu() {
   async function handleLogout() {
     setPending(true)
     try {
-      await logout()
-      queryClient.clear()
-      toast.success('Signed out')
-      navigate('/login', { replace: true })
+      // Clears the session, the query cache and the persisted copy, toasts "Signed out" and
+      // tells the other tabs; the landing page is the destination.
+      await logout('user')
+      navigate('/', { replace: true })
     } finally {
       setPending(false)
     }

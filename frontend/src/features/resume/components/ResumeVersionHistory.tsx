@@ -2,7 +2,7 @@ import { History } from 'lucide-react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
+import { VersionListSkeleton } from '@/features/resume/components/ResumeSkeletons'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatDateTime, formatRelative } from '@/lib/utils'
@@ -36,7 +36,7 @@ export function ResumeVersionHistory({ resumeId, currentVersion }: ResumeVersion
       </CardHeader>
       <CardContent>
         {versions.isLoading ? (
-          <LoadingState variant="list" rows={3} />
+          <VersionListSkeleton rows={3} />
         ) : versions.error ? (
           <ErrorState error={versions.error} size="sm" onRetry={() => void versions.refetch()} />
         ) : (versions.data?.length ?? 0) === 0 ? (

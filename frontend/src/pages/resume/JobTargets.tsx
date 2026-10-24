@@ -1,10 +1,9 @@
-import { Crosshair, FileCheck2, LayoutGrid, List, Plus, Search } from 'lucide-react'
+import { Crosshair, FileCheck2, LayoutGrid, List, Plus, Search, Sparkles } from 'lucide-react'
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -17,6 +16,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { cn, formatDate, formatRelative } from '@/lib/utils'
 import { useTargets } from '@/features/ats/api'
 import { TargetDueBadges, TargetStatusBadge } from '@/features/ats/components/TargetBadges'
+import { TargetBoardSkeleton, TargetTableSkeleton } from '@/features/ats/components/AtsSkeletons'
 import { TargetFormDialog } from '@/features/ats/components/TargetFormDialog'
 import { scoreTone, TARGET_STATUS_LABELS, TONE_TEXT } from '@/features/ats/labels'
 import { JOB_TARGET_STATUSES, type JobTarget, type JobTargetStatus } from '@/features/ats/types'
@@ -24,31 +24,35 @@ import { JOB_TARGET_STATUSES, type JobTarget, type JobTargetStatus } from '@/fea
 const VIEW_KEY = 'jobpilot.ats.targetsView'
 
 function Score({ target }: { target: JobTarget }) {
-  if (target.last_score === null) return <span className="text-xs text-muted-foreground">Not analysed</span>
+  if (target.last_score === null) return <span className="whitespace-nowrap text-xs text-muted-foreground">Not analysed</span>
   return (
-    <span className={cn('text-sm font-semibold tabular-nums', TONE_TEXT[scoreTone(target.last_score)])} title="Estimated ATS compatibility">
+    <span className={cn('whitespace-nowrap text-sm font-semibold tabular-nums', TONE_TEXT[scoreTone(target.last_score)])} title="Estimated ATS compatibility">
       {target.last_score}
       <span className="text-[10px] font-normal text-muted-foreground"> est.</span>
     </span>
   )
 }
 
-function TargetCard({ target }: { target: JobTarget }) {
+/** Memoised list row: react-query keeps unchanged targets referentially equal across refetches. */
+const TargetCard = React.memo(function TargetCard({ target }: { target: JobTarget }) {
   return (
     <Link
       to={`/resume/targets/${target.id}`}
-      className="block rounded-lg border border-border bg-card p-3 shadow-sm transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="block rounded-lg border border-border bg-card p-3 shadow-xs transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{target.role_title}</p>
-          <p className="truncate text-xs text-muted-foreground">{target.company_name}</p>
-        </div>
-        <Score target={target} />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium" title={target.role_title}>
+          {target.role_title}
+        </p>
+        <p className="truncate text-xs text-muted-foreground">{target.company_name}</p>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        <Score target={target} />
         {target.tailored_resume ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] text-success" title={target.tailored_resume.name}>
+          <span
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-medium text-success-soft-foreground"
+            title={target.tailored_resume.name}
+          >
             <FileCheck2 className="size-3" aria-hidden />
             Tailored v{target.tailored_resume.current_version}
           </span>
@@ -60,18 +64,21 @@ function TargetCard({ target }: { target: JobTarget }) {
       ) : null}
     </Link>
   )
-}
+})
 
-function Board({ targets }: { targets: JobTarget[] }) {
+/** Memoised: typing in the search / company filters must not re-render every card. */
+const Board = React.memo(function Board({ targets }: { targets: JobTarget[] }) {
   const columns = JOB_TARGET_STATUSES.map((status) => ({ status, items: targets.filter((t) => t.status === status) }))
   return (
     <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-      <div className="grid min-w-[1100px] grid-cols-8 gap-3">
+      {/* Eight stages never fit legibly in one screen width: each column keeps a readable
+          minimum (11rem) and the board scrolls sideways instead of squeezing the cards. */}
+      <div className="grid grid-cols-[repeat(8,minmax(11rem,1fr))] gap-3">
         {columns.map(({ status, items }) => (
-          <section key={status} aria-label={TARGET_STATUS_LABELS[status]} className="flex min-h-40 flex-col gap-2 rounded-lg bg-muted/40 p-2">
-            <h2 className="flex items-center justify-between px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {TARGET_STATUS_LABELS[status]}
-              <span className="tabular-nums">{items.length}</span>
+          <section key={status} aria-label={TARGET_STATUS_LABELS[status]} className="flex min-h-40 flex-col gap-2 rounded-xl bg-surface-2 p-2">
+            <h2 className="flex min-h-8 items-center justify-between gap-2 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+              <span className="leading-tight">{TARGET_STATUS_LABELS[status]}</span>
+              <span className="rounded-full bg-card px-1.5 tabular-nums text-foreground shadow-xs">{items.length}</span>
             </h2>
             {items.map((target) => (
               <TargetCard key={target.id} target={target} />
@@ -81,9 +88,9 @@ function Board({ targets }: { targets: JobTarget[] }) {
       </div>
     </div>
   )
-}
+})
 
-function TargetTable({ targets }: { targets: JobTarget[] }) {
+const TargetTable = React.memo(function TargetTable({ targets }: { targets: JobTarget[] }) {
   const navigate = useNavigate()
   return (
     <Card>
@@ -129,7 +136,9 @@ function TargetTable({ targets }: { targets: JobTarget[] }) {
       </CardContent>
     </Card>
   )
-}
+})
+
+const NO_TARGETS: JobTarget[] = []
 
 /** `/resume/targets` — saved job opportunities and their tailored resumes, by status. */
 export default function JobTargetsPage() {
@@ -148,11 +157,12 @@ export default function JobTargetsPage() {
   const debouncedSearch = useDebounce(search, 300)
   const debouncedCompany = useDebounce(company, 300)
   const query = useTargets({ search: debouncedSearch || undefined, company: debouncedCompany || undefined, page_size: 100 })
-  const targets = query.data?.items ?? []
+  const targets = query.data?.items ?? NO_TARGETS
   const filtered = Boolean(debouncedSearch || debouncedCompany)
 
   const chooseView = (next: 'board' | 'table') => {
-    setView(next)
+    // Board <-> table re-renders every target: a transition keeps the buttons responsive.
+    React.startTransition(() => setView(next))
     try {
       localStorage.setItem(VIEW_KEY, next)
     } catch {
@@ -171,10 +181,18 @@ export default function JobTargetsPage() {
         title="Job-Specific Resumes"
         description="Each target is one company and role with its job description, a tailored resume and where you are in the process."
         actions={
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus aria-hidden />
-            New target
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => setDialogOpen(true)}>
+              <Plus aria-hidden />
+              New target
+            </Button>
+            <Button asChild>
+              <Link to="/resume/targets/new">
+                <Sparkles aria-hidden />
+                Optimize a resume for a job
+              </Link>
+            </Button>
+          </>
         }
       />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -201,7 +219,7 @@ export default function JobTargetsPage() {
       ) : null}
 
       {query.isLoading ? (
-        <LoadingState variant={view === 'board' ? 'cards' : 'table'} rows={4} />
+        view === 'board' ? <TargetBoardSkeleton /> : <TargetTableSkeleton />
       ) : query.error ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : targets.length === 0 ? (
@@ -211,14 +229,22 @@ export default function JobTargetsPage() {
           description={
             filtered
               ? 'Try another search or clear the company filter.'
-              : 'Save a company and role to tailor a resume for it, track its ATS estimate and record what you sent.'
+              : 'Paste a job description and pick a resume: JobPilot saves the job here and makes a copy optimized for it. Or save a company and role first.'
           }
           action={
             filtered ? undefined : (
-              <Button onClick={() => setDialogOpen(true)}>
-                <Plus aria-hidden />
-                New target
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button asChild>
+                  <Link to="/resume/targets/new">
+                    <Sparkles aria-hidden />
+                    Optimize a resume for a job
+                  </Link>
+                </Button>
+                <Button variant="outline" onClick={() => setDialogOpen(true)}>
+                  <Plus aria-hidden />
+                  New target
+                </Button>
+              </div>
             )
           }
         />

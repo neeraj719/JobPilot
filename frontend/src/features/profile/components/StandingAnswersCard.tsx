@@ -4,7 +4,6 @@ import * as React from 'react'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +20,7 @@ import {
 import { errorMessage } from '@/lib/api'
 import { formatDate, sourceLabel } from '@/lib/utils'
 import type { StandingAnswerRead } from '@/types/api'
+import { StandingAnswersSkeleton } from '@/features/profile/components/ProfileSkeletons'
 
 /** Show `{company}` as the reader would understand it. */
 function wording(text: string): string {
@@ -166,7 +166,7 @@ export function StandingAnswersCard() {
         {query.error ? (
           <ErrorState error={query.error} title="Could not load your standing answers" onRetry={() => void query.refetch()} />
         ) : query.isLoading ? (
-          <LoadingState variant="list" rows={2} />
+          <StandingAnswersSkeleton rows={2} />
         ) : (query.data ?? []).length === 0 ? (
           <EmptyState
             size="sm"

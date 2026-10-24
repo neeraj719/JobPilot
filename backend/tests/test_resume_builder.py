@@ -645,7 +645,7 @@ def test_improve_text_fixes_grammar_and_rejects_new_facts(api: TestClient, monke
     plain = api.post(
         f"{RESUMES}/{rid}/ai/improve-text", json={"text": "i built  the the dashboard ,for users", "field": "summary"}
     ).json()
-    assert plain == {"text": "I built the dashboard, for users.", "changed": True, "source": "rule", "reason": None}
+    assert plain == {"text": "I built the dashboard, for users.", "changed": True, "source": "rule", "reason": None, "ai_provider": None, "ai_model": None}
 
     monkeypatch.setattr(ai_tasks, "improve_text", lambda text, field: "I built the dashboard for 5,000 users.")
     number = api.post(f"{RESUMES}/{rid}/ai/improve-text", json={"text": "i built the dashboard for users", "field": "summary"}).json()
@@ -661,7 +661,11 @@ def test_improve_text_fixes_grammar_and_rejects_new_facts(api: TestClient, monke
 
     monkeypatch.setattr(ai_tasks, "improve_text", lambda text, field: "I built the dashboard for our users.")
     good = api.post(f"{RESUMES}/{rid}/ai/improve-text", json={"text": "i built the dashboard for users", "field": "summary"}).json()
-    assert good == {"text": "I built the dashboard for our users.", "changed": True, "source": "ai", "reason": None}
+    assert {k: good[k] for k in ("text", "changed", "source", "reason")} == {
+        "text": "I built the dashboard for our users.", "changed": True, "source": "ai", "reason": None
+    }
+    # the task is faked past the runtime and the routing is the mock: no model to name (ai-model-choice)
+    assert good["ai_provider"] is None
 
 
 def test_draft_summary_uses_facts_and_guards_the_polish(api: TestClient, monkeypatch) -> None:
@@ -676,7 +680,7 @@ def test_draft_summary_uses_facts_and_guards_the_polish(api: TestClient, monkeyp
     assert refused["source"] == "rule" and refused["reason"] == "invented_number"
 
     empty = api.post(f"{RESUMES}/{rid}/ai/draft-summary", json={"parsed_data": {"name": "Nobody"}}).json()
-    assert empty == {"text": None, "source": "rule", "reason": "not_enough_facts"}
+    assert empty == {"text": None, "source": "rule", "reason": "not_enough_facts", "ai_provider": None, "ai_model": None}
 
 
 # --------------------------------------------------------------------------- ownership

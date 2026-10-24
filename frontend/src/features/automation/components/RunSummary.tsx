@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { RunStatusBadge } from '@/features/automation/components/RunStatusBadge'
@@ -49,11 +50,23 @@ export interface RunSummaryProps {
 export function RunSummary({ run, loading = false }: RunSummaryProps) {
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {Array.from({ length: STAT_TILES.length }, (_, index) => (
-          <Skeleton key={index} className="h-[72px] w-full rounded-lg" />
-        ))}
-      </div>
+      <SkeletonRegion label="Loading the run" className="space-y-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-hidden>
+          <Skeleton className="h-[22px] w-20 rounded-full" />
+          <Skeleton className="h-3.5 w-48" />
+          <Skeleton className="h-3.5 w-28" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" aria-hidden>
+          {Array.from({ length: STAT_TILES.length }, (_, index) => (
+            <Card key={index}>
+              <CardContent className="space-y-0.5 p-3">
+                <SkeletonLine size="xl" className="w-8" />
+                <SkeletonLine size="xs" className="w-20 max-w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </SkeletonRegion>
     )
   }
 

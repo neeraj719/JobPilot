@@ -3,8 +3,8 @@ import { Bot, Chrome, Sparkles } from 'lucide-react'
 import { ErrorState } from '@/components/common/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useAiStatus, useBrowserStatus } from '@/features/settings/api'
+import { InfoRowsSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -32,11 +32,7 @@ export function AiSettingsCard() {
         </CardHeader>
         <CardContent className="space-y-4">
           {aiStatus.isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-5 w-full" />
-              <Skeleton className="h-5 w-full" />
-              <Skeleton className="h-5 w-2/3" />
-            </div>
+            <InfoRowsSkeleton rows={3} label="Loading the AI provider" />
           ) : aiStatus.error ? (
             <ErrorState error={aiStatus.error} size="sm" onRetry={() => void aiStatus.refetch()} />
           ) : (
@@ -75,7 +71,7 @@ export function AiSettingsCard() {
         </CardHeader>
         <CardContent>
           {browserStatus.isLoading ? (
-            <Skeleton className="h-5 w-full" />
+            <InfoRowsSkeleton rows={2} label="Checking browser automation" />
           ) : browserStatus.error ? (
             <ErrorState error={browserStatus.error} size="sm" onRetry={() => void browserStatus.refetch()} />
           ) : (

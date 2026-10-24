@@ -28,8 +28,8 @@ import type {
 const USE_DEFAULT = '__default'
 
 const WORKFLOW_HELP: Record<WorkflowId, string> = {
-  generation: 'Writing new resume sections, summaries and tailored versions.',
-  analysis: 'Scoring a resume against a job description (ATS estimate).',
+  generation: 'Writing new resume sections and summaries, and tailoring a resume to a job target.',
+  analysis: 'ATS Optimizer: polishing the suggestions of an analysis (Analyse, Polish, Auto-optimize).',
   rewriting: 'Rewriting single bullets and polishing wording.',
   jd_analysis: 'Pulling requirements and keywords out of a job description.',
   review: 'The final quality check of a tailored resume.',
@@ -80,7 +80,7 @@ function TargetPicker({ id, label, value, onChange, providers, defaultLabel, inh
   const usable = providers.filter(providerUsable)
   const selected = value?.provider ?? USE_DEFAULT
   return (
-    <div className="grid gap-2 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+    <div className="grid gap-2 sm:grid-cols-[minmax(12rem,max-content)_minmax(0,1fr)]">
       <Select
         value={selected}
         onValueChange={(next) => {

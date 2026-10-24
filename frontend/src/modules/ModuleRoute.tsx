@@ -1,21 +1,17 @@
 import * as React from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 
-import { LoadingState } from '@/components/common/LoadingState'
-import { PageContainer } from '@/components/layout/PageContainer'
+import { RouteErrorBoundary } from '@/components/common/ErrorBoundary'
+import { PageSkeleton } from '@/components/common/skeletons'
 import { toast } from '@/components/ui/toaster'
 import { useWorkspaceModules } from '@/features/workspace/api'
 import { unavailableToast } from '@/features/workspace/copy'
 import type { WorkspaceModule } from '@/features/workspace/types'
 import { getModuleDefinition } from '@/modules/registry'
 
-/** What a page shows while its module's bundle downloads. */
+/** What a page shows while its module's bundle downloads: a page-shaped skeleton. */
 export function PageLoading() {
-  return (
-    <PageContainer aria-busy="true">
-      <LoadingState variant="cards" rows={3} />
-    </PageContainer>
-  )
+  return <PageSkeleton />
 }
 
 function unavailableMessage(code: string, module: WorkspaceModule | undefined): { title: string; description: string } {
@@ -48,8 +44,10 @@ export function ModuleRoute({ code }: { code: string }) {
     if (!module || !module.available) return <RedirectToLauncher code={code} module={module} />
   }
   return (
-    <React.Suspense fallback={<PageLoading />}>
-      <Outlet />
-    </React.Suspense>
+    <RouteErrorBoundary label="this page">
+      <React.Suspense fallback={<PageLoading />}>
+        <Outlet />
+      </React.Suspense>
+    </RouteErrorBoundary>
   )
 }

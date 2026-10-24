@@ -1,7 +1,6 @@
 import { Mail, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +9,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { formatDateTime, formatRelative } from '@/lib/utils'
 import { useConnectGmail, useDisconnectGmail, useIntegrations, useSyncGmail } from '@/features/settings/api'
+import { GmailStatusSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'CONNECTED') return <Badge variant="success">Connected</Badge>
@@ -64,7 +64,7 @@ export function EmailIntegrationCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         {integrationsQuery.isLoading ? (
-          <LoadingState variant="list" rows={3} />
+          <GmailStatusSkeleton />
         ) : integrationsQuery.error ? (
           <ErrorState
             error={integrationsQuery.error}

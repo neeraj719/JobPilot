@@ -47,12 +47,13 @@ export function StaySignedInNudge() {
 
   return (
     <div className="px-4 pt-4 sm:px-6">
-      <Alert variant="info" role="status" className="pr-12">
+      {/* Compact banner (py-2.5): it sits above every page, so it must not push heroes below the fold. */}
+      <Alert variant="info" role="status" className="py-2.5 pr-12 [&>svg]:top-3">
         {/* Before the icon: the Alert pads every sibling *after* its svg. */}
         <button
           type="button"
           onClick={dismiss}
-          className="absolute right-3 top-3 rounded-sm p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Dismiss"
         >
           <X className="size-4" />

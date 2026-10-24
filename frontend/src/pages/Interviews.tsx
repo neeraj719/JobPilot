@@ -4,7 +4,6 @@ import * as React from 'react'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -20,6 +19,7 @@ import {
 } from '@/features/interviews/api'
 import { InterviewCard } from '@/features/interviews/components/InterviewCard'
 import { InterviewDetailSheet } from '@/features/interviews/components/InterviewDetailSheet'
+import { InterviewsSkeleton } from '@/features/interviews/components/InterviewSkeletons'
 import {
   InterviewFormDialog,
   type InterviewFormSubmit,
@@ -187,7 +187,7 @@ export default function InterviewsPage() {
           onRetry={() => void interviewsQuery.refetch()}
         />
       ) : interviewsQuery.isLoading ? (
-        <LoadingState variant="cards" rows={3} />
+        <InterviewsSkeleton count={3} />
       ) : isEmpty ? (
         <EmptyState
           icon={CalendarClock}

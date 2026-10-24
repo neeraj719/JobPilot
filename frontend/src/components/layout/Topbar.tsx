@@ -1,6 +1,8 @@
+import { useIsFetching } from '@tanstack/react-query'
 import { Menu, Search } from 'lucide-react'
 import * as React from 'react'
 
+import { TopProgressBar } from '@/components/common/skeletons'
 import { NotificationsBell } from '@/components/layout/NotificationsBell'
 import { BrandMark } from '@/components/layout/Sidebar'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
@@ -19,11 +21,21 @@ export interface TopbarProps {
   className?: string
 }
 
-export function Topbar({ title, onOpenMenu, showBrand = false, className }: TopbarProps) {
+/**
+ * Background refreshes keep the content on screen; a thin gradient bar says "updating". The
+ * `useIsFetching` subscription lives here, in a leaf, so a refetch re-renders this bar only —
+ * not the whole topbar (search, bell, theme, account menu).
+ */
+function FetchingBar() {
+  const fetching = useIsFetching() > 0
+  return <TopProgressBar active={fetching} className="absolute inset-x-0 bottom-0 translate-y-px" />
+}
+
+export const Topbar = React.memo(function Topbar({ title, onOpenMenu, showBrand = false, className }: TopbarProps) {
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 sm:px-6',
+        'glass sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border/70 px-4 sm:px-6 dark:border-glass-border/30',
         className,
       )}
     >
@@ -36,7 +48,7 @@ export function Topbar({ title, onOpenMenu, showBrand = false, className }: Topb
 
       {showBrand ? <BrandMark withName className="-ml-1 mr-2" /> : null}
 
-      {title ? <h2 className="min-w-0 truncate text-sm font-semibold sm:text-base">{title}</h2> : null}
+      {title ? <h2 className="min-w-0 truncate text-sm font-semibold tracking-tight sm:text-base">{title}</h2> : null}
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <div className="relative hidden md:block">
@@ -55,6 +67,7 @@ export function Topbar({ title, onOpenMenu, showBrand = false, className }: Topb
         <ThemeToggle />
         <UserMenu />
       </div>
+      <FetchingBar />
     </header>
   )
-}
+})

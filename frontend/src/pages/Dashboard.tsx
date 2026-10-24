@@ -7,6 +7,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   useDashboardActivity,
   useDashboardCharts,
@@ -24,7 +25,7 @@ import {
 import { AttentionPanel } from '@/features/dashboard/components/AttentionPanel'
 import { AutomationCard } from '@/features/dashboard/components/AutomationCard'
 import { ChartCard } from '@/features/dashboard/components/ChartCard'
-import { DashboardSkeleton } from '@/features/dashboard/components/DashboardSkeleton'
+import { ActivitySkeleton, DashboardSkeleton } from '@/features/dashboard/components/DashboardSkeleton'
 import { FunnelChart, FunnelSummary, buildFunnelRows } from '@/features/dashboard/components/FunnelChart'
 import { HeroStats } from '@/features/dashboard/components/HeroStats'
 import { HorizontalBarChart } from '@/features/dashboard/components/HorizontalBarChart'
@@ -91,6 +92,12 @@ export default function DashboardPage() {
         <PageHeader
           title="Dashboard"
           description="Today at a glance: what was found, what was sent and what needs you."
+          actions={
+            <>
+              <Skeleton className="hidden h-3 w-24 sm:block" />
+              <Skeleton className="h-8 w-24 rounded-md" />
+            </>
+          }
         />
         <DashboardSkeleton />
       </PageContainer>
@@ -275,17 +282,7 @@ export default function DashboardPage() {
               onRetry={() => void activity.refetch()}
             />
           ) : activity.isLoading ? (
-            <div className="space-y-3" aria-busy="true">
-              {Array.from({ length: 5 }, (_, index) => (
-                <div key={index} className="flex animate-pulse items-center gap-3">
-                  <div className="size-8 shrink-0 rounded-full bg-muted" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-3 w-1/3 rounded bg-muted" />
-                    <div className="h-3 w-2/3 rounded bg-muted" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ActivitySkeleton rows={5} />
           ) : (
             <ActivityTimeline items={activityItems} limit={ACTIVITY_VISIBLE} />
           )}

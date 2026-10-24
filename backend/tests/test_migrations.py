@@ -35,7 +35,7 @@ TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 #: one server never drop each other's migration database mid-run.
 MIGRATION_DATABASE = f"{make_url(TEST_DATABASE_URL).database}_migration_check"
 
-#: The 38 tables of the JobPilot AI schema, as ``schema.table``.
+#: The 39 tables of the JobPilot AI schema, as ``schema.table``.
 EXPECTED_TABLES = {
     "master.users",
     "master.roles",
@@ -55,6 +55,7 @@ EXPECTED_TABLES = {
     "master.ai_provider_credentials",
     "master.modules",
     "master.user_module_settings",
+    "master.linkedin_connections",
     "master.user_workspace_preferences",
     "unified.jobs",
     "unified.job_sources",
@@ -116,7 +117,9 @@ def migrated(monkeypatch):
     _recreate_database(url)
     # alembic/env.py prefers DATABASE_URL over the ini value.
     monkeypatch.setenv("DATABASE_URL", url)
-    command.upgrade(_config(url), "head")
+    # "heads", not "head": parallel streams branch off one revision on purpose (two heads
+    # until integration merges them); "heads" is the same thing once there is one head.
+    command.upgrade(_config(url), "heads")
     yield url
 
 
@@ -133,7 +136,7 @@ def test_upgrade_creates_every_table(migrated: str) -> None:
     finally:
         engine.dispose()
     assert tables == EXPECTED_TABLES
-    assert len(EXPECTED_TABLES) == 38
+    assert len(EXPECTED_TABLES) == 39
     # Only Alembic's own bookkeeping is left behind in ``public``.
     assert public == {"alembic_version"}
 

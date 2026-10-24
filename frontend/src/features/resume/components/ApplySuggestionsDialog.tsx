@@ -1,6 +1,7 @@
 import { ChevronDown, Wand2 } from 'lucide-react'
 import * as React from 'react'
 
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage, isApiError } from '@/lib/api'
@@ -418,7 +420,26 @@ export function ApplySuggestionsDialog({ resumeId, open, onOpenChange }: ApplySu
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
           {planQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading suggestions…</p>
+            <SkeletonRegion label="Loading suggestions" className="space-y-2">
+              {/* The "Ready to apply" heading and its checkbox rows. */}
+              <SkeletonLine size="xs" className="w-32" />
+              <ul className="space-y-2" aria-hidden>
+                {[0, 1, 2].map((index) => (
+                  <li key={index} className="rounded-md border border-border p-3">
+                    <div className="flex items-start gap-3">
+                      <Skeleton className="mt-0.5 size-4 shrink-0 rounded" />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex h-[22px] items-center gap-2">
+                          <Skeleton className="h-3.5 w-48 max-w-[60%]" />
+                          <Skeleton className="h-[22px] w-24 rounded-full" />
+                        </div>
+                        <SkeletonLine size="sm" className={index === 1 ? 'w-1/2' : 'w-4/5'} />
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </SkeletonRegion>
           ) : planQuery.error ? (
             <Alert variant="destructive">
               <AlertDescription>{errorMessage(planQuery.error)}</AlertDescription>

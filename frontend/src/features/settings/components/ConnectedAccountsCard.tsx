@@ -2,7 +2,6 @@ import { Bot, CircleCheck, Info, Link2, Link2Off, ShieldQuestion } from 'lucide-
 import * as React from 'react'
 
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +14,7 @@ import { errorMessage } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import { useConnectAccount, useDisconnectAccount, useIntegrations } from '@/features/settings/api'
 import type { AdapterInfo, ConnectedAccountRead, JobSourceType } from '@/types/api'
+import { AdapterRowsSkeleton } from '@/features/settings/components/SettingsSkeletons'
 
 function AdapterRow({
   adapter,
@@ -192,7 +192,7 @@ export function ConnectedAccountsCard() {
         </Alert>
 
         {integrationsQuery.isLoading ? (
-          <LoadingState variant="list" rows={4} />
+          <AdapterRowsSkeleton rows={4} />
         ) : integrationsQuery.error ? (
           <ErrorState
             error={integrationsQuery.error}

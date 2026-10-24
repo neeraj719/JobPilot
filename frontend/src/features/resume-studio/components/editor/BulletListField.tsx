@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2, Trophy, Wand2, WandSparkles } from 'lucide-react'
+import { ArrowDown, ArrowUp, Cpu, Plus, Sparkles, Trash2, Trophy, Wand2, WandSparkles } from 'lucide-react'
 import * as React from 'react'
 import { useFieldArray, useFormContext, type FieldArrayPath } from 'react-hook-form'
 
@@ -9,10 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/lib/api'
+import { AiModelChip } from '@/features/ai-providers/components/AiModelChip'
+import type { WorkflowTarget } from '@/features/ai-providers/types'
+import { choiceShortLabel, choiceTarget, useAiChoice } from '@/features/ai-providers/useAiChoice'
 
 import { useAchievementBullet, useImproveText, useRewriteBullet } from '../../api'
 import type { EditorValues } from '../../schema'
@@ -36,6 +42,9 @@ interface PanelState {
   error: string | null
   candidates: BulletCandidate[]
   note: string | null
+  /** The model picked for this run (kept for Retry). */
+  ai?: WorkflowTarget
+  model?: { provider: string | null; model: string | null }
 }
 
 export interface BulletListFieldProps {
@@ -56,16 +65,25 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
   const rewrite = useRewriteBullet(resumeId)
   const achievement = useAchievementBullet(resumeId)
   const improve = useImproveText(resumeId)
+  const rewriteChoice = useAiChoice('rewrite_bullet')
+  const improveChoice = useAiChoice('improve_grammar')
 
   const textAt = (index: number) => String(getValues(`${name}.${index}.text` as never) ?? '').trim()
 
-  const run = async (index: number, action: Action) => {
+  /** Asks "which model?" first when the user has 2+ usable models (and asked to be asked). */
+  const run = (index: number, action: Action) => {
+    if (textAt(index).length < 3) return
+    const choice = action === 'improve' ? improveChoice : rewriteChoice
+    void choice.runWithModel((ai) => execute(index, action, ai))
+  }
+
+  const execute = async (index: number, action: Action, ai?: WorkflowTarget) => {
     const original = textAt(index)
     if (original.length < 3) return
-    setPanel({ index, action, original, loading: true, error: null, candidates: [], note: null })
+    setPanel({ index, action, original, loading: true, error: null, candidates: [], note: null, ai })
     try {
       if (action === 'improve') {
-        const result = await improve.mutateAsync({ text: original, field: name === 'achievements' ? 'achievement' : 'bullet' })
+        const result = await improve.mutateAsync({ text: original, field: name === 'achievements' ? 'achievement' : 'bullet', ai })
         const candidates: BulletCandidate[] = result.changed
           ? [{ text: result.text, source: result.source, has_placeholder: false, checks: { kept_details: true, no_new_numbers: true, no_new_claims: true } }]
           : []
@@ -76,6 +94,8 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
           loading: false,
           error: null,
           candidates,
+          ai,
+          model: { provider: result.ai_provider ?? null, model: result.ai_model ?? null },
           note: result.changed
             ? result.reason
               ? 'The AI version added facts that are not in your text, so only grammar fixes are shown.'
@@ -85,12 +105,22 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
       } else {
         const result =
           action === 'rewrite'
-            ? await rewrite.mutateAsync({ text: original, role: context?.role, company: context?.company })
-            : await achievement.mutateAsync({ text: original })
-        setPanel({ index, action, original, loading: false, error: null, candidates: result.candidates, note: result.note })
+            ? await rewrite.mutateAsync({ text: original, role: context?.role, company: context?.company, ai })
+            : await achievement.mutateAsync({ text: original, ai })
+        setPanel({
+          index,
+          action,
+          original,
+          loading: false,
+          error: null,
+          candidates: result.candidates,
+          note: result.note,
+          ai,
+          model: { provider: result.ai_provider ?? null, model: result.ai_model ?? null },
+        })
       }
     } catch (error) {
-      setPanel({ index, action, original, loading: false, error: errorMessage(error), candidates: [], note: null })
+      setPanel({ index, action, original, loading: false, error: errorMessage(error), candidates: [], note: null, ai })
     }
   }
 
@@ -146,6 +176,28 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
                         <DropdownMenuItem onSelect={() => void run(index, 'achievement')}>
                           <Trophy aria-hidden /> Make achievement-oriented
                         </DropdownMenuItem>
+                        {rewriteChoice.canChoose ? (
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <Cpu aria-hidden /> Rewrite once with…
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className="w-64">
+                              {(rewriteChoice.data?.candidates ?? []).map((candidate) => (
+                                <DropdownMenuItem
+                                  key={candidate.id}
+                                  disabled={!candidate.available}
+                                  onSelect={() => void execute(index, 'rewrite', choiceTarget(candidate))}
+                                  className="flex-col items-start gap-0"
+                                >
+                                  <span className="text-sm">{candidate.label}</span>
+                                  <span className="text-2xs text-muted-foreground">
+                                    {candidate.available ? choiceShortLabel(candidate) : candidate.unavailable_reason}
+                                  </span>
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        ) : null}
                       </>
                     ) : null}
                     <DropdownMenuItem onSelect={() => void run(index, 'improve')}>
@@ -197,8 +249,11 @@ export function BulletListField({ name, resumeId, label, addLabel = 'Add bullet'
                 }
                 onApply={(text, candidate) => apply(index, text, candidate)}
                 onClose={() => setPanel(null)}
-                onRetry={() => void run(index, panel.action)}
+                onRetry={() => void execute(index, panel.action, panel.ai)}
               />
+            ) : null}
+            {panel && panel.index === index && !panel.loading && panel.model ? (
+              <AiModelChip provider={panel.model.provider} model={panel.model.model} prefix="Answered by" className="mt-1.5" />
             ) : null}
           </li>
         ))}

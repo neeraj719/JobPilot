@@ -3,6 +3,10 @@
 Thin by design: every rule lives in ``jd`` / ``fetch`` / ``lookup`` / ``scoring`` /
 ``suggestions`` / ``service`` / ``targets``. Every score returned is an estimate
 (``schemas.DISCLAIMER``).
+
+Every endpoint that can call a model accepts the per-run model choice ``ai: {provider, model}``
+(multipart: ``ai_provider`` / ``ai_model``); ``ai.choice.apply_choice`` validates it and the AI
+runtime uses it for every call of the request (and the background polish it starts).
 """
 from __future__ import annotations
 
@@ -17,11 +21,13 @@ from app.core.exceptions import RateLimitedError, ValidationFailed
 from app.core.rate_limit import rate_limiter
 from app.models.enums import JdSource, JobTargetStatus
 from app.models.user import User
+from app.modules.ai.choice import apply_choice, form_target
 from app.modules.ats import fetch as fetch_mod
 from app.modules.ats import jd as jd_mod
 from app.modules.ats import lookup as lookup_mod
 from app.modules.ats import service, targets
 from app.modules.ats.schemas import (
+    AiRunRequest,
     AnalysisCreate,
     AnalysisListItem,
     AnalysisRead,
@@ -37,6 +43,7 @@ from app.modules.ats.schemas import (
     JdParseRequest,
     JdParseResult,
     Methodology,
+    QuickTailorRequest,
     SnapshotCreate,
     SnapshotRead,
     TailorRequest,
@@ -102,7 +109,8 @@ def get_methodology(user: User = Depends(get_current_user)) -> Methodology:
 
 
 @router.post("/jd/parse", response_model=JdParseResult, summary="Structure a pasted job description")
-def parse_jd(payload: JdParseRequest, user: User = Depends(get_current_user)) -> JdParseResult:
+def parse_jd(payload: JdParseRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> JdParseResult:
+    apply_choice(db, user, payload.ai)
     _ai_rate_limit(user, payload.use_ai)
     return _parse_result(
         payload.text, source=JdSource.PASTED, confidence="high", title=payload.title, company=payload.company, use_ai=payload.use_ai
@@ -115,20 +123,25 @@ def upload_jd(
     title: str | None = Form(default=None),
     company: str | None = Form(default=None),
     use_ai: bool = Form(default=False),
+    ai_provider: str | None = Form(default=None, max_length=30),
+    ai_model: str | None = Form(default=None, max_length=200),
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> JdParseResult:
+    apply_choice(db, user, form_target(ai_provider, ai_model))
     _ai_rate_limit(user, use_ai)
     text = jd_mod.extract_upload_text(file.filename or "", _read_upload(file))
     return _parse_result(text, source=JdSource.UPLOADED, confidence="medium", title=title, company=company, use_ai=use_ai)
 
 
 @router.post("/jd/fetch", response_model=JdParseResult, summary="Read a job description from a posting URL or a board posting")
-def fetch_jd(payload: JdFetchRequest, user: User = Depends(get_current_user)) -> JdParseResult:
+def fetch_jd(payload: JdFetchRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> JdParseResult:
     """Known vendors (Greenhouse, Lever, Ashby, SmartRecruiters) are read from their public APIs;
     other pages are fetched once under the SSRF and size guards. 422 ``jd_unreadable`` when
     nothing readable comes back - the user then pastes the text."""
     if not payload.url and payload.board is None:
         raise ValidationFailed("Give the job posting URL.", code="invalid_url")
+    apply_choice(db, user, payload.ai)
     fetch_mod.enforce_rate_limit(user.id)
     _ai_rate_limit(user, payload.use_ai)
     if payload.board is not None:
@@ -159,6 +172,7 @@ def company_lookup(
 def create_analysis(payload: AnalysisCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AnalysisRead:
     """Deterministic estimate, returned at once. When a model is configured the suggestions are
     polished in the background: poll ``GET /ats/analyses/{id}`` while ``status`` is RUNNING."""
+    apply_choice(db, user, payload.ai)
     return service.create_analysis(db, user.id, payload)
 
 
@@ -200,6 +214,7 @@ def auto_optimize(
 ) -> AutoOptimizeResult:
     """``new_resume`` creates a TAILORED resume linked to its source; ``new_version`` saves a new
     version of the same resume. Suggestions that need confirmation are never applied here."""
+    apply_choice(db, user, payload.ai)
     return service.auto_optimize(db, user.id, analysis_id, mode=payload.mode, name=payload.name)
 
 
@@ -209,8 +224,16 @@ def undo(analysis_id: uuid.UUID, db: Session = Depends(get_db), user: User = Dep
 
 
 @router.post("/analyses/{analysis_id}/polish", response_model=AnalysisRead, summary="Retry the AI polish of the suggestions")
-def retry_polish(analysis_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> AnalysisRead:
-    return service.retry_polish(db, user.id, analysis_id)
+def retry_polish(
+    analysis_id: uuid.UUID,
+    payload: AiRunRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AnalysisRead:
+    """Optional body ``{ai, task}``: ``task: tailor_resume`` retries the AI tailoring of a tailored copy
+    (inferred when omitted)."""
+    apply_choice(db, user, payload.ai if payload else None)
+    return service.retry_polish(db, user.id, analysis_id, task=payload.task if payload else None)
 
 
 # --------------------------------------------------------------------------- targets
@@ -232,6 +255,23 @@ def list_targets(
     user: User = Depends(get_current_user),
 ) -> PageResponse[TargetRead]:
     return targets.list_targets(db, user.id, pagination, status=status_filter, company=company, search=search)
+
+
+@router.post("/targets/tailor", response_model=TailorResult, summary="Optimize a resume for a pasted job description (one call)")
+def quick_tailor(payload: QuickTailorRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> TailorResult:
+    """Job description + resume -> a saved target and a TAILORED copy, in one transaction.
+
+    The company and role come from the request, else from the job description (``Unknown company``,
+    the JD title or ``Untitled role``). Then the same run as ``/targets/{id}/tailor``: the source is
+    analysed, every safe change is applied to a new TAILORED resume, and when a model is configured
+    the AI pass rewrites the summary and the relevant bullets in the background (``ai_pass:
+    running``; poll ``GET /ats/analyses/{analysis_id}``). Errors: 422 ``resume_required``,
+    ``resume_not_parsed``, ``jd_required``, ``jd_too_short``; 404 another user's resume; 409
+    ``target_exists`` (``details.id``) when this job is already saved - tailor it with
+    ``POST /targets/{id}/tailor``."""
+    apply_choice(db, user, payload.ai)
+    _ai_rate_limit(user, True)
+    return targets.quick_tailor(db, user.id, payload)
 
 
 @router.post("/targets", response_model=TargetDetail, status_code=status.HTTP_201_CREATED, summary="Save a job target")
@@ -263,6 +303,7 @@ def add_snapshot(
     target_id: uuid.UUID, payload: SnapshotCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> SnapshotResult:
     target = service.get_target(db, user.id, target_id)
+    apply_choice(db, user, payload.ai)
     _ai_rate_limit(user, payload.use_ai)
     snapshot, created = targets.add_snapshot(db, user.id, target, payload)
     return SnapshotResult(snapshot=SnapshotRead.model_validate(snapshot), created=created, target=targets.target_read(db, target))
@@ -273,10 +314,13 @@ def upload_snapshot(
     target_id: uuid.UUID,
     file: UploadFile = File(...),
     use_ai: bool = Form(default=False),
+    ai_provider: str | None = Form(default=None, max_length=30),
+    ai_model: str | None = Form(default=None, max_length=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SnapshotResult:
     target = service.get_target(db, user.id, target_id)
+    apply_choice(db, user, form_target(ai_provider, ai_model))
     _ai_rate_limit(user, use_ai)
     text = jd_mod.extract_upload_text(file.filename or "", _read_upload(file))
     snapshot, created = service.snapshot_from_text(
@@ -287,8 +331,17 @@ def upload_snapshot(
 
 
 @router.post("/targets/{target_id}/refresh", response_model=SnapshotResult, summary="Re-fetch the job description from the posting URL")
-def refresh_target(target_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> SnapshotResult:
-    snapshot, created = targets.refresh_target(db, user.id, target_id)
+def refresh_target(
+    target_id: uuid.UUID,
+    payload: AiRunRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SnapshotResult:
+    """Optional body ``{use_ai, ai}``: let the (picked) model refine the re-fetched description."""
+    use_ai = bool(payload and payload.use_ai)
+    apply_choice(db, user, payload.ai if payload else None)
+    _ai_rate_limit(user, use_ai)
+    snapshot, created = targets.refresh_target(db, user.id, target_id, use_ai=use_ai)
     target = service.get_target(db, user.id, target_id)
     return SnapshotResult(snapshot=SnapshotRead.model_validate(snapshot), created=created, target=targets.target_read(db, target))
 
@@ -299,6 +352,7 @@ def tailor(
 ) -> TailorResult:
     """Analysis of the source resume, then a TAILORED copy with every safe change applied and
     explained; the target moves Preparing → Ready."""
+    apply_choice(db, user, payload.ai)
     return targets.tailor(db, user.id, target_id, payload)
 
 

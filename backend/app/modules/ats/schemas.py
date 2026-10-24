@@ -20,6 +20,7 @@ from app.models.enums import (
     SuggestionStatus,
     WorkMode,
 )
+from app.modules.ai.settings_schemas import WorkflowTarget
 from app.modules.resumes.schemas import ResumeRead
 
 DISCLAIMER = (
@@ -69,6 +70,8 @@ class JdParseRequest(BaseModel):
     company: str | None = Field(default=None, max_length=255)
     #: Ask the configured model to refine the classification (slow on a local model).
     use_ai: bool = False
+    #: The model picked for this run (``ai.choice``); ``None`` = the routing.
+    ai: WorkflowTarget | None = None
 
 
 class BoardPostingRef(BaseModel):
@@ -87,6 +90,7 @@ class JdFetchRequest(BaseModel):
     url: str | None = Field(default=None, max_length=2048)
     board: BoardPostingRef | None = None
     use_ai: bool = False
+    ai: WorkflowTarget | None = None
 
 
 class JdParseResult(BaseModel):
@@ -178,6 +182,8 @@ class AnalysisCreate(BaseModel):
     resume_id: uuid.UUID
     jd: JdInput
     weights: dict[str, float] | None = None
+    #: The model picked for this run (the background polish uses it too).
+    ai: WorkflowTarget | None = None
 
 
 class CategoryScore(BaseModel):
@@ -357,6 +363,7 @@ class AutoOptimizeRequest(BaseModel):
 
     mode: Literal["new_resume", "new_version"] = "new_resume"
     name: str | None = Field(default=None, max_length=255)
+    ai: WorkflowTarget | None = None
 
 
 class AutoOptimizeResult(BaseModel):
@@ -389,6 +396,7 @@ class SnapshotCreate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     structured: StructuredJD | None = None
     use_ai: bool = False
+    ai: WorkflowTarget | None = None
 
 
 class SnapshotRead(BaseModel):
@@ -514,6 +522,36 @@ class TailorRequest(BaseModel):
 
     source_resume_id: uuid.UUID | None = None
     name: str | None = Field(default=None, max_length=255)
+    ai: WorkflowTarget | None = None
+
+
+class AiRunRequest(BaseModel):
+    """Optional body of an AI action that takes no other input (``/polish``, ``/refresh``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: ``/refresh`` only: let the model refine the re-fetched job description.
+    use_ai: bool = False
+    ai: WorkflowTarget | None = None
+    #: ``/polish`` only: which pass to retry. ``tailor_resume`` re-runs the AI tailoring of a tailored
+    #: copy (rewrites applied as a new version); omitted = inferred from the analysis.
+    task: Literal["polish_suggestions", "tailor_resume"] | None = None
+
+
+class QuickTailorRequest(BaseModel):
+    """``POST /ats/targets/tailor``: paste a job description, pick a resume, get a tailored copy.
+
+    ``source_resume_id`` omitted = the default resume. ``company_name`` / ``role_title`` omitted =
+    read from the job description (``Unknown company`` / the JD title or ``Untitled role``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    jd: SnapshotCreate
+    source_resume_id: uuid.UUID | None = None
+    company_name: str | None = Field(default=None, max_length=255)
+    role_title: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    ai: WorkflowTarget | None = None
 
 
 class TailorResult(BaseModel):
@@ -523,6 +561,29 @@ class TailorResult(BaseModel):
     source_analysis_id: uuid.UUID
     source_score: int | None = None
     explanations: list[Explanation] = Field(default_factory=list)
+    #: Convenience ids (same as ``target.id`` / ``resume.id`` / ``analysis.id``).
+    target_id: uuid.UUID | None = None
+    tailored_resume_id: uuid.UUID | None = None
+    analysis_id: uuid.UUID | None = None
+    #: ``running``: the AI rewrite runs in the background on ``analysis_id`` (poll it); when it is
+    #: DONE the rewrites are applied as a new version and the target's ``last_analysis_id`` is the
+    #: final estimate. ``rules_only``: no model is configured, the rule-based copy is final.
+    ai_pass: Literal["running", "rules_only"] = "rules_only"
+
+
+class TailorChange(BaseModel):
+    """One change on the tailored copy, for the "what changed" list (grouped by ``group``)."""
+
+    group: Literal["skills", "summary", "bullets", "sections"]
+    kind: SuggestionKind
+    title: str
+    before: str | None = None
+    after: str | None = None
+    rationale: str = ""
+    source: Literal["AI", "SYSTEM"] = "SYSTEM"
+    target_path: str | None = None
+    applied_version: int | None = None
+    suggestion_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class FieldChange(BaseModel):
@@ -554,6 +615,11 @@ class CompareResult(BaseModel):
     explanations: list[Explanation] = Field(default_factory=list)
     #: Which diff produced ``fields`` (always ``ats``: see ``targets.field_diff``).
     diff_provider: Literal["ats", "builder"] = "ats"
+    #: The applied changes, rule-based and AI, original text -> current text (a bullet the rules
+    #: tidied and the AI then rewrote is one entry).
+    changes: list[TailorChange] = Field(default_factory=list)
+    #: AI rewrites JobPilot's guards refused (they would have added a fact); never applied.
+    ai_rejected: int = 0
 
 
 class AtsSummary(BaseModel):

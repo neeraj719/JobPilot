@@ -5,7 +5,6 @@ import { useForm } from 'react-hook-form'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,13 +17,14 @@ import { adminUserLookupSchema, type AdminUserLookupValues } from '@/features/wo
 import type { AdminModuleState, AdminUserRef } from '@/features/workspace/types'
 import { errorMessage, isApiError } from '@/lib/api'
 import { moduleIcon } from '@/modules/registry'
+import { AdminUserModulesSkeleton, ModuleRowsSkeleton } from '@/features/workspace/components/WorkspaceSkeletons'
 
 function ModuleToggles({ user }: { user: AdminUserRef }) {
   const view = useAdminUserModules(user.id)
   const toggle = useAdminToggleModule(user.id)
   const [pendingCode, setPendingCode] = React.useState<string | null>(null)
 
-  if (view.isPending) return <LoadingState rows={3} />
+  if (view.isPending) return <ModuleRowsSkeleton rows={3} trailing="switch" />
   if (view.isError) return <ErrorState error={view.error} size="sm" onRetry={() => void view.refetch()} />
 
   function onToggle(module: AdminModuleState, enabled: boolean) {
@@ -128,7 +128,7 @@ export function AdminModulesCard() {
         </Form>
 
         {email === null ? null : found.isPending ? (
-          <LoadingState rows={2} />
+          <AdminUserModulesSkeleton />
         ) : notFound ? (
           <EmptyState size="sm" icon={UserRound} title="No account with that email" description={email} />
         ) : found.isError ? (

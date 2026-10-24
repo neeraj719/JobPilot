@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { SkeletonLine } from '@/components/common/skeletons'
 import { useAiSettings } from '@/features/ai-providers/api'
 
 /** Settings → "AI & browser": points at the per-user AI Model Settings page. */
@@ -19,7 +19,7 @@ export function AiProvidersLinkCard() {
           <div className="min-w-0">
             <p className="text-sm font-semibold">AI Model Settings</p>
             {settings.isLoading ? (
-              <Skeleton className="mt-1 h-4 w-56" />
+              <SkeletonLine size="xs" className="w-56" />
             ) : (
               <p className="text-xs text-muted-foreground">
                 {settings.data?.summary ?? 'Choose your AI provider, add your own API key and pick a model per task.'}

@@ -16,6 +16,10 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { EyeOff, GripVertical, Plus, UserRound } from 'lucide-react'
+import { type LucideIcon } from 'lucide-react'
+import * as React from 'react'
+
+import { SECTION_ICONS } from './sectionIcons'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -48,7 +52,8 @@ export interface SectionListProps {
  * Space + arrow keys (dnd-kit keyboard sensor). Removing hides a section from the resume;
  * its content is kept and comes back when the section is added again.
  */
-export function SectionList({ order, counts, active, onSelect, onReorder, onRemove, onAdd }: SectionListProps) {
+/** Memoised: the editor re-renders on every keystroke; the list only when its props change. */
+export const SectionList = React.memo(function SectionList({ order, counts, active, onSelect, onReorder, onRemove, onAdd }: SectionListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -66,16 +71,17 @@ export function SectionList({ order, counts, active, onSelect, onReorder, onRemo
 
   return (
     <nav aria-label="Resume sections" className="space-y-2">
+      <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Sections</p>
       <button
         type="button"
         onClick={() => onSelect('header')}
         aria-current={active === 'header' ? 'true' : undefined}
         className={cn(
-          'flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          active === 'header' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:bg-accent',
+          'flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm transition-[background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          active === 'header' ? 'border-gradient font-medium shadow-sm' : 'border border-border bg-card hover:bg-accent',
         )}
       >
-        <UserRound className="size-4 text-muted-foreground" aria-hidden />
+        <SectionChip icon={UserRound} active={active === 'header'} />
         Name &amp; contact
       </button>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
@@ -114,7 +120,7 @@ export function SectionList({ order, counts, active, onSelect, onReorder, onRemo
       ) : null}
     </nav>
   )
-}
+})
 
 function SortableRow({
   id,
@@ -135,8 +141,8 @@ function SortableRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        'flex items-center gap-1 rounded-md border bg-card pr-1 text-sm',
-        active ? 'border-primary bg-primary/5' : 'border-border',
+        'flex items-center gap-0.5 rounded-xl pr-1 text-sm transition-shadow',
+        active ? 'border-gradient shadow-sm' : 'border border-border bg-card',
         isDragging && 'z-10 shadow-lg',
       )}
     >
@@ -146,15 +152,16 @@ function SortableRow({
         {...attributes}
         {...listeners}
         aria-label={`Reorder ${SECTION_LABELS[id]} (Space, then arrow keys)`}
-        className="cursor-grab touch-none rounded p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+        className="cursor-grab touch-none rounded-lg p-1.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
       >
         <GripVertical className="size-4" aria-hidden />
       </button>
+      <SectionChip icon={SECTION_ICONS[id]} active={active} />
       <button
         type="button"
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
-        className={cn('flex min-w-0 flex-1 items-center gap-2 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', active && 'font-medium')}
+        className={cn('flex min-w-0 flex-1 items-center gap-2 py-2 pl-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', active && 'font-medium')}
       >
         <span className="truncate">{SECTION_LABELS[id]}</span>
         {count ? (
@@ -171,5 +178,20 @@ function SortableRow({
         </Button>
       </SimpleTooltip>
     </li>
+  )
+}
+
+/** Small icon chip for a section row: soft brand tint, solid gradient when active. */
+function SectionChip({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
+  return (
+    <span
+      className={cn(
+        'flex size-7 shrink-0 items-center justify-center rounded-lg',
+        active ? 'bg-gradient-brand text-gradient-foreground' : 'bg-gradient-brand-soft text-primary',
+      )}
+      aria-hidden
+    >
+      <Icon className="size-3.5" />
+    </span>
   )
 }

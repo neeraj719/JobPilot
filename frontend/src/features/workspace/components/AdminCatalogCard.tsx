@@ -3,7 +3,6 @@ import * as React from 'react'
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,6 +12,7 @@ import { useAdminCatalog, useAdminUpdateCatalog } from '@/features/workspace/api
 import type { AdminCatalogModule, AdminCatalogUpdate, ModuleStatus } from '@/features/workspace/types'
 import { errorMessage } from '@/lib/api'
 import { moduleIcon } from '@/modules/registry'
+import { ModuleRowsSkeleton } from '@/features/workspace/components/WorkspaceSkeletons'
 
 const STATUS_LABELS: Record<ModuleStatus, string> = {
   AVAILABLE: 'Available',
@@ -48,25 +48,25 @@ export function AdminCatalogCard() {
       <CardHeader>
         <CardTitle className="text-base">Platform modules</CardTitle>
         <CardDescription>Which modules exist for everyone on this JobPilot installation.</CardDescription>
-        <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+        <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
           Switching a module off hides it for everyone and returns 403 from its API.
         </p>
       </CardHeader>
       <CardContent>
         {catalog.isPending ? (
-          <LoadingState rows={3} />
+          <ModuleRowsSkeleton rows={4} trailing="select-switch" label="Loading platform modules" />
         ) : catalog.isError ? (
           <ErrorState error={catalog.error} size="sm" onRetry={() => void catalog.refetch()} />
         ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border" aria-label="Platform modules">
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Platform modules">
             {catalog.data.map((module) => {
               const Icon = moduleIcon(module.code, module.icon)
               const id = `catalog-module-${module.code}`
               const busy = pendingCode !== null
               return (
                 <li key={module.code} className="flex flex-wrap items-center gap-3 p-3 sm:flex-nowrap">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-brand-soft text-primary ring-1 ring-inset ring-primary/15">
                     <Icon className="size-4" aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">

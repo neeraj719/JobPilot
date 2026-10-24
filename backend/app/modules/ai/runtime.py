@@ -53,7 +53,7 @@ from sqlalchemy import func, select, text
 
 from app.core.config import settings
 from app.modules.ai import registry
-from app.modules.ai.context import current_ai_user
+from app.modules.ai.context import current_ai_user, current_target_override
 from app.modules.ai.errors import (
     BUDGET_EXCEEDED,
     PROVIDER_NOT_CONFIGURED,
@@ -179,10 +179,17 @@ def _load_credential(user_id: uuid.UUID | None, provider: str) -> _Credential | 
 
 
 def resolve_current(task: str, *, user_id: uuid.UUID | None = None) -> Resolved:
-    """Resolve ``task`` for ``user_id`` (default: :func:`ai.context.current_ai_user`)."""
-    uid = user_id if user_id is not None else current_ai_user()
+    """Resolve ``task`` for ``user_id`` (default: :func:`ai.context.current_ai_user`).
+
+    A per-run model choice published by ``ai.choice.apply_choice`` (or carried into a
+    background thread by ``ai.context.ai_user(..., target_override=...)``) wins with
+    ``source="per_run"`` — but only for the user it was validated for.
+    """
+    current = current_ai_user()
+    uid = user_id if user_id is not None else current
     row = _load_user_settings(uid) if uid is not None else None
-    return resolve_from(row, task, user_id=uid)
+    override = current_target_override() if uid is not None and uid == current else None
+    return resolve_from(row, task, user_id=uid, override=override)
 
 
 # --------------------------------------------------------------------------- client cache
@@ -451,8 +458,12 @@ def record_usage(
     duration_ms: int,
     status: str,
     error_code: str | None = None,
+    source: str | None = None,
 ) -> Decimal | None:
-    """Append one usage event in its own transaction (never raises). Returns the cost."""
+    """Append one usage event in its own transaction (never raises). Returns the cost.
+
+    ``source`` is how the target was chosen (``per_run`` | ``task_override`` |
+    ``user_default`` | ``server_default``)."""
     cost = registry.estimate_cost(provider, model, input_tokens, output_tokens)
     if user_id is None:
         return cost
@@ -479,6 +490,7 @@ def record_usage(
                 duration_ms=int(duration_ms),
                 status=AiUsageStatus(status),
                 error_code=error_code,
+                source=(source or None) and str(source)[:20],
             )
         )
         db.commit()
@@ -520,6 +532,7 @@ def _attempt(
         return data, CallInfo(resolved.task, resolved.workflow, "mock", provider.model or target.model, resolved.source)
 
     check_limits(user_id, target)
+    usage_source = resolved.source if target == resolved.target else "fallback"
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("AI %s -> %s/%s prompt: %s", resolved.task, target.provider, target.model, redact_for_logs(prompt))
     started = time.perf_counter()
@@ -538,7 +551,7 @@ def _attempt(
                 user_id=user_id, provider=target.provider, model=target.model, task=resolved.task,
                 workflow=resolved.workflow, input_tokens=usage.get("input_tokens", 0) or 0,
                 output_tokens=usage.get("output_tokens", 0) or 0, tokens_estimated=not usage.get("reports"),
-                duration_ms=duration, status="ERROR", error_code=err.code,
+                duration_ms=duration, status="ERROR", error_code=err.code, source=usage_source,
             )
             if err is not exc:
                 raise err from exc
@@ -551,7 +564,7 @@ def _attempt(
     cost = record_usage(
         user_id=user_id, provider=target.provider, model=target.model, task=resolved.task, workflow=resolved.workflow,
         input_tokens=input_tokens, output_tokens=output_tokens, tokens_estimated=not reported,
-        duration_ms=duration, status=status_on_success,
+        duration_ms=duration, status=status_on_success, source=usage_source,
     )
     info = CallInfo(
         task=resolved.task,

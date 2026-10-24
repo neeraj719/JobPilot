@@ -271,8 +271,8 @@ export default function QueuePage() {
         title="Application queue"
         description="Ordered by company priority, then match score, then freshness — work top-down."
         actions={
-          <Button variant="outline" onClick={() => void queueQuery.refetch()} disabled={queueQuery.isFetching}>
-            <RefreshCw className={queueQuery.isFetching ? 'animate-spin' : undefined} />
+          <Button variant="outline" onClick={() => void queueQuery.refetch()} loading={queueQuery.isFetching}>
+            {queueQuery.isFetching ? null : <RefreshCw />}
             Refresh
           </Button>
         }

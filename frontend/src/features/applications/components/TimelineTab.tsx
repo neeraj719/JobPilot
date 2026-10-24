@@ -19,7 +19,7 @@ import type { LucideIcon } from 'lucide-react'
 import { EmptyState } from '@/components/common/EmptyState'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { TimelineSkeleton } from '@/features/applications/components/ApplicationSkeletons'
 import {
   EMAIL_CLASSIFICATION_LABELS,
   INTERVIEW_TYPE_LABELS,
@@ -111,11 +111,7 @@ export function TimelineTab({ events, emails, interviews, loading = false }: Tim
         </CardHeader>
         <CardContent>
           {loading && !events ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }, (_, index) => (
-                <Skeleton key={index} className="h-12 w-full" />
-              ))}
-            </div>
+            <TimelineSkeleton rows={4} />
           ) : !events || events.length === 0 ? (
             <EmptyState size="sm" icon={CircleDot} title="No activity recorded yet" />
           ) : (

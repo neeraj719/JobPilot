@@ -1,8 +1,9 @@
 import { Check, CircleAlert, Info, Sparkles, X } from 'lucide-react'
 
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@/components/ui/spinner'
+import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
 import type { BulletCandidate, BulletChecks } from '../../types'
@@ -31,7 +32,7 @@ export interface SuggestionPanelProps {
  */
 export function SuggestionPanel({ title, original, loading, error, candidates, note, onApply, onClose, onRetry }: SuggestionPanelProps) {
   return (
-    <div className="mt-2 rounded-lg border border-ai/25 bg-ai-soft/60 p-3" role="region" aria-label={title} aria-busy={loading}>
+    <div className="border-gradient-soft mt-2 rounded-xl p-3" role="region" aria-label={title} aria-busy={loading}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-medium">
           <Sparkles className="size-4 text-ai" aria-hidden />
@@ -49,9 +50,21 @@ export function SuggestionPanel({ title, original, loading, error, candidates, n
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Suggestions</p>
           {loading ? (
-            <div className="flex items-center gap-2 rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-              <Spinner size="sm" /> Checking against your resume facts…
-            </div>
+            <SkeletonRegion label="Checking suggestions against your resume facts" className="space-y-2">
+              {/* One suggestion card: text, the fact-check chips, Apply. */}
+              <div className="rounded-md border border-border bg-card p-2" aria-hidden>
+                <SkeletonLine size="sm" className="w-full" />
+                <SkeletonLine size="sm" className="w-3/4" />
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {[16, 22, 20, 24].map((width, index) => (
+                    <Skeleton key={index} className="h-[19px] rounded-full" style={{ width: `${width * 0.25}rem` }} />
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              </div>
+            </SkeletonRegion>
           ) : error ? (
             <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
               <p className="flex items-center gap-1.5">

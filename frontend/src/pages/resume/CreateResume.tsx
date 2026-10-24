@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SkeletonLine, SkeletonRegion } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,7 +17,12 @@ import { toast } from '@/components/ui/toaster'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { MAX_RESUME_BYTES, formatBytes, useUploadResume } from '@/features/resume/api'
+import { useUploadOriginal } from '@/features/resume-upload/api'
+import { AfterUploadChoice } from '@/features/resume-upload/components/AfterUploadChoice'
+import { ResumeDropzone, useCheckedFile } from '@/features/resume-upload/components/ResumeDropzone'
+import { UploadProgressBar } from '@/features/resume-upload/components/UploadProgressBar'
+import type { AfterUpload } from '@/features/resume-upload/types'
+import { parseSummary } from '@/features/resume-upload/validation'
 import { TargetRoleSelect } from '@/features/resume/components/TargetRoleSelect'
 import { useJobPreferences } from '@/features/profile/api'
 import {
@@ -30,14 +36,17 @@ import {
 import { TemplatePicker } from '@/features/resume-studio/components/TemplatePicker'
 import { EMPTY_RESUME } from '@/features/resume-studio/schema'
 import type { StudioResume } from '@/features/resume-studio/types'
+import { useAiChoice } from '@/features/ai-providers/useAiChoice'
+import { LinkedInConnectPanel } from '@/features/linkedin/components/LinkedInConnectPanel'
 
-type Mode = 'profile' | 'upload' | 'paste' | 'linkedin' | 'blank'
+type Mode = 'profile' | 'upload' | 'paste' | 'connect' | 'linkedin' | 'blank'
 
 const MODES: { id: Mode; title: string; description: string; Icon: typeof UserRound }[] = [
+  { id: 'upload', title: 'Upload my resume', description: 'Keep your original file as-is. We also read it so scoring and tailoring work.', Icon: FileUp },
   { id: 'profile', title: 'Start from my profile', description: 'Your saved profile and preferences: verified facts only.', Icon: UserRound },
-  { id: 'upload', title: 'Upload PDF or DOCX', description: 'We read your existing resume; you review what was extracted.', Icon: FileUp },
   { id: 'paste', title: 'Paste resume text', description: 'Copy the text from any document or site you wrote it in.', Icon: ClipboardPaste },
-  { id: 'linkedin', title: 'Import LinkedIn export', description: 'The ZIP from LinkedIn’s “Get a copy of your data”.', Icon: Linkedin },
+  { id: 'connect', title: 'Connect LinkedIn', description: 'Sign in with LinkedIn to fill your name, email and photo; review before anything is saved.', Icon: Linkedin },
+  { id: 'linkedin', title: 'Import LinkedIn export', description: '…or upload the ZIP export for your full history.', Icon: Linkedin },
   { id: 'blank', title: 'Blank resume', description: 'Start with empty sections and fill them in yourself.', Icon: FilePlus2 },
 ]
 
@@ -59,7 +68,8 @@ export default function CreateResumePage() {
   useDocumentTitle('Create Resume')
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const mode: Mode | null = isMode(params.get('mode')) ? (params.get('mode') as Mode) : null
+  // `?source=linkedin` is where the LinkedIn OAuth callback (and its notification) lands.
+  const mode: Mode | null = params.get('source') === 'linkedin' ? 'connect' : isMode(params.get('mode')) ? (params.get('mode') as Mode) : null
   const setMode = (next: Mode | null) => setParams(next ? { mode: next } : {}, { replace: true })
 
   const templates = useTemplates()
@@ -67,8 +77,9 @@ export default function CreateResumePage() {
   const prefill = usePrefill(mode === 'profile')
   const build = useBuildResume()
   const importText = useImportText()
+  const parseChoice = useAiChoice('parse_resume')
   const importLinkedin = useImportLinkedin()
-  const upload = useUploadResume()
+  const upload = useUploadOriginal()
   const update = useUpdateStudioResume()
 
   const [name, setName] = React.useState('')
@@ -76,7 +87,10 @@ export default function CreateResumePage() {
   const [template, setTemplate] = React.useState('classic')
   const [setDefault, setSetDefault] = React.useState(false)
   const [text, setText] = React.useState('')
-  const [file, setFile] = React.useState<File | null>(null)
+  const picked = useCheckedFile()
+  const file = picked.file
+  const [after, setAfter] = React.useState<AfterUpload>('original')
+  const keepOriginal = mode === 'upload' && after === 'original'
   const [linkedinFiles, setLinkedinFiles] = React.useState<File[]>([])
 
   React.useEffect(() => {
@@ -89,7 +103,7 @@ export default function CreateResumePage() {
   const canSubmit = (() => {
     switch (mode) {
       case 'upload':
-        return Boolean(file)
+        return picked.ok
       case 'paste':
         return text.trim().length >= 30
       case 'linkedin':
@@ -110,14 +124,24 @@ export default function CreateResumePage() {
     try {
       let id: string
       if (mode === 'upload' && file) {
-        const created = await upload.mutateAsync({ file, name: displayName, targetRole: targetRole ?? undefined, setDefault })
+        const created = await parseChoice.runWithModel((ai) => upload.mutateAsync({ file, name: displayName, targetRole: targetRole ?? undefined, setDefault, ai }))
+        if (!created) return // the "Which model?" dialog was cancelled
         if (template !== 'classic') await update.mutateAsync({ id: created.id, template })
         id = created.id
+        if (after === 'original') {
+          // Keep as original: the flow ends on the uploaded resume's page, not in the editor.
+          toast.success('Resume uploaded — kept as your original file', { description: parseSummary(created).text })
+          navigate(`/resume/my/${created.id}`)
+          return
+        }
         if (created.parse_status !== 'PARSED') {
           toast.warning('We could not read everything from that file', { description: created.parse_error ?? 'Fill in the sections in the editor.' })
         }
       } else if (mode === 'paste') {
-        id = (await importText.mutateAsync({ text, name: displayName, target_role: targetRole, template })).id
+        // Parsing pasted text may call the AI model: ask which one when the user has several.
+        const created = await parseChoice.runWithModel((ai) => importText.mutateAsync({ text, name: displayName, target_role: targetRole, template, ai }))
+        if (!created) return
+        id = created.id
       } else if (mode === 'linkedin') {
         id = (await importLinkedin.mutateAsync({ files: linkedinFiles, name: displayName, targetRole, template })).id
       } else {
@@ -147,7 +171,7 @@ export default function CreateResumePage() {
         description="Choose where to start. Whatever you pick, the resume holds only facts you provided — JobPilot never invents experience, numbers or qualifications."
       />
 
-      <div role="radiogroup" aria-label="How do you want to start?" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div role="radiogroup" aria-label="How do you want to start?" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {MODES.map(({ id, title, description, Icon }) => (
           <button
             key={id}
@@ -169,7 +193,9 @@ export default function CreateResumePage() {
         ))}
       </div>
 
-      {mode ? (
+      {mode === 'connect' ? (
+        <LinkedInConnectPanel onBack={() => setMode(null)} />
+      ) : mode ? (
         <form onSubmit={(e) => void submit(e)} className="space-y-6">
           <Card>
             <CardHeader>
@@ -178,7 +204,13 @@ export default function CreateResumePage() {
             <CardContent className="space-y-4">
               {mode === 'profile' ? (
                 prefill.isLoading ? (
-                  <Skeleton className="h-16" />
+                  <SkeletonRegion label="Reading your profile" className="flex items-start gap-2">
+                    <Skeleton className="mt-0.5 size-4 shrink-0 rounded-full" />
+                    <div className="min-w-0 flex-1">
+                      <SkeletonLine size="sm" className="w-full" />
+                      <SkeletonLine size="sm" className="w-1/2" />
+                    </div>
+                  </SkeletonRegion>
                 ) : prefill.error ? (
                   <p className="text-sm text-destructive">{errorMessage(prefill.error)}</p>
                 ) : profileEmpty ? (
@@ -200,23 +232,13 @@ export default function CreateResumePage() {
               ) : null}
 
               {mode === 'upload' ? (
-                <div className="space-y-1">
-                  <Label htmlFor="create-file">PDF or DOCX (max {formatBytes(MAX_RESUME_BYTES)})</Label>
-                  <Input
-                    id="create-file"
-                    type="file"
-                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    onChange={(e) => {
-                      const picked = e.target.files?.[0] ?? null
-                      if (picked && picked.size > MAX_RESUME_BYTES) {
-                        toast.error('File is too large', { description: `Maximum size is ${formatBytes(MAX_RESUME_BYTES)}.` })
-                        e.target.value = ''
-                        return
-                      }
-                      setFile(picked)
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground">The original file is kept unchanged; edits go into a structured copy.</p>
+                <div className="space-y-4">
+                  {upload.isPending ? (
+                    <UploadProgressBar progress={upload.progress} fileName={file?.name} />
+                  ) : (
+                    <ResumeDropzone id="create-file" file={file} problem={picked.problem} onFile={(f) => void picked.setFile(f)} />
+                  )}
+                  <AfterUploadChoice id="create-after" value={after} onChange={setAfter} disabled={upload.isPending} />
                 </div>
               ) : null}
 
@@ -249,7 +271,7 @@ export default function CreateResumePage() {
                     <ShieldCheck className="size-4" aria-hidden />
                     <AlertDescription>
                       JobPilot never logs in to LinkedIn and never scrapes it. The export is read in memory and not stored; only the
-                      resume made from it is saved.
+                      resume made from it is saved (and, if you connected LinkedIn, the same details on that connection for syncing).
                     </AlertDescription>
                   </Alert>
                   <div className="space-y-1">
@@ -288,6 +310,7 @@ export default function CreateResumePage() {
             </CardContent>
           </Card>
 
+          {keepOriginal ? null : (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Template</CardTitle>
@@ -303,13 +326,14 @@ export default function CreateResumePage() {
               />
             </CardContent>
           </Card>
+          )}
 
           <div className="flex flex-wrap justify-between gap-2">
             <Button type="button" variant="ghost" onClick={() => setMode(null)}>
               <ArrowLeft aria-hidden /> Choose another start
             </Button>
             <Button type="submit" disabled={!canSubmit} loading={busy}>
-              Create and open the editor <ArrowRight aria-hidden />
+              {keepOriginal ? 'Upload and keep as original' : 'Create and open the editor'} <ArrowRight aria-hidden />
             </Button>
           </div>
         </form>

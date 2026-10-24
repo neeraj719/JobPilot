@@ -4,6 +4,8 @@ AI Model Settings endpoints (bring-your-own provider):
 
 * ``GET  /ai/providers``                     catalog (privacy/billing notes, key pages) + the user's credential status
 * ``GET  /ai/settings`` / ``PUT /ai/settings`` default model, per-workflow models, fallback, limits
+* ``PATCH /ai/settings``                      prompt mode and/or remember one workflow's model (model picker)
+* ``GET  /ai/choices?task=``                  models the user can pick for one AI run (``ai.choice``)
 * ``PUT  /ai/credentials/{provider}``         save / rotate a key or base URL (recent sign-in required)
 * ``DELETE /ai/credentials/{provider}``       remove it (recent sign-in required; ciphertext wiped)
 * ``POST /ai/credentials/{provider}/test``    one cheap call, result stored (rate limited)
@@ -26,16 +28,18 @@ from app.core.deps import get_current_user, require_recent_auth
 from app.core.exceptions import NotFoundError, RateLimitedError
 from app.core.rate_limit import rate_limiter
 from app.models.user import User
-from app.modules.ai import registry, settings_service
+from app.modules.ai import choice, registry, settings_service
 from app.modules.ai.factory import provider_status
 from app.modules.ai.schemas import AIStatus
 from app.modules.ai.settings_schemas import (
+    AiChoicesResponse,
     ConnectionTestRequest,
     ConnectionTestResult,
     CredentialRead,
     CredentialWrite,
     ModelsResponse,
     ProvidersResponse,
+    SettingsPatch,
     SettingsRead,
     SettingsUpdate,
     UsageResponse,
@@ -85,6 +89,24 @@ def get_settings(user: User = Depends(get_current_user), db: Session = Depends(g
 @router.put("/settings", response_model=SettingsRead, summary="Replace the user's AI model settings")
 def put_settings(payload: SettingsUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> SettingsRead:
     return SettingsRead.model_validate(settings_service.update_settings(db, user, payload))
+
+
+@router.patch("/settings", response_model=SettingsRead, summary="Change the model-picker mode or remember a workflow's model")
+def patch_settings(payload: SettingsPatch, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> SettingsRead:
+    """``model_prompt_mode``: ``ask`` | ``default``. ``remember: {workflow, provider, model}`` sets
+    ``workflow_models[workflow]`` (validated like ``PUT``). Everything else is kept."""
+    return SettingsRead.model_validate(settings_service.patch_settings(db, user, payload))
+
+
+@router.get("/choices", response_model=AiChoicesResponse, summary="Models the user can pick for one AI run")
+def get_choices(
+    task: str = Query(default="general", min_length=1, max_length=80, pattern=r"^[a-z0-9_]+$"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AiChoicesResponse:
+    """The task's routed default first, then the other usable models (cached 60 s per user).
+    The UI asks "which model should process this?" only when ``should_ask``."""
+    return AiChoicesResponse.model_validate(choice.list_choices(db, user, task))
 
 
 @router.put("/credentials/{provider}", response_model=CredentialRead, summary="Save or rotate a provider credential")

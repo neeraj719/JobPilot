@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useProviderModels } from '@/features/ai-providers/api'
 import { formatPrice } from '@/features/ai-providers/schema'
 import type { ModelRow, ProviderId } from '@/features/ai-providers/types'
@@ -69,7 +70,18 @@ export function ModelSelect({ provider, value, onChange, id, disabled, className
   return (
     <Select value={value ?? undefined} onValueChange={onChange} disabled={disabled || models.isLoading}>
       <SelectTrigger id={id} className={className} aria-label={rest['aria-label']}>
-        <SelectValue placeholder={models.isLoading ? 'Loading models…' : 'Choose a model'} />
+        <SelectValue
+          placeholder={
+            models.isLoading ? (
+              <span role="status" className="flex items-center">
+                <Skeleton className="h-3.5 w-28" />
+                <span className="sr-only">Loading models</span>
+              </span>
+            ) : (
+              'Choose a model'
+            )
+          }
+        />
       </SelectTrigger>
       <SelectContent>
         {value && !known ? (

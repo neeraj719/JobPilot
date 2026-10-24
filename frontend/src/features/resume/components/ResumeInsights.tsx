@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
-import { LoadingState } from '@/components/common/LoadingState'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
@@ -23,6 +22,7 @@ import {
 import { RecommendationList } from '@/features/resume/components/RecommendationList'
 import { ResumeHealthCard } from '@/features/resume/components/ResumeHealthCard'
 import { ResumeScoreHistoryChart } from '@/features/resume/components/ResumeScoreHistoryChart'
+import { ResumeInsightsSkeleton } from '@/features/resume/components/ResumeSkeletons'
 import type { ParsedResume, ResumeRead } from '@/types/api'
 
 /** Resume health, recommendations and the before/after chart for one resume. */
@@ -36,7 +36,7 @@ export function ResumeInsights({ resume }: { resume: ResumeRead }) {
 
   if (resume.parse_status !== 'PARSED') return null
 
-  if (query.isLoading) return <LoadingState variant="list" rows={3} />
+  if (query.isLoading) return <ResumeInsightsSkeleton />
   if (query.error || !query.data) {
     return (
       <ErrorState

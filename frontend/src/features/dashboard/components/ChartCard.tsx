@@ -1,6 +1,8 @@
 import type { LucideIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -79,7 +81,9 @@ export function ChartCard({
             className={cn('transition-opacity duration-200', refreshing && 'opacity-60')}
             aria-busy={refreshing || undefined}
           >
-            {children}
+            <ErrorBoundary variant="widget" label="this chart">
+              {children}
+            </ErrorBoundary>
           </div>
         )}
         {footer && !error && !loading && !empty ? <div className="pt-3">{footer}</div> : null}

@@ -33,18 +33,26 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import Any
 
 
 class AiUserSlot:
-    """Mutable holder for the user id of one request (or one ``ai_user`` block)."""
+    """Mutable holder for the user id of one request (or one ``ai_user`` block).
 
-    __slots__ = ("user_id",)
+    ``target_override`` is the model the user picked for *this run* (the "which model should
+    process this?" choice, ``ai.choice``): an ``ai.routing.Target`` validated by
+    ``ai.choice.validate_choice``. ``ai.runtime.resolve_current`` returns it with
+    ``source="per_run"`` for every task of the request, so no call site changes.
+    """
 
-    def __init__(self, user_id: uuid.UUID | None = None) -> None:
+    __slots__ = ("user_id", "target_override")
+
+    def __init__(self, user_id: uuid.UUID | None = None, target_override: Any = None) -> None:
         self.user_id = user_id
+        self.target_override = target_override
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"<AiUserSlot {self.user_id}>"
+        return f"<AiUserSlot {self.user_id} {self.target_override}>"
 
 
 _slot: ContextVar[AiUserSlot | None] = ContextVar("jobpilot_ai_user_slot", default=None)
@@ -69,15 +77,36 @@ def current_ai_user() -> uuid.UUID | None:
         return None
 
 
+def current_target_override() -> Any:
+    """The per-run model choice of the current request / block (``ai.routing.Target``) or ``None``."""
+    slot = _slot.get()
+    return slot.target_override if slot is not None else None
+
+
+def set_target_override(target: Any) -> bool:
+    """Publish ``target`` as this request's per-run model (``ai.choice.apply_choice``).
+
+    Returns ``False`` when there is no slot (outside a request or ``ai_user`` block), in
+    which case nothing is changed.
+    """
+    slot = _slot.get()
+    if slot is None:
+        return False
+    slot.target_override = target
+    return True
+
+
 @contextmanager
-def ai_user(user_id: uuid.UUID | str | None) -> Iterator[None]:
+def ai_user(user_id: uuid.UUID | str | None, *, target_override: Any = None) -> Iterator[None]:
     """Run a block with ``user_id``'s AI settings (threads, workers, scripts).
 
     Set and reset happen in the same context, so nesting and threads are safe. A thread
     started with ``threading.Thread`` starts with an *empty* context: wrap the thread's
-    target in this, not the code that starts it.
+    target in this, not the code that starts it. ``target_override`` carries a per-run
+    model choice into background work (capture it with :func:`current_target_override`
+    before starting the thread).
     """
-    token = _slot.set(AiUserSlot(_coerce(user_id)))
+    token = _slot.set(AiUserSlot(_coerce(user_id), target_override))
     try:
         yield
     finally:
@@ -93,6 +122,7 @@ async def request_ai_context() -> AsyncIterator[AiUserSlot]:
         yield slot
     finally:
         slot.user_id = None
+        slot.target_override = None
         try:
             _slot.reset(token)
         except ValueError:  # torn down in another context: the emptied slot is harmless
@@ -105,4 +135,12 @@ def bind_request_user(slot: AiUserSlot | None, user_id: uuid.UUID | None) -> Non
         slot.user_id = user_id
 
 
-__all__ = ["AiUserSlot", "ai_user", "bind_request_user", "current_ai_user", "request_ai_context"]
+__all__ = [
+    "AiUserSlot",
+    "ai_user",
+    "bind_request_user",
+    "current_ai_user",
+    "current_target_override",
+    "request_ai_context",
+    "set_target_override",
+]

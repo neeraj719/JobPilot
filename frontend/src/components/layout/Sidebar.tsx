@@ -2,7 +2,14 @@ import { ChevronDown, ChevronLeft } from 'lucide-react'
 import * as React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { activeNavChild, isNavGroupActive, isNavItemActive, type NavItem } from '@/components/layout/navigation'
+import {
+  activeNavChild,
+  isNavGroupActive,
+  isNavItemActive,
+  RAIL_FOCUS,
+  RAIL_TOOLTIP,
+  type NavItem,
+} from '@/components/layout/navigation'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SimpleTooltip } from '@/components/ui/tooltip'
@@ -25,28 +32,47 @@ export interface SidebarProps {
  * the rail is 64px (w-16); the column padding (px-3, 12px) plus the item padding
  * (px-3, 12px) puts every 16px icon at 24–40px, i.e. dead centre of the rail, and in
  * exactly the same place when expanded. Only the labels fade, so nothing jumps.
+ *
+ * Colour: the rail is the dark indigo `sidebar` surface in BOTH themes. Everything on it uses
+ * the `sidebar-*` tokens only (foreground, muted, section, accent, primary, raised, border,
+ * ring) — never the page tokens, which are tuned for the light canvas.
  */
 const LABEL_FADE = 'whitespace-nowrap transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none'
 
-/** The JobPilot mark. Always links to the launcher ("All modules"). */
-export function BrandMark({ withName = false, className }: { withName?: boolean; className?: string }) {
+/** The JobPilot logo tile: brand-600 (light) / brand-400 tint (dark), the same everywhere. */
+export function LogoMark({ className }: { className?: string }) {
   return (
-    <SimpleTooltip label="All modules" side="bottom" disabled={withName}>
+    <span
+      className={cn(
+        'flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-brand-50 shadow-sm ring-1 ring-inset ring-brand-50/15',
+        'dark:bg-brand-400 dark:text-brand-950',
+        className,
+      )}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
+        <path d="M20.3 3.9 5.6 9.8c-.9.4-.9 1.6 0 2l5.1 2.2 2.3 5.2c.4.9 1.6.8 2-.1l5.9-14.3c.3-.8-.4-1.5-1.2-1.2Z" />
+      </svg>
+    </span>
+  )
+}
+
+/** The JobPilot mark. Always links to the launcher ("All modules"). */
+export function BrandMark({ withName = false, onRail = false, className }: { withName?: boolean; onRail?: boolean; className?: string }) {
+  return (
+    <SimpleTooltip label="All modules" side="bottom" disabled={withName} className={onRail ? RAIL_TOOLTIP : undefined}>
       <Link
         to="/home"
         className={cn(
-          'flex shrink-0 items-center gap-2.5 rounded-md p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'flex shrink-0 items-center gap-2.5 rounded-md p-1',
+          onRail ? RAIL_FOCUS : 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           className,
         )}
       >
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
-          <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
-            <path d="M20.3 3.9 5.6 9.8c-.9.4-.9 1.6 0 2l5.1 2.2 2.3 5.2c.4.9 1.6.8 2-.1l5.9-14.3c.3-.8-.4-1.5-1.2-1.2Z" />
-          </svg>
-        </span>
+        <LogoMark />
         {withName ? (
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold leading-tight text-foreground">JobPilot AI</span>
+            <span className="block truncate text-sm font-semibold leading-tight tracking-tight text-foreground">JobPilot AI</span>
             <span className="block truncate text-[11px] leading-tight text-muted-foreground">All modules</span>
           </span>
         ) : null}
@@ -74,16 +100,18 @@ function SidebarRail({ collapsed }: { collapsed: boolean }) {
         tabIndex={-1}
         className={cn('absolute inset-0', collapsed ? 'cursor-e-resize' : 'cursor-w-resize')}
       >
-        <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover/rail:bg-primary/40" />
+        <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover/rail:bg-sidebar-primary/70" />
       </button>
 
-      {/* The visible toggle, centred on the border line. */}
+      {/* The visible toggle, centred on the border line: a white (card) disc that reads on
+          both the dark rail and the light canvas. */}
       <SimpleTooltip
         side="right"
+        className={RAIL_TOOLTIP}
         label={
           <span className="flex items-center gap-2">
             {label}
-            <kbd className="rounded border border-border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground">
+            <kbd className="rounded border border-sidebar-border bg-sidebar px-1.5 font-mono text-[10px] text-sidebar-muted">
               {SIDEBAR_SHORTCUT_LABEL}
             </kbd>
           </span>
@@ -97,7 +125,7 @@ function SidebarRail({ collapsed }: { collapsed: boolean }) {
           aria-keyshortcuts="Control+B Meta+B"
           className={cn(
             'absolute left-1/2 top-1/2 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full',
-            'border border-sidebar-border bg-background text-muted-foreground shadow-sm',
+            'border border-border bg-card text-muted-foreground shadow-sm',
             'transition-[color,background-color,border-color,box-shadow,transform] duration-150',
             'hover:scale-110 hover:border-primary/50 hover:bg-primary hover:text-primary-foreground hover:shadow-md',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
@@ -128,26 +156,28 @@ function NavRow({ item, pathname, isCollapsed, onNavigate, depth = 0, active }: 
   const isActive = active ?? isNavItemActive(item, pathname)
   const Icon = item.icon
   return (
-    <SimpleTooltip label={item.label} side="right" disabled={!isCollapsed}>
+    <SimpleTooltip label={item.label} side="right" disabled={!isCollapsed} className={RAIL_TOOLTIP}>
       <Link
         to={item.to}
         onClick={onNavigate}
+        onPointerEnter={() => prefetchNavTarget(item.to)}
+        onFocus={() => prefetchNavTarget(item.to)}
         aria-current={isActive ? 'page' : undefined}
         aria-label={isCollapsed ? item.label : undefined}
         className={cn(
           'group relative flex items-center gap-3 overflow-hidden rounded-md px-3 font-medium',
           depth === 0 ? 'h-9 text-sm' : 'h-8 text-[13px]',
           'transition-colors duration-150 motion-reduce:transition-none',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          RAIL_FOCUS,
           isActive
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_0_1px_0_0_hsl(var(--sidebar-accent-foreground)/0.06),0_6px_18px_-8px_hsl(var(--sidebar-primary)/0.6)]'
             : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
         )}
       >
-        {/* Active indicator: a short accent bar on the leading edge. */}
+        {/* Active indicator: a short bright bar on the leading edge. */}
         <span
           className={cn(
-            'absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary transition-all duration-200',
+            'absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-gradient-to-b from-sidebar-primary to-sidebar-glow transition-all duration-200',
             isActive ? 'opacity-100' : 'h-0 opacity-0',
           )}
           aria-hidden
@@ -156,7 +186,7 @@ function NavRow({ item, pathname, isCollapsed, onNavigate, depth = 0, active }: 
           className={cn(
             'shrink-0 transition-colors',
             depth === 0 ? 'size-4' : 'size-3.5',
-            isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground',
+            isActive ? 'text-sidebar-primary' : 'text-sidebar-muted group-hover:text-sidebar-accent-foreground',
           )}
           aria-hidden
         />
@@ -202,9 +232,9 @@ function NavGroup({ item, pathname, isCollapsed, onNavigate }: Omit<NavRowProps,
             aria-controls={listId}
             aria-label={open ? `Collapse ${item.label}` : `Expand ${item.label}`}
             className={cn(
-              'absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground',
+              'absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-muted',
               'transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              RAIL_FOCUS,
             )}
           >
             <ChevronDown
@@ -245,7 +275,14 @@ function NavGroup({ item, pathname, isCollapsed, onNavigate }: Omit<NavRowProps,
 }
 
 /** Left navigation: the module switcher on top, then the active module's sections only. */
-export function Sidebar({ collapsed = false, onNavigate, className }: SidebarProps) {
+/** Hover / focus intent on a Resume Studio link: warm its first queries (on-demand chunk). */
+function prefetchNavTarget(path: string) {
+  if (!path.startsWith('/resume')) return
+  void import('@/modules/resume/prefetchData').then((m) => m.prefetchResumePath(path)).catch(() => undefined)
+}
+
+/** Memoised: the shell re-renders on module-list refetches; the rail only needs to on its own props / route. */
+export const Sidebar = React.memo(function Sidebar({ collapsed = false, onNavigate, className }: SidebarProps) {
   const { pathname } = useLocation()
   const isDrawer = Boolean(onNavigate)
   const isCollapsed = collapsed && !isDrawer
@@ -256,11 +293,13 @@ export function Sidebar({ collapsed = false, onNavigate, className }: SidebarPro
     <div className={cn('relative flex h-full flex-col bg-sidebar text-sidebar-foreground', className)}>
       <div
         className={cn(
-          'flex h-16 shrink-0 items-center gap-1.5 overflow-hidden border-b border-sidebar-border',
+          'flex h-16 shrink-0 items-center gap-2 overflow-hidden border-b border-sidebar-border',
           isCollapsed ? 'justify-center px-3' : 'px-3',
+          // The drawer's close button sits at the right end of this row.
+          isDrawer && 'pr-12',
         )}
       >
-        {!isCollapsed ? <BrandMark /> : null}
+        {!isCollapsed ? <BrandMark onRail /> : null}
         <ModuleSwitcher
           definition={active.definition}
           module={active.module}
@@ -272,20 +311,20 @@ export function Sidebar({ collapsed = false, onNavigate, className }: SidebarPro
       </div>
 
       <ScrollArea className="flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
-        <nav className="space-y-5 px-3 py-4" aria-label={active.definition ? `${active.module?.name ?? active.definition.name} navigation` : 'Main'}>
+        <nav className="space-y-6 px-3 py-5" aria-label={active.definition ? `${active.module?.name ?? active.definition.name} navigation` : 'Main'}>
           {active.isLoading && !active.definition ? (
             <div className="space-y-2 px-3" aria-hidden>
               {Array.from({ length: 6 }, (_, index) => (
-                <Skeleton key={index} className="h-7 w-full" />
+                <Skeleton key={index} className="h-7 w-full bg-sidebar-accent/60" />
               ))}
             </div>
           ) : null}
           {sections.map((section) => (
             <div key={section.title} className="space-y-0.5">
-              <div className="relative flex h-6 items-center px-3">
+              <div className="relative mb-1 flex h-6 items-center px-3">
                 <p
                   className={cn(
-                    'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70',
+                    'text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-section',
                     LABEL_FADE,
                     isCollapsed ? 'w-0 overflow-hidden opacity-0' : 'opacity-100',
                   )}
@@ -317,4 +356,4 @@ export function Sidebar({ collapsed = false, onNavigate, className }: SidebarPro
       {!isDrawer ? <SidebarRail collapsed={isCollapsed} /> : null}
     </div>
   )
-}
+})

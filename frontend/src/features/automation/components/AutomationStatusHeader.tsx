@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { SkeletonLine } from '@/components/common/skeletons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -89,12 +90,35 @@ export function AutomationStatusHeader({
 
   if (loading) {
     return (
-      <Card>
-        <CardContent className="space-y-4 p-6">
-          <Skeleton className="h-6 w-56" />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <Card role="status" aria-busy="true">
+        <span className="sr-only">Loading the automation status</span>
+        <CardContent className="space-y-5 p-5 sm:p-6" aria-hidden>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex items-start gap-3">
+              <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
+              <div className="space-y-1">
+                <SkeletonLine size="sm" className="w-36" />
+                <SkeletonLine size="sm" className="w-80 max-w-full" />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Skeleton className="h-9 w-24 rounded-lg" />
+              <Skeleton className="h-9 w-28 rounded-lg" />
+              <Skeleton className="size-9 rounded-lg" />
+            </div>
+          </div>
+          <div className="grid gap-5 border-t border-border pt-5 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }, (_, index) => (
-              <Skeleton key={index} className="h-12 w-full" />
+              <div key={index} className="min-w-0 space-y-1">
+                <div className="flex h-4 items-center gap-1.5">
+                  <Skeleton className="size-3.5 rounded-full" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+                <div>
+                  <SkeletonLine size="sm" className={index % 2 ? 'w-24' : 'w-40'} />
+                  <SkeletonLine size="xs" className="w-32 max-w-full" />
+                </div>
+              </div>
             ))}
           </div>
         </CardContent>

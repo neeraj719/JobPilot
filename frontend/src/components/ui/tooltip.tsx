@@ -36,6 +36,8 @@ export interface SimpleTooltipProps {
   align?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['align']
   delayDuration?: number
   disabled?: boolean
+  /** Extra classes for the bubble (the sidebar passes its rail colours). */
+  className?: string
 }
 
 export function SimpleTooltip({
@@ -45,12 +47,13 @@ export function SimpleTooltip({
   align = 'center',
   delayDuration = 200,
   disabled = false,
+  className,
 }: SimpleTooltipProps) {
   if (disabled) return <>{children}</>
   return (
     <Tooltip delayDuration={delayDuration}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side} align={align}>
+      <TooltipContent side={side} align={align} className={className}>
         {label}
       </TooltipContent>
     </Tooltip>

@@ -145,6 +145,28 @@ class Settings(BaseSettings):
         ]
     )
 
+    # --- LinkedIn (official OAuth only: Sign In with LinkedIn using OpenID Connect, plus the
+    #     optional Member Data Portability API). Never scraping, never browser automation. ---
+    LINKEDIN_CLIENT_ID: str | None = None
+    LINKEDIN_CLIENT_SECRET: str | None = None
+    LINKEDIN_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/linkedin/callback"
+    LINKEDIN_AUTH_BASE: str = "https://www.linkedin.com/oauth/v2"
+    LINKEDIN_API_BASE: str = "https://api.linkedin.com"
+    #: Send a PKCE (S256) challenge with the authorization request and the verifier with the
+    #: token exchange. **Off by default**: LinkedIn documents PKCE only for its separately
+    #: approved "native PKCE" flow, and on a standard web app the real token endpoint answered
+    #: ``401 invalid_request: authorization code not found`` for codes issued to a request that
+    #: carried a ``code_challenge`` (2026-10-24, owner's app). The confidential client secret,
+    #: the signed single-use ``state`` + cookie and the ID-token ``nonce`` still protect the flow.
+    LINKEDIN_PKCE_ENABLED: bool = False
+    #: Request ``r_dma_portability_3rd_party`` (Member Snapshot API). Only once LinkedIn has
+    #: approved the app for "Member Data Portability (3rd party)"; EU/EEA members only.
+    LINKEDIN_DMA_ENABLED: bool = False
+    #: How often the scheduler re-checks connections that have auto-sync on (it never writes).
+    LINKEDIN_AUTO_SYNC_HOURS: int = Field(default=24, ge=1, le=24 * 30)
+    #: An export ZIP older than this is reported as stale on the LinkedIn card.
+    LINKEDIN_EXPORT_STALE_DAYS: int = Field(default=90, ge=1, le=3650)
+
     # --- Browser automation ---
     PLAYWRIGHT_HEADLESS: bool = True
     #: Chromium's renderer sandbox is what protects this host from a hostile page.

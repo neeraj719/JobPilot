@@ -6,11 +6,11 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
 import { EMAIL_CLASSIFICATION_LABELS } from '@/lib/utils'
 import { formatApiDateTime, formatApiRelative } from '@/features/automation/datetime'
 import { ClassificationBadge } from '@/features/emails/components/ClassificationBadge'
 import { EMAIL_CLASSIFICATIONS, type ApplicationRead, type EmailClassification, type EmailMessageRead } from '@/types/api'
+import { EmailDetailSkeleton } from '@/features/emails/components/EmailSkeletons'
 
 export interface EmailDetailProps {
   email: EmailMessageRead | null
@@ -50,12 +50,7 @@ export function EmailDetail({
 }: EmailDetailProps) {
   if (loading) {
     return (
-      <div className="space-y-4 p-5">
-        <Skeleton className="h-6 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
+      <EmailDetailSkeleton />
     )
   }
 

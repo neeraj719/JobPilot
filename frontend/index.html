@@ -2,17 +2,90 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
+    <!-- no-flash: resolve the theme exactly like src/stores/ui.ts (stored preference in
+         localStorage "jobpilot.ui" -> prefers-color-scheme) and apply it before the first paint,
+         so a reload never flashes the wrong canvas. Colours mirror --background (light / dark). -->
+    <script>
+      ;(function () {
+        var dark = false
+        try {
+          var theme = 'system'
+          var stored = JSON.parse(localStorage.getItem('jobpilot.ui') || 'null')
+          if (stored && stored.state && stored.state.theme) theme = stored.state.theme
+          dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        } catch (e) {
+          dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        }
+        var root = document.documentElement
+        if (dark) root.classList.add('dark')
+        root.style.colorScheme = dark ? 'dark' : 'light'
+      })()
+    </script>
+    <style>
+      html { background-color: #f6f7fa; }
+      html.dark { background-color: #11141a; }
+    </style>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Installable web app (PWA baseline): manifest, home-screen icon. The service worker is
+         registered by vite-plugin-pwa in production builds only. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="JobPilot" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fa" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#11141a" />
-    <!-- Self-hosted Inter (public/fonts, SIL OFL). Preloaded so text does not re-flow on swap. -->
-    <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Self-hosted fonts (public/fonts, SIL OFL). Preloaded so text does not re-flow on swap. -->
+    <link rel="preload" href="/fonts/InterVariable-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Display face for headings (Bricolage Grotesque, SIL OFL), 41 kB, preloaded too. -->
+    <link rel="preload" href="/fonts/BricolageGrotesque-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <meta
       name="description"
-      content="JobPilot AI — discover matching software jobs, prepare applications with AI and track every response."
+      content="JobPilot AI — build your resume, score it against a real job description and tailor it with AI suggestions you approve. Nothing is added that you did not do."
     />
+    <!-- Link previews (the landing page refines these at runtime with useDocumentMeta). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="JobPilot AI" />
+    <meta property="og:title" content="JobPilot AI — build, score and tailor your resume" />
+    <meta
+      property="og:description"
+      content="Build your resume, score it against a real job description and tailor it with AI suggestions you approve."
+    />
+    <meta property="og:image" content="/landing/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="JobPilot AI — build, score and tailor your resume" />
+    <meta
+      name="twitter:description"
+      content="Build your resume, score it against a real job description and tailor it with AI suggestions you approve."
+    />
+    <meta name="twitter:image" content="/landing/og.png" />
+    <!--
+      The landing page's LCP candidate is the hero poster. Preload it only where it is shown:
+      `/` for a visitor without a session token in this tab (signed-in users get the launcher).
+      `imagesizes` must match HERO_POSTER_SIZES in src/features/landing/LandingHero.tsx.
+    -->
+    <script>
+      ;(function () {
+        try {
+          if (location.pathname !== '/') return
+          var auth = JSON.parse(sessionStorage.getItem('jobpilot.auth') || 'null')
+          if (auth && auth.state && auth.state.accessToken) return
+          var link = document.createElement('link')
+          link.rel = 'preload'
+          link.as = 'image'
+          link.href = '/3d/hero-scene.webp'
+          link.setAttribute('imagesrcset', '/3d/hero-scene-640.webp 640w, /3d/hero-scene.webp 1120w')
+          link.setAttribute('imagesizes', '(min-width: 1440px) 640px, (min-width: 1024px) 45vw, 80vw')
+          link.setAttribute('fetchpriority', 'high')
+          document.head.appendChild(link)
+        } catch (e) {
+          /* storage blocked: the image still loads with high priority from the page */
+        }
+      })()
+    </script>
     <title>JobPilot AI</title>
   </head>
   <body class="h-full">
