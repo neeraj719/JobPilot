@@ -655,6 +655,25 @@ employer's ATS result.
   `submitted_resume_version`); `POST /targets/{id}/snapshot` / `/snapshot/upload` (new snapshot,
   change detection by text hash); `/refresh` (re-fetch the stored URL); `/tailor {source_resume_id}`;
   `GET /targets/{id}/compare` (source vs tailored with the explanation per change); `GET /summary`.
+* **One-screen tailoring** (job-tailor stream, no migration): `POST /targets/tailor {jd: SnapshotCreate,
+  source_resume_id? (None = default resume), company_name?, role_title?, name?, ai?}` → `TailorResult` (+ `target_id`,
+  `tailored_resume_id`, `analysis_id`, `ai_pass: running|rules_only`). One transaction: resume (422 `resume_required`,
+  404 another user's) → snapshot → target (company/role: request → JD → `Unknown company` / JD title / `Untitled role`;
+  when derived, the JD `text_sha256` joins the fingerprint, so the same JD twice is 409 `target_exists` with
+  `details.id` while two different pasted JDs both save) → the same run as `/targets/{id}/tailor`. `_ai_rate_limit` applies.
+  The JD rules parser now also reads a plainly named company ("About X", "Join X", "X is hiring", "… at X" title).
+* **AI tailoring pass** (`ats.tailoring.tailor_pass`, task `tailor_resume` → workflow `generation`): when a model
+  answers, the tailored copy's first analysis stays RUNNING and the pass rewrites the summary (≤ 60 words, own facts only,
+  `tailoring.summary_problem`) and up to `TAILOR_MAX_BULLETS` = 12 bullets (JD-overlapping entries first;
+  `resumes.apply.bullet_problem` + a tool may only be named when its own entry names it), and orders skills JD-first.
+  Steps are suggestion rows with `checks.tailor_pass` / `checks.tailor_state` (pending → accepted | rejected | unchanged |
+  not_run | applied) so the UI shows "AI rewrite (n of m)"; refused candidates keep `checks.ai_rejected`. Accepted
+  rewrites are applied in one go as a new version (`change_source` AI, note "AI tailoring for <company · role>: n changes"),
+  rows marked APPLIED with `checks.applied_to_resume_id`, then a fresh analysis (no polish) is the target's
+  `last_analysis_id`. Model error → nothing applied, `error` on the analysis; `POST /analyses/{id}/polish {task:
+  tailor_resume}` retries (task inferred when omitted). `GET /targets/{id}/compare` gains `changes[]` (`TailorChange`:
+  group skills|summary|bullets|sections, before → after, rationale, source AI|SYSTEM; a rules-then-AI rewrite of one
+  text is one entry) and `ai_rejected`. UI: `/resume/targets/new` (`features/ats/tailor/**`).
 * Model calls go through `ats.llm` → `ai.runtime`; JD and resume text is always fenced with
   `ai.safety.wrap_untrusted`; background polish runs inside `ai.context.ai_user(user_id)`.
 * Every model-calling endpoint above accepts the per-run model choice `ai: {provider, model}` (multipart

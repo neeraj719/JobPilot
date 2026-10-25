@@ -487,31 +487,42 @@ def render_pdf(parsed: ParsedResume | dict[str, Any], template: ResumeTemplate |
                     spaceAfter=spacing.section_after,
                 )
             )
-        content: list[Any] = []
+        # The heading (and its rule) waits for the first piece of content and is grouped with it,
+        # so a heading never ends a page alone. Only the *start* of a section or an entry is kept
+        # together (heading, entry line, meta, first bullet); the remaining bullets flow across
+        # pages. Groups are flat: a KeepTogether nested in another made reportlab move whole
+        # sections (even seven-line ones) to a fresh page, leaving most of the page blank.
+        pending: list[Any] = list(head)
+
+        def emit(items: list[Any], *, together: bool) -> None:
+            nonlocal pending
+            group = [*pending, *items]
+            pending = []
+            if not group:
+                return
+            if together and len(group) > 1:
+                story.append(KeepTogether(group))
+            else:
+                story.extend(group)
+
         if block.paragraph:
-            content.append(Paragraph(escape(block.paragraph), body))
+            emit([Paragraph(escape(block.paragraph), body)], together=True)
         if block.inline:
-            content.append(Paragraph(escape(block.inline), body))
-        for item in block.bullets:
-            content.append(bullet_par(item))
+            emit([Paragraph(escape(block.inline), body)], together=True)
+        for index, item in enumerate(block.bullets):
+            emit([bullet_par(item)], together=index == 0)
         for position, entry in enumerate(block.entries):
-            parts: list[Any] = []
+            start: list[Any] = []
             if position:
-                parts.append(Spacer(1, spacing.entry_gap))
-            parts.append(entry_head(entry))
+                start.append(Spacer(1, spacing.entry_gap))
+            start.append(entry_head(entry))
             if entry.meta:
-                parts.append(Paragraph(escape(entry.meta), meta_style))
-            for bullet in entry.bullets:
-                parts.append(bullet_par(bullet))
-            content.append(KeepTogether(parts) if len(parts) <= 6 else parts[0])
-            if len(parts) > 6:
-                content.extend(parts[1:])
-        # Keep a heading with the start of its section.
-        if content:
-            story.append(KeepTogether([*head, content[0]]))
-            story.extend(content[1:])
-        else:
-            story.extend(head)
+                start.append(Paragraph(escape(entry.meta), meta_style))
+            bullets = [bullet_par(bullet) for bullet in entry.bullets]
+            emit([*start, *bullets[:1]], together=True)
+            emit(bullets[1:], together=False)
+        # An empty section still shows its heading.
+        story.extend(pending)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(

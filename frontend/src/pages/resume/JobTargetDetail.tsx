@@ -178,6 +178,7 @@ function JdCard({ target }: { target: JobTargetDetail }) {
 }
 
 function TailorCard({ target }: { target: JobTargetDetail }) {
+  const navigate = useNavigate()
   const resumes = useResumes()
   const tailor = useTailor(target.id)
   const [sourceId, setSourceId] = React.useState(target.source_resume?.id ?? NONE)
@@ -188,8 +189,12 @@ function TailorCard({ target }: { target: JobTargetDetail }) {
   const run = async (ai?: WorkflowTarget) => {
     try {
       const result = await tailor.mutateAsync({ source_resume_id: sourceId === NONE ? undefined : sourceId, ai })
+      const running = result.ai_pass === 'running'
       toast.success(`Created “${result.resume.name}”`, {
-        description: `Estimate ${result.source_score ?? '—'} → ${result.analysis.overall_score ?? '—'} with ${result.explanations.length} safe changes. The original is unchanged.`,
+        description: running
+          ? `${result.explanations.length} safe changes applied; the AI rewrite continues in the background. The original is unchanged.`
+          : `Estimate ${result.source_score ?? '—'} → ${result.analysis.overall_score ?? '—'} with ${result.explanations.length} safe changes. The original is unchanged.`,
+        action: { label: running ? 'Follow progress' : 'See what changed', onClick: () => navigate(`/resume/targets/new?target=${target.id}&analysis=${result.analysis.id}`) },
       })
       setComparing(true)
     } catch (error) {

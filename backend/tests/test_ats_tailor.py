@@ -357,3 +357,24 @@ def test_plan_bullets_puts_the_matching_entries_first_and_caps():
     many = backend_resume()
     many["experience"][0]["description"] = "\n".join(f"- Built Python service number{n} for billing" for n in range(20))
     assert len(tailoring.plan_bullets(many, BACKEND_STRUCTURED)) == tailoring.TAILOR_MAX_BULLETS
+
+
+@pytest.mark.parametrize(
+    ("text", "company"),
+    [
+        (BACKEND_JD, "Acme"),  # an "About Acme" heading
+        ("Senior Data Engineer at Northwind Traders\n\nResponsibilities\n- Build pipelines", "Northwind Traders"),
+        ("Join Contoso as a Staff Engineer.\n", "Contoso"),
+        ("At Fabrikam, we ship every day.\n", "Fabrikam"),
+        ("Acme Corp is hiring a backend engineer\n", "Acme Corp"),
+        ("About the role\nYou will build things.", None),
+        ("About us\nWe build things.", None),
+        (NO_COMPANY_JD, None),
+        (FRONTEND_JD, None),
+    ],
+)
+def test_the_jd_parser_reads_a_plainly_named_company(text: str, company: str | None):
+    from app.modules.ats.jd import structure_jd
+
+    assert structure_jd(text).company == company
+    assert structure_jd(text, company="Typed Inc").company == "Typed Inc"  # what the user typed always wins

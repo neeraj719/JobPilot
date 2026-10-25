@@ -15,12 +15,17 @@ Ports: backend 8106 (Redis db 19), Vite 5236, stub AI 8103, test DB `jobpilot_te
 - ✅ 5a. pytest `tests/test_ats_tailor.py` (24 pass); with ats_api, ats_scoring, ai_choice, db_conventions,
   migrations, resume_apply: 168 pass (one run hit a teardown deadlock in test_ai_choice from its polish thread —
   flaky race, passes alone and in the rerun)
-- ⏳ 1. Frontend `/resume/targets/new` TailorComposer (features/ats/tailor/**) + entry points
-- ⏳ 4. Quality: tsc, build (main ≤ 352 kB), contrast, 1440/390, light/dark
-- ⏳ 5b. Playwright proofs (a)-(f) on private servers, screenshots `notes/screenshots/job-tailor/`
-- ⏳ 5c. Full backend suite once, alone → `notes/job-tailor-junit.xml`
-- ⏳ Docs: CONTRACTS §18 note
-- ⏳ Cleanup: soft-delete tailor.check@jobpilot.ai, stop servers + stub
+- ✅ 1. Frontend `/resume/targets/new` → `features/ats/tailor/{TailorComposer,ResumePicker,TailorProgress,TailorResultView,TailorSteps,InlineEdit}.tsx`
+  (lazy, exported from `modules/resume/pages.ts`); `JdInputPanel` props `tabs/showMetaFields/autoPreview/onParsed/initialText`;
+  api `useQuickTailor`, `useTailorTarget`, `useRetryPolish(id, task)`; types `QuickTailorRequest`, `TailorChange`, TailorResult ids.
+  Entry points: JobTargets header (gradient "Optimize a resume for a job" + outline "New target") and empty state;
+  dashboard quick action "Optimize for a job"; MyResumes buttons + StudioResumeCard menu → `/resume/targets/new?resume=<id>`.
+  JobTargetDetail: inline rename of role/company; TailorCard toast links to the progress/result view.
+- ✅ 4. Quality: tsc clean, build green, main chunk 350.45 kB (composer in the lazy resume pages chunk), contrast 0 failures, 1440/390 light+dark
+- ✅ 5b. Playwright proofs (a)-(f) all PASS (a on real Ollama qwen2.5:3b, b/c/e on stub :8103); 18 screenshots in `notes/screenshots/job-tailor/`
+- ✅ 5c. Full backend suite once, alone → `notes/job-tailor-junit.xml`: exit 0, tests=1447, failures=0, errors=0, skipped=3 (571 s)
+- ✅ Docs: CONTRACTS §18 notes (one-screen tailoring + AI tailoring pass)
+- ✅ Cleanup: tailor.check@jobpilot.ai soft-deleted (4 targets, 8 resumes, credential), servers + stub stopped
 
 ## Decisions
 - No migration: pass state lives on `ats_analyses.status/progress` + suggestion rows (`checks.tailor_pass`,
@@ -32,6 +37,10 @@ Ports: backend 8106 (Redis db 19), Vite 5236, stub AI 8103, test DB `jobpilot_te
 - Model error mid-pass → nothing applied (rules-only copy stands), rows `not_run`, error on the analysis.
 - Bullet guard for tailoring is stricter than the shared one: a rewrite may only name tools its own entry names.
 - Uploaded / URL JDs are sent as PASTED text (+ url) so the server does not refetch.
+
+- JD rules parser reads a plainly named company (jd._company_from_text) so the Company field can prefill.
+- Summary prompt asks for 35-55 words: a shorter AI summary made the final analysis propose a rule summary over it.
+- Picker lists originals (default first) before tailored copies.
 
 ## Blockers
 - none

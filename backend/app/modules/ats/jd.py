@@ -303,6 +303,38 @@ def _title(lines: list[str], given: str | None) -> str | None:
     return None
 
 
+_NAME = r"([A-Z][A-Za-z0-9&.'-]*(?:\s+(?:[A-Z][A-Za-z0-9&.'-]*|&|of|and)){0,3})"
+#: Conservative cues that name the hiring company in the posting's own words (keywords any case,
+#: the name capitalised). The last one applies to the title line only.
+_COMPANY_CUES: tuple[re.Pattern[str], ...] = (
+    re.compile(rf"^(?i:about)\s+{_NAME}\s*:?\s*$"),  # an "About Acme" heading
+    re.compile(rf"^(?i:join|at)\s+{_NAME}(?=\s*[,!.:]|\s+(?i:is|are|we|you|as|and)\b)"),  # "Join Acme as...", "At Acme, we..."
+    re.compile(rf"^{_NAME}\s+(?i:is|are)\s+(?i:hiring|looking|seeking|building)\b"),  # "Acme is hiring"
+    re.compile(rf"\s(?i:at|@)\s+{_NAME}\s*$"),  # a title line "Senior Engineer at Acme"
+)
+_NOT_A_COMPANY = frozenset("us the our you your this we company team role job position opportunity them it here".split())
+
+
+def _company_from_text(lines: list[str]) -> str | None:
+    """The hiring company when the posting names it plainly (first lines only); ``None`` otherwise.
+
+    Deterministic and conservative: an "About X" heading, "Join X" / "At X," / "X is hiring", or a
+    title line "... at X". A generic catch ("About the role", "About us") is dropped."""
+    head = [l for l in (_strip_line(x) for x in lines[:40]) if l]
+    for index, line in enumerate(head):
+        for number, pattern in enumerate(_COMPANY_CUES):
+            if number == 3 and index > 0:
+                continue
+            match = pattern.search(line)
+            if not match:
+                continue
+            name = " ".join(match.group(1).split()).strip(" .,:;-&")
+            if not name or name.split()[0].lower() in _NOT_A_COMPANY or len(name) > 60:
+                continue
+            return name[:255]
+    return None
+
+
 def _keywords(lines: list[tuple[str, str]], title: str | None, company: str | None, skills: list[str]) -> list[str]:
     noise = set(STOP_WORDS) | _JD_STOP_WORDS | _ALIAS_WORDS | _LEVEL_WORDS
     noise |= set(_TOKEN_RE.findall((company or "").lower()))
@@ -407,7 +439,7 @@ def structure_jd(
 
     return StructuredJD(
         title=jd_title,
-        company=(company or "").strip()[:255] or None,
+        company=(company or "").strip()[:255] or _company_from_text(raw_lines),
         location=(location or "").strip()[:255] or None,
         work_mode=work_mode,
         seniority=_seniority(jd_title, text),

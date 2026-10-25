@@ -70,7 +70,7 @@ SUMMARY_SYSTEM = (
     "You rewrite a resume summary so it speaks to one target role. Use only the candidate facts you are "
     "given: their job titles, employers, years of experience and skills. Never add a skill, tool, number, "
     "employer, job title, degree, award or claim that is not in the facts. Do not present the target role "
-    "as a title the candidate held; you may say they are seeking it. Write 2-3 sentences, at most 55 words, "
+    "as a title the candidate held; you may say they are seeking it. Write 2-3 sentences of 35 to 55 words, "
     "third person without pronouns, no brackets, no placeholders."
 )
 

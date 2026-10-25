@@ -114,7 +114,16 @@ export default function TailorComposerPage() {
     if (!touched.current.company) setCompany(parsed.company ?? '')
   }, [parsed])
 
-  const list = React.useMemo(() => (resumes.data ?? []).filter((r) => !r.archived_at), [resumes.data])
+  // Originals first (the default on top), tailored copies after: the list grows with every run.
+  const list = React.useMemo(
+    () =>
+      (resumes.data ?? [])
+        .filter((r) => !r.archived_at)
+        .map((r, index) => ({ r, rank: (r.is_default ? 0 : r.kind === 'TAILORED' ? 2 : 1) * 10_000 + index }))
+        .sort((a, b) => a.rank - b.rank)
+        .map(({ r }) => r),
+    [resumes.data],
+  )
   const readable = list.filter((r) => r.parse_status === 'PARSED')
   const resumeId =
     (picked && readable.some((r) => r.id === picked) ? picked : null) ?? readable.find((r) => r.is_default)?.id ?? readable[0]?.id ?? null
