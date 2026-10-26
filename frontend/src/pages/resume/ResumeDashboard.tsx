@@ -47,13 +47,14 @@ function ago(iso: string | null | undefined): string {
 interface QuickAction {
   label: string
   description: string
-  to: string
+  /** A page to go to, or `'upload'`: open the upload sheet here, like the header button does. */
+  to: string | 'upload'
   icon: LucideIcon
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
   { label: 'Create a resume', description: 'From your profile or from scratch', to: '/resume/new', icon: FilePlus2 },
-  { label: 'Upload my resume', description: 'PDF or DOCX, kept as the original', to: '/resume/new?mode=upload', icon: Upload },
+  { label: 'Upload my resume', description: 'PDF or DOCX, kept as the original', to: 'upload', icon: Upload },
   { label: 'Check against a job', description: 'Estimated ATS score and safe fixes', to: '/resume/ats', icon: ScanSearch },
   { label: 'Optimize for a job', description: 'Paste a JD, pick a resume', to: '/resume/targets/new', icon: Crosshair },
 ]
@@ -186,22 +187,32 @@ export default function ResumeDashboardPage() {
           Quick actions
         </h2>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {QUICK_ACTIONS.map((action) => (
-            <Link
-              key={action.label}
-              to={action.to}
-              className="group flex items-center gap-3 rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                <action.icon className="size-4" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{action.label}</span>
-                <span className="block truncate text-xs text-muted-foreground">{action.description}</span>
-              </span>
-              <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </Link>
-          ))}
+          {QUICK_ACTIONS.map((action) => {
+            const className =
+              'group flex items-center gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            const content = (
+              <>
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <action.icon className="size-4" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{action.label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{action.description}</span>
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+              </>
+            )
+            // Upload opens the same right-hand sheet as the header button, not the full Create page.
+            return action.to === 'upload' ? (
+              <button key={action.label} type="button" onClick={() => upload.openSheet()} className={className} data-quick-upload>
+                {content}
+              </button>
+            ) : (
+              <Link key={action.label} to={action.to} className={className}>
+                {content}
+              </Link>
+            )
+          })}
         </div>
       </section>
 
