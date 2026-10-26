@@ -262,8 +262,11 @@ def _build_choices(db: Session, user: User, task: str) -> dict[str, Any]:
         return default_model_for(provider) or None
 
     # 2. one entry per provider with a credential (+ recently used models of it)
+    server_only = settings.AI_SERVER_MODEL_ONLY
     for provider in registry.PROVIDER_ORDER:
         if provider in ("mock", "ollama") or provider not in creds:
+            continue
+        if server_only and provider != server_default().provider:
             continue
         models: list[str] = []
         first = preferred_model(provider)
@@ -277,11 +280,12 @@ def _build_choices(db: Session, user: User, task: str) -> dict[str, Any]:
             add(provider, model, "credential")
 
     # 3. local Ollama models when the server answers
+    local = None
     try:
-        local = _ollama_models(user, creds.get("ollama"))
+        if not server_only:
+            local = _ollama_models(user, creds.get("ollama"))
     except Exception as exc:  # noqa: BLE001 - a missing local server only hides its models
         logger.info("Ollama models unavailable for the model picker (%s)", type(exc).__name__)
-        local = None
     if local:
         ordered = [m for m in [preferred_model("ollama")] if m and m in local] + [m for m in local]
         for model in ordered:
@@ -302,7 +306,8 @@ def _build_choices(db: Session, user: User, task: str) -> dict[str, Any]:
         "default": default_id,
         "candidates": candidates,
         "usable_count": usable,
-        "should_ask": mode == "ask" and usable >= 2,
+        # Single-model servers still confirm the model before each run.
+        "should_ask": mode == "ask" and usable >= (1 if server_only else 2),
     }
 
 
@@ -351,6 +356,11 @@ def validate_choice(db: Session, user: User, target: WorkflowTarget) -> Target:
     info = registry.provider_info(provider)
     if info is None:
         raise ValidationFailed(f"Unknown AI provider {provider!r}.", code="ai_model_unknown", details={"provider": provider})
+    server = server_default()
+    if settings.AI_SERVER_MODEL_ONLY and (provider, model) != (server.provider, server.model):
+        raise ValidationFailed(
+            f"Only {server.model} is offered on this server.", code="ai_model_unknown", details={"provider": provider, "model": model}
+        )
     creds = {c.provider: c for c in settings_service.list_credential_rows(db, user.id)}
     cred = creds.get(provider)
     base_url = cred.base_url if cred else None

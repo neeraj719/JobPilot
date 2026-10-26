@@ -95,6 +95,8 @@ def credential_read(row: AiProviderCredential) -> dict[str, Any]:
 
 
 def _hosted(provider: str, base_url: str | None) -> bool:
+    if settings.AI_SERVER_MODEL_ONLY and provider == server_default().provider:
+        return False  # the operator's own model server, not a third-party API
     if provider in ("openai", "gemini", "anthropic"):
         return True
     return provider == "openai_compatible" and not is_local_url(base_url)
@@ -206,6 +208,8 @@ def providers_catalog(db: Session, user: User) -> dict[str, Any]:
     server = server_default()
     providers = []
     for provider_id in registry.PROVIDER_ORDER:
+        if settings.AI_SERVER_MODEL_ONLY and provider_id != server.provider:
+            continue
         info = registry.PROVIDERS[provider_id]
         entry = registry.catalog_entry(info)
         cred = creds.get(provider_id)
@@ -214,6 +218,8 @@ def providers_catalog(db: Session, user: User) -> dict[str, Any]:
         entry["server_key_configured"] = provider_id == server.provider and _server_key(provider_id)
         if provider_id == server.provider and provider_id != "mock" and server.model:
             entry["default_model"] = server.model
+        if settings.AI_SERVER_MODEL_ONLY:
+            entry["hosted"] = _hosted(provider_id, None)
         entry["credential"] = credential_read(cred) if cred else None
         providers.append(entry)
     return {
@@ -309,6 +315,14 @@ def models_for(db: Session, user: User, provider: str, *, refresh: bool = False,
     info = registry.provider_info(provider)
     if info is None:
         raise NotFoundError("Unknown AI provider")
+    server = server_default()
+    if settings.AI_SERVER_MODEL_ONLY and provider != server.provider:
+        raise NotFoundError("Only the server's model is offered on this deployment")
+    if settings.AI_SERVER_MODEL_ONLY and server.model:
+        # The server's model is the only option; its endpoint may not list models at all.
+        row = registry._model_row(info, registry.model_info(provider, server.model), server.model, None, available=True)
+        return {"provider": provider, "models": [row], "live": False, "fetched_at": None,
+                "error_code": None, "error": None, "prices_as_of": info.prices_as_of}
     cred = get_credential_row(db, user.id, provider)
     models: list[dict[str, Any]] | None = None
     error: AIProviderError | None = None
@@ -355,6 +369,13 @@ def model_known(db: Session, user: User, provider: str, model: str) -> bool:
 
 
 def _validate_target(db: Session, user: User, provider: str, model: str | None, creds: dict[str, AiProviderCredential], *, what: str) -> tuple[str, str]:
+    server = server_default()
+    if settings.AI_SERVER_MODEL_ONLY and (provider, (model or "").strip() or server.model) != (server.provider, server.model):
+        raise ValidationFailed(
+            f"{what}: only {server.model} is offered on this server.",
+            code="unknown_model",
+            details={"field": what, "provider": provider, "model": model},
+        )
     problem = target_problem(provider, creds)
     if problem:
         raise ValidationFailed(f"{what}: {problem}", code="provider_not_configured", details={"field": what, "provider": provider})

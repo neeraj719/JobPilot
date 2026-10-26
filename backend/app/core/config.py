@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     AI_USAGE_RETENTION_DAYS: int = 400
     #: Test-connection / model-list requests per user per minute.
     AI_TEST_RATE_LIMIT_PER_MINUTE: int = 10
+    #: Offer only the server's own model (``LLM_PROVIDER`` / ``LLM_MODEL``) in AI Model Settings:
+    #: other providers are hidden and the server provider lists just that model. For a
+    #: deployment with one self-hosted model behind ``OPENAI_BASE_URL`` that has no ``/models``.
+    AI_SERVER_MODEL_ONLY: bool = False
 
     # --- Gmail OAuth (least privilege: gmail.readonly only) ---
     GOOGLE_CLIENT_ID: str | None = None

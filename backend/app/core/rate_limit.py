@@ -44,7 +44,9 @@ class _RedisBackend:
     def hit(self, key: str, limit: int, window: int) -> tuple[bool, int]:
         pipe = self._client.pipeline()
         pipe.incr(key)
-        pipe.expire(key, window)
+        # NX: the window starts at the first hit. Re-arming it on every hit meant a client
+        # that never paused for a full window was never let back in.
+        pipe.expire(key, window, nx=True)
         count, _ = pipe.execute()
         return int(count) <= limit, max(0, limit - int(count))
 
